@@ -11,13 +11,13 @@ Work through Group 1 first — nothing compiles until all of those are done.
 
 These cause immediate build failure on Jetson before a single source file is compiled.
 
-- [ ] **`meson.build:69`** — Remove `dependency('libcamera', required: true)`; replace with a no-op `declare_dependency()` under a `JETSON_BUILD` guard.
-- [ ] **`meson.build:73`** — Remove `dependency('lgpio', required: true)`; replace with `dependency('libgpiod', required: true)`.
-- [ ] **`meson.build:84–87`** — Remove the `summary()` block that references `libcamera_dep` (will crash if the dep is a stub).
-- [ ] **`meson.build:90,95,242–244`** — Remove `libcamera_dep` and `lgpio_dep` from `rpicam_app_dep` and `pitrac_lm_module_deps`.
-- [ ] **`meson.build:99–104`** — Remove all rpicam-apps `subdir()` calls (`core`, `encoder`, `image`, `output`, `preview`, `post_processing_stages`); these pull in the entire libcamera source tree.
-- [ ] **`meson.build:124,231`** — Remove `rpicam_app_src` from the sources list; there is no rpicam-apps object tree to link on Jetson.
-- [ ] **`meson.build:71`** — Lower the `opencv4` version floor from `>= 4.9.0` to `>= 4.5.0` to match the version shipped with JetPack 5.1.6.
+- [x] **`meson.build:69`** — Remove `dependency('libcamera', required: true)`; replace with a no-op `declare_dependency()` under a `JETSON_BUILD` guard.
+- [x] **`meson.build:73`** — Remove `dependency('lgpio', required: true)`; replace with `dependency('libgpiod', required: true)`.
+- [x] **`meson.build:84–87`** — Remove the `summary()` block that references `libcamera_dep` (will crash if the dep is a stub).
+- [x] **`meson.build:90,95,242–244`** — Remove `libcamera_dep` and `lgpio_dep` from `rpicam_app_dep` and `pitrac_lm_module_deps`.
+- [x] **`meson.build:99–104`** — Remove all rpicam-apps `subdir()` calls (`core`, `encoder`, `image`, `output`, `preview`, `post_processing_stages`); these pull in the entire libcamera source tree.
+- [x] **`meson.build:124,231`** — Remove `rpicam_app_src` from the sources list; there is no rpicam-apps object tree to link on Jetson.
+- [x] **`meson.build:71`** — Lower the `opencv4` version floor from `>= 4.9.0` to `>= 4.5.0` to match the version shipped with JetPack 5.1.6.
 - [ ] **`libcamera_interface.h`** — Wrap entire file in `#ifndef JETSON_BUILD`; create new `v4l2_interface.h` with identical public function signatures wrapped in `#ifdef JETSON_BUILD`.
 - [ ] **`v4l2_interface.h` (new file)** — Replace `LibcameraJpegApp*` array member with `cv::VideoCapture*` per camera slot; replace all RPiCam includes with OpenCV and V4L2 headers.
 - [ ] **`still_image_libcamera_app.hpp`** — Wrap entire file in `#ifndef JETSON_BUILD`; `LibcameraJpegApp` subclasses `RPiCamApp` which does not exist on Jetson.
