@@ -79,7 +79,7 @@ opencv_dep = dependency('opencv4', required : true, version : '>=4.5.0', include
 
 fmt_dep = dependency('fmt', required : true)
 
-boost_dep = dependency('boost', method: 'pkg-config', version : '>=1.74.0', modules : ['timer', 'log', 'thread', 'filesystem', 'regex'])
+boost_dep = dependency('boost', method: 'pkg-config', version : '>=1.71.0', modules : ['timer', 'log', 'thread', 'filesystem', 'regex'])
 
 msgpack_dep = dependency('msgpack-cxx', required : true)
 yamlcpp_dep = dependency('yaml-cpp', required : true)
