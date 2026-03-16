@@ -14,6 +14,8 @@
 
 #ifdef __unix__  // Ignore in Windows environment
 
+#ifndef JETSON_BUILD  // JETSON_STUB: entire file excluded on Jetson — see v4l2_interface.cpp
+
 #include <chrono>
 
 
@@ -1626,5 +1628,6 @@ bool PerformCameraSystemStartup() {
 
 }
 
-#endif // #ifdef __unix__  // Ignore in Windows environment
-// Unix-only libcamera-related code
+#endif // JETSON_BUILD
+
+#endif // __unix__

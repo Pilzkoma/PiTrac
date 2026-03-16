@@ -196,6 +196,7 @@ pitrac_lm_sources += ([
 			'gs_globals.cpp',
 			'gs_fsm.cpp',
 			'libcamera_interface.cpp',
+			'v4l2_interface.cpp',      # JETSON_STUB: Jetson stubs; guarded #ifdef JETSON_BUILD inside
 			'libcamera_jpeg.cpp',
 			'ball_watcher.cpp',
 			'ball_watcher_image_buffer.cpp',
