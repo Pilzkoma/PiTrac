@@ -7,6 +7,8 @@
 
 #pragma once
 
+#ifndef JETSON_BUILD  // JETSON_STUB
+
 #ifdef __unix__  // Ignore in Windows environment
 
 #include "core/rpicam_app.hpp"
@@ -141,4 +143,6 @@ namespace golf_sim {
 
 }
 
-#endif // #ifdef __unix__  // Ignore in Windows environment
+#endif // __unix__
+
+#endif // JETSON_BUILD
