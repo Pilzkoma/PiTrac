@@ -9,9 +9,11 @@
 #include <signal.h>
 #include <sys/stat.h>
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "core/rpicam_encoder.hpp"
 #include "encoder/encoder.hpp"
 #include "output/output.hpp"
+#endif  // JETSON_BUILD
 
 #include <opencv2/core/cvdef.h>
 #include <opencv2/highgui.hpp>
@@ -26,18 +28,21 @@
 
 namespace gs = golf_sim;
 
-
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include <sys/signalfd.h>
 #include <poll.h>
-
+#endif  // JETSON_BUILD
 
 #include "ball_watcher.h"
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 using namespace std::placeholders;
+#endif  // JETSON_BUILD
 
 namespace golf_sim {
 
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 static int get_colourspace_flags(std::string const &codec)
 {
 	GS_LOG_TRACE_MSG(trace, "get_colourspace_flags - codec is: " + codec);
@@ -47,8 +52,11 @@ static int get_colourspace_flags(std::string const &codec)
 	else
 		return RPiCamEncoder::FLAG_VIDEO_NONE;
 }
+#endif  // JETSON_BUILD
 
 // The main event loop for the application.
+
+#ifndef JETSON_BUILD  // JETSON_STUB
 
 bool ball_watcher_event_loop(RPiCamEncoder &app, bool & motion_detected)
 {
@@ -65,7 +73,7 @@ bool ball_watcher_event_loop(RPiCamEncoder &app, bool & motion_detected)
 	app.StartEncoder();
 	app.StartCamera();
 
-	// Instead of using the dynamical link4ed-library approach used by lrpiocam apps, 
+	// Instead of using the dynamical link4ed-library approach used by lrpiocam apps,
 	// we will just manually create a mottion_detect object
 
 	MotionDetectStage motion_detect_stage(&app);
@@ -115,7 +123,7 @@ bool ball_watcher_event_loop(RPiCamEncoder &app, bool & motion_detected)
                 start_time = std::chrono::high_resolution_clock::now();
                 count = 0; // reset the "frames encoded" counter too
         }
- 
+
 		// Immediately have the motion detection stage determine if there was movement.
 
 		bool result = motion_detect_stage.Process(completed_request);
@@ -127,7 +135,7 @@ bool ball_watcher_event_loop(RPiCamEncoder &app, bool & motion_detected)
 				app.StopCamera(); // stop complains if encoder very slow to close
 				app.StopEncoder();
 				motion_detected = true;
-				
+
 				// TBD - for now, once we have motion, get out immediately
 				return true;
 			}
@@ -143,6 +151,79 @@ bool ball_watcher_event_loop(RPiCamEncoder &app, bool & motion_detected)
 	return true;
 }
 
+#else  // JETSON_BUILD
+
+bool ball_watcher_event_loop(JetsonCaptureApp& app, bool& motion_detected)
+{
+	// Open the V4L2 capture device for this camera slot.
+	if (!app.cap.open(app.device_path, cv::CAP_V4L2)) {
+		GS_LOG_MSG(error, "ball_watcher_event_loop - failed to open capture device: " + app.device_path);
+		return false;
+	}
+
+	if (app.width > 0 && app.height > 0) {
+		app.cap.set(cv::CAP_PROP_FRAME_WIDTH,  app.width);
+		app.cap.set(cv::CAP_PROP_FRAME_HEIGHT, app.height);
+	}
+
+	const float framerate = static_cast<float>(app.cap.get(cv::CAP_PROP_FPS));
+
+	// JETSON_STUB: MotionDetectStage constructor signature will be updated when
+	// motion_detect.h is ported — will take (int width, int height) on Jetson
+	// rather than RPiCamApp*.
+	MotionDetectStage motion_detect_stage(app.width, app.height);  // JETSON_STUB
+
+	boost::property_tree::ptree empty_params;
+	motion_detect_stage.Read(empty_params);
+	motion_detect_stage.Configure();
+
+	motion_detected = false;
+
+	static const int kMaxConsecutiveReadFailures = 5;
+	int consecutive_failures = 0;
+
+	for (uint sequence = 0; ; sequence++)
+	{
+		if (!gs::GolfSimGlobals::golf_sim_running_) {
+			app.cap.release();
+			return false;
+		}
+
+		cv::Mat frame;
+		if (!app.cap.read(frame) || frame.empty()) {
+			GS_LOG_MSG(error, "ball_watcher_event_loop - cap.read() failed (consecutive: "
+			                  + std::to_string(++consecutive_failures) + ")");
+			if (consecutive_failures >= kMaxConsecutiveReadFailures) {
+				GS_LOG_MSG(error, "ball_watcher_event_loop - too many consecutive read failures, aborting.");
+				break;
+			}
+			continue;
+		}
+		consecutive_failures = 0;
+
+		// Build the per-frame context that MotionDetectStage::Process() reads and writes.
+		// JetsonCompletedRequest replaces CompletedRequestPtr (libcamera type).
+		JetsonCompletedRequestPtr completed_request = std::make_shared<JetsonCompletedRequest>();
+		completed_request->frame     = frame;
+		completed_request->sequence  = sequence;
+		completed_request->framerate = framerate;
+
+		motion_detect_stage.Process(completed_request);
+
+		auto it = completed_request->post_process_metadata.find("motion_detect.result");
+		if (it != completed_request->post_process_metadata.end() && it->second) {
+			app.cap.release();
+			motion_detected = true;
+			return true;
+		}
+	}
+
+	app.cap.release();
+	return false;
 }
 
-#endif // #ifdef __unix__  // Ignore in Windows environment
+#endif  // JETSON_BUILD
+
+}
+
+#endif // __unix__

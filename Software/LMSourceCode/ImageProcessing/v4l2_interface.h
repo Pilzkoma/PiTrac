@@ -15,7 +15,9 @@
 
 #ifdef __unix__  // Ignore in Windows environment
 
+#include <memory>
 #include <string>
+#include <unordered_map>
 
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
@@ -47,6 +49,23 @@ struct JetsonCaptureApp {
     int              width  = 0;             // sensor width  (pixels)
     int              height = 0;             // sensor height (pixels)
 };
+
+
+// ---------------------------------------------------------------------------
+// JetsonCompletedRequest — replaces CompletedRequestPtr (libcamera type).
+// Passed to MotionDetectStage::Process() on the Jetson build.  Lives here
+// so that both ball_watcher.cpp and motion_detect_stage.cpp share one
+// definition rather than each defining their own.
+// ---------------------------------------------------------------------------
+
+struct JetsonCompletedRequest {
+    cv::Mat  frame;                                           // captured frame from cap.read()
+    uint     sequence  = 0;                                   // per-loop frame counter
+    float    framerate = 0.0f;                                // device FPS at open time
+    std::unordered_map<std::string, bool> post_process_metadata; // replaces libcamera metadata bag
+};
+
+using JetsonCompletedRequestPtr = std::shared_ptr<JetsonCompletedRequest>;
 
 
 namespace golf_sim {
