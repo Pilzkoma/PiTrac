@@ -44,7 +44,11 @@
 
 #include "gs_fsm.h"
 #include "gs_ipc_system.h"
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "libcamera_interface.h"
+#else
+#include "v4l2_interface.h"
+#endif  // JETSON_BUILD
 
 
 namespace fs = std::filesystem;

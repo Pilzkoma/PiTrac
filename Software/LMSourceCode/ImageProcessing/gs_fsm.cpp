@@ -29,7 +29,11 @@
 #include "gs_ui_system.h"
 #include "gs_sim_interface.h"
 #include "pulse_strobe.h"
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "libcamera_interface.h"
+#else
+#include "v4l2_interface.h"
+#endif  // JETSON_BUILD
 
 #include "gs_fsm.h"
 
