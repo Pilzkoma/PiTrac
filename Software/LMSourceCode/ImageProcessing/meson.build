@@ -69,6 +69,10 @@ apr_dep = cxx.find_library('apr-1', required : true)
 
 jetson_build = get_option('jetson_build')  # JETSON_STUB
 
+if jetson_build
+    add_global_arguments('-DJETSON_BUILD', language : 'cpp')
+endif
+
 if not jetson_build  # JETSON_STUB
     libcamera_dep = dependency('libcamera', required : true)
     lgpio_dep = dependency('lgpio', required : true)
