@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Core Vision System|HW + SW|Build|45%|🟡 In Progress|2026-03-16|
+|SP1 — Core Vision System|HW + SW|Build|55%|🟡 In Progress|2026-03-16|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Design|0%|🔵 Planning|2026-03-14|
@@ -257,7 +257,7 @@ IMPORTANT RULES FOR THIS CHAT:
 |-|-|
 |Type|☑ Hardware ☑ Software|
 |Phase|Build|
-|% Complete|45%|
+|% Complete|55%|
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
@@ -360,12 +360,12 @@ PiTrac's key techniques:
 
 ### ✅ Next Steps
 
-* \[ ] Complete Group 3 stubs (7 no-op functions) — SetLibCameraLoggingOff, ConfigurePostProcessing pipeline half, ConfigureLibCameraOptions, WatchForHitAndTrigger, SetLibcameraTuningFileEnvVariable, kGatherClubData=false, kUsePreImageSubtraction=false
-* \[ ] Copy LOGBOOK.md to ~/JetsonLM and commit to GitHub
-* \[ ] SSH into Jetson or connect directly and run: meson setup build_jetson -Djetson_build=true --wipe
-* \[ ] Paste meson configure output — fix any new errors found
+* \[x] Complete Group 3 stubs (7 no-op functions) — SetLibCameraLoggingOff, ConfigurePostProcessing pipeline half, ConfigureLibCameraOptions, WatchForHitAndTrigger, SetLibcameraTuningFileEnvVariable, kGatherClubData=false, kUsePreImageSubtraction=false
+* \[ ] Clone repo on Jetson: git clone https://github.com/Pilzkoma/PiTrac.git ~/JetsonLM
 * \[ ] Install apt dependencies on Jetson: meson ninja-build libboost-all-dev libmsgpack-dev default-jdk maven v4l-utils libv4l-dev libgpiod-dev
 * \[ ] Build ActiveMQ-CPP 3.9.5 from source on Jetson
+* \[ ] Run: meson setup build_jetson -Djetson_build=true --wipe — paste output
+* \[ ] Fix any meson configure errors
 * \[ ] Begin Group 2 runtime implementations once cameras arrive
 * \[ ] Order IR LED array 850nm ~10W (e.g. Chanzon) — not yet ordered
 
@@ -402,6 +402,13 @@ PiTrac's key techniques:
 > All 14 Group 1 compile blockers completed: meson.build guards, v4l2_interface.h, JetsonCaptureApp, JetsonCompletedRequest, ball_watcher rewrite, motion_detect.h stub base class, motion_detect_stage.cpp guards.
 > All changes committed and pushed to github.com/Pilzkoma/PiTrac.
 > Next session: Group 3 stubs, then first meson configure on Jetson.
+
+**2026-03-16 — session 2**
+
+> All 24 porting tasks complete. Group 3 stubs done: v4l2_interface.cpp created with 5 stub functions, libcamera_interface.cpp fully guarded with JETSON_BUILD, meson.build updated.
+> kGatherClubData and kUsePreImageSubtraction already false by default — no changes needed.
+> Codebase is now ready for first meson configure attempt on Jetson.
+> Next: boot Jetson, clone repo, install apt dependencies, run meson setup -Djetson_build=true --wipe.
 
 \---
 
