@@ -44,6 +44,7 @@ if cxx.get_id() == 'gcc'
     cpp_arguments += '-Wno-psabi'
 endif
 
+neon = get_option('neon_flags')
 if cpu == 'aarch64' or neon == 'arm64'
     cpp_arguments += [
         '-mcpu=cortex-a76',
@@ -66,11 +67,16 @@ ssl_dep = dependency('openssl', required : true)
 activemq_dep = dependency('activemq-cpp', required : true)
 apr_dep = cxx.find_library('apr-1', required : true)
 
-libcamera_dep = dependency('libcamera', required : true)
-thread_dep = dependency('threads', required : true)
-opencv_dep = dependency('opencv4', required : true, version : '>=4.9.0', include_type: 'system',)
+jetson_build = get_option('jetson_build')  # JETSON_STUB
 
-lgpio_dep = dependency('lgpio', required : true)
+if not jetson_build  # JETSON_STUB
+    libcamera_dep = dependency('libcamera', required : true)
+    lgpio_dep = dependency('lgpio', required : true)
+endif  # JETSON_STUB
+
+thread_dep = dependency('threads', required : true)
+opencv_dep = dependency('opencv4', required : true, version : '>=4.5.0', include_type: 'system',)
+
 fmt_dep = dependency('fmt', required : true)
 
 boost_dep = dependency('boost', method: 'pkg-config', version : '>=1.74.0', modules : ['timer', 'log', 'thread', 'filesystem', 'regex'])
@@ -80,48 +86,57 @@ yamlcpp_dep = dependency('yaml-cpp', required : true)
 onnxruntime_dep = dependency('onnxruntime', required : true)
 
 
-summary({
-            'location' : libcamera_dep.get_variable('libdir'),
-            'version' : libcamera_dep.version()
-        },
-        section : 'libcamera')
+if not jetson_build  # JETSON_STUB
+    summary({
+                'location' : libcamera_dep.get_variable('libdir'),
+                'version' : libcamera_dep.version()
+            },
+            section : 'libcamera')
+endif  # JETSON_STUB
 
 rpicam_app_src = []
-rpicam_app_dep = [libcamera_dep, lgpio_dep]
+rpicam_app_dep = jetson_build ? [] : [libcamera_dep, lgpio_dep]  # JETSON_STUB
 
 conf_data = configuration_data()
 
 pitrac_lm_module_deps = [
-	libcamera_dep, thread_dep, opencv_dep, lgpio_dep, rpicam_app_dep,
+	thread_dep, opencv_dep,
 	fmt_dep, boost_dep, activemq_dep, ssl_dep, apr_dep, msgpack_dep, yamlcpp_dep, onnxruntime_dep,]
+if not jetson_build  # JETSON_STUB
+    pitrac_lm_module_deps += [libcamera_dep, lgpio_dep, rpicam_app_dep]
+endif  # JETSON_STUB
 
 
-subdir('core')
-subdir('encoder')
-subdir('image')
-subdir('output')
-subdir('preview')
-subdir('post_processing_stages')
+if not jetson_build  # JETSON_STUB
+    subdir('core')
+    subdir('encoder')
+    subdir('image')
+    subdir('output')
+    subdir('preview')
+    subdir('post_processing_stages')
+endif  # JETSON_STUB
 
 configure_file(output : 'config.h', configuration : conf_data)
 
 # Generate a version string.
-version_cmd = [meson.project_source_root() / 'utils' / 'version.py', meson.project_version()]
+if not jetson_build  # JETSON_STUB
+    version_cmd = [meson.project_source_root() / 'utils' / 'version.py', meson.project_version()]
 
-# Check if a version.gen file is present.
-# This would have been generated from the meson dist command.
-dist_version_file = meson.project_source_root() / 'version.gen'
-if fs.is_file(dist_version_file)
-    version_cmd += fs.read(dist_version_file)
-endif
+    # Check if a version.gen file is present.
+    # This would have been generated from the meson dist command.
+    dist_version_file = meson.project_source_root() / 'version.gen'
+    if fs.is_file(dist_version_file)
+        version_cmd += fs.read(dist_version_file)
+    endif
 
-version_cpp = vcs_tag(command : version_cmd,
-                      replace_string: '@VER@',
-                      input : meson.project_source_root() / 'core' / 'version.cpp.in',
-                      output : 'version.cpp',
-                      fallback : meson.project_version())
+    version_cpp = vcs_tag(command : version_cmd,
+                          replace_string: '@VER@',
+                          input : meson.project_source_root() / 'core' / 'version.cpp.in',
+                          output : 'version.cpp',
+                          fallback : meson.project_version())
 
-rpicam_app_src += version_cpp
+    rpicam_app_src += version_cpp
+endif  # JETSON_STUB
 
 
 enable_recompile_closed_source = get_option('enable_recompile_closed_source')
@@ -269,13 +284,15 @@ custom_target('post_build2',
   build_by_default : true
 )
 
-summary({
-            'libav encoder' : enable_libav,
-            'drm preview' : enable_drm,
-            'egl preview' : enable_egl,
-            'qt preview' : enable_qt,
-            'OpenCV postprocessing' : enable_opencv,
-            'IMX500 postprocessing' : get_option('enable_imx500'),
-        },
-        bool_yn : true, section : 'Build configuration')
+if not jetson_build  # JETSON_STUB
+    summary({
+                'libav encoder' : enable_libav,
+                'drm preview' : enable_drm,
+                'egl preview' : enable_egl,
+                'qt preview' : enable_qt,
+                'OpenCV postprocessing' : enable_opencv,
+                'IMX500 postprocessing' : get_option('enable_imx500'),
+            },
+            bool_yn : true, section : 'Build configuration')
+endif  # JETSON_STUB
 

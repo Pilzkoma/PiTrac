@@ -63,3 +63,8 @@ option('disable_rpi_booleans',
         type : 'boolean',
         value : false,
         description : 'Disable use Raspberry Pi specific extensions in the build')
+
+option('jetson_build',
+        type : 'boolean',
+        value : false,
+        description : 'Build for NVIDIA Jetson; removes libcamera, lgpio, and rpicam-apps')
