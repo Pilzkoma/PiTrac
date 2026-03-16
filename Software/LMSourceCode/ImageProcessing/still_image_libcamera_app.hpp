@@ -13,6 +13,8 @@
 
 #pragma once
 
+#ifndef JETSON_BUILD  // JETSON_STUB
+
 #ifdef __unix__  // Ignore in Windows environment
 
 
@@ -43,4 +45,6 @@ bool still_image_event_loop(LibcameraJpegApp& app, cv::Mat& returnImg);
 
 bool ball_flight_camera_event_loop(LibcameraJpegApp& app, cv::Mat& returnImg);
 
-#endif // #ifdef __unix__  // Ignore in Windows environment
+#endif // __unix__
+
+#endif // JETSON_BUILD
