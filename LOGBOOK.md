@@ -360,6 +360,8 @@ PiTrac's key techniques:
 
 ### ✅ Next Steps
 
+* \[ ] Confirm Boost 1.74.0 built and installed correctly: pkg-config --modversion boost
+* \[ ] Re-run: meson setup build_jetson -Djetson_build=true --wipe && ninja -C build_jetson
 * \[x] Complete Group 3 stubs (7 no-op functions) — SetLibCameraLoggingOff, ConfigurePostProcessing pipeline half, ConfigureLibCameraOptions, WatchForHitAndTrigger, SetLibcameraTuningFileEnvVariable, kGatherClubData=false, kUsePreImageSubtraction=false
 * \[ ] Clone repo on Jetson: git clone https://github.com/Pilzkoma/PiTrac.git ~/JetsonLM
 * \[ ] Install apt dependencies on Jetson: meson ninja-build libboost-all-dev libmsgpack-dev default-jdk maven v4l-utils libv4l-dev libgpiod-dev
@@ -409,6 +411,15 @@ PiTrac's key techniques:
 > kGatherClubData and kUsePreImageSubtraction already false by default — no changes needed.
 > Codebase is now ready for first meson configure attempt on Jetson.
 > Next: boot Jetson, clone repo, install apt dependencies, run meson setup -Djetson_build=true --wipe.
+
+**2026-03-16 — session 3 (Jetson first compile)**
+
+> First ninja compile attempt on Jetson.
+> Resolved: meson configure fully clean after fixing fmt, Boost floor, msgpack name, yaml-cpp, onnxruntime install, GCC 10, PITRAC_ROOT, JETSON_BUILD preprocessor define.
+> Blocked on: Boost 1.71 incompatible with C++20 — named_scope.hpp, multi_index, property_tree all broken. BOOST_NO_CXX11_ALLOCATOR workaround insufficient.
+> Fix in progress: building Boost 1.74.0 from source on Jetson (~20 min). Left running overnight.
+> Also outstanding: libcamera_jpeg.cpp still pulls in rpicam headers — needs same JETSON_BUILD guard treatment as other files. v4l2_interface.cpp SetLibCameraLoggingOff declaration mismatch needs fixing.
+> Next session: confirm Boost 1.74 install, re-run ninja, fix remaining compile errors.
 
 \---
 
