@@ -30,8 +30,10 @@
 #include "ball_watcher_image_buffer.h"
 #include "gs_club_data.h"
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 1
 #include <libcamera/stream.h>
 #include "core/rpicam_app.hpp"
+#endif  // JETSON_BUILD
 
 #include "gs_globals.h"
 #include "gs_options.h"
@@ -43,7 +45,9 @@
 
 
 namespace gs = golf_sim;
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 2
 using Stream = libcamera::Stream;
+#endif  // JETSON_BUILD
 
 #define NAME "motion_detect"
 
@@ -112,13 +116,21 @@ void MotionDetectStage::Configure()
 	}
 
 	// Let's process the main stream!
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 3
 	// stream_ = app_->LoresStream(&info);
 	stream_ = app_->GetMainStream();
-	
+
 	if (!stream_)
 		return;
 
 	StreamInfo info = app_->GetStreamInfo(stream_);
+#else  // JETSON_BUILD
+	if (frame_width_ <= 0 || frame_height_ <= 0)
+		return;
+	struct { int width, height; } info;
+	info.width  = frame_width_;
+	info.height = frame_height_;
+#endif  // JETSON_BUILD
 
 	config_.hskip = std::max(config_.hskip, 1);
 	config_.vskip = std::max(config_.vskip, 1);
@@ -177,14 +189,29 @@ void MotionDetectStage::Configure()
 	}
 }
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 4
 bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
+#else
+bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
+#endif
 {
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 5
 	if (!stream_) {
 		GS_LOG_MSG(error, "MotionDetectStage::Process - No stream_");
 		return false;
 	}
+#else  // JETSON_BUILD
+	if (frame_width_ <= 0 || frame_height_ <= 0) {
+		GS_LOG_MSG(error, "MotionDetectStage::Process - frame dimensions not set");
+		return false;
+	}
+#endif  // JETSON_BUILD
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 8a
 	completed_request->post_process_metadata.Set("motion_detect.result", false);
+#else
+	completed_request->post_process_metadata["motion_detect.result"] = false;
+#endif  // JETSON_BUILD
 
 	if (detectionPaused_ && postMotionFramesToCapture_ <= 0) {
 		GS_LOG_MSG(error, "detectionPaused_ and postMotionFramesToCapture_ <= 0");
@@ -197,6 +224,7 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
 		return false;
 	}
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 6
 	libcamera::FrameBuffer *buffer = completed_request->buffers[stream_];
 
     BufferReadSync r(app_, buffer);
@@ -206,6 +234,18 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
     uint8_t *image = (uint8_t *)mem[0].data();
 
     StreamInfo info = app_->GetStreamInfo(stream_);
+#else  // JETSON_BUILD
+	// OV9281 is monochrome; V4L2 delivers V4L2_PIX_FMT_GREY, OpenCV wraps as CV_8UC1
+	// (one byte per pixel). The loop below steps horizontally by config_.hskip bytes,
+	// which is correct for CV_8UC1.
+	// JETSON_STUB: if OpenCV delivers CV_8UC3 (verify with real hardware), the horizontal
+	// step must be config_.hskip * frame.channels(), not config_.hskip bytes.
+	uint8_t *image = completed_request->frame.data;
+	struct { int width, height, stride; } info;
+	info.width  = completed_request->frame.cols;
+	info.height = completed_request->frame.rows;
+	info.stride = static_cast<int>(completed_request->frame.step);
+#endif  // JETSON_BUILD
 
 	// We need to protect access to first_time_, previous_frame_ and motion_detected_.
 	std::lock_guard<std::mutex> lock(mutex_);
@@ -229,7 +269,11 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
 			}
 		}
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 8b
 		completed_request->post_process_metadata.Set("motion_detect.result", false);
+#else
+		completed_request->post_process_metadata["motion_detect.result"] = false;
+#endif  // JETSON_BUILD
 
 		return false;
 	}
@@ -315,11 +359,19 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
 	// the post-motion images
 	if (postMotionFramesToCapture_ > 1) {
 		GS_LOG_MSG(trace, "Post-motion frames > 0 - setting result local_motion_detected to false.");
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 8c
 		completed_request->post_process_metadata.Set("motion_detect.result", false);
+#else
+		completed_request->post_process_metadata["motion_detect.result"] = false;
+#endif  // JETSON_BUILD
 	}
 	else {
 		// TBD - Too Much Logging - GS_LOG_MSG(trace, "No post-motion frames after this one - setting result local_motion_detected of: " + std::to_string(local_motion_detected) + ".");
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 8d
 		completed_request->post_process_metadata.Set("motion_detect.result", local_motion_detected);
+#else
+		completed_request->post_process_metadata["motion_detect.result"] = local_motion_detected;
+#endif  // JETSON_BUILD
 		// Signal motion to the outside world.
 		motion_detected_ = local_motion_detected;
 	}
@@ -340,7 +392,11 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
 		// during which the movement was first detected.
 		frameInfo.isballHitFrame = (postMotionFramesToCapture_ == gs::GolfSimClubData::kNumberFramesToSaveAfterHit);
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 7
 		cv::Mat mat = cv::Mat(info.height, info.width, CV_8U, image, info.stride);
+#else
+		cv::Mat mat = completed_request->frame;  // shallow alias; clone() below ensures independent copy
+#endif  // JETSON_BUILD
 
 		if (config_.showroi) {
 			cv::Scalar c_black{ 0, 0, 0 }; // black
@@ -394,12 +450,14 @@ bool MotionDetectStage::Process(CompletedRequestPtr& completed_request)
 	return false;
 }
 
+#ifndef JETSON_BUILD  // JETSON_STUB — Block 9
 static PostProcessingStage *Create(RPiCamApp *app)
 {
 	return new MotionDetectStage(app);
 }
 
 static RegisterStage reg(NAME, &Create);
+#endif  // JETSON_BUILD
 
 
 #endif // #ifdef __unix__  // Ignore in Windows environment

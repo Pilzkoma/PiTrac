@@ -11,17 +11,50 @@
 
 #pragma once
 
+#ifndef JETSON_BUILD  // JETSON_STUB
+
 #include "core/rpicam_app.hpp"
 
 #include "post_processing_stages/post_processing_stage.hpp"
 
+#else  // JETSON_BUILD
 
+#include <memory>
+#include <boost/property_tree/ptree.hpp>
+#include "v4l2_interface.h"
+
+// Minimal base class replacing PostProcessingStage (which inherits RPiCamApp).
+// Provides frame dimensions to Configure() and Process() in place of app_->GetStreamInfo().
+// RPiCamApp* app_ is gone; frame_width_ and frame_height_ take its place.
+class PostProcessingStage {
+public:
+	PostProcessingStage(int width, int height)
+		: frame_width_(width), frame_height_(height) {}
+	virtual ~PostProcessingStage() = default;
+	virtual char const* Name() const = 0;
+	virtual void Read(boost::property_tree::ptree const& params) = 0;
+	virtual void Configure() = 0;
+	virtual bool Process(JetsonCompletedRequestPtr& completed_request) = 0;
+protected:
+	int frame_width_;
+	int frame_height_;
+};
+
+#endif  // JETSON_BUILD
+
+
+#ifndef JETSON_BUILD  // JETSON_STUB
 using Stream = libcamera::Stream;
+#endif  // JETSON_BUILD
 
 class MotionDetectStage : public PostProcessingStage
 {
 public:
+#ifndef JETSON_BUILD  // JETSON_STUB
 	MotionDetectStage(RPiCamApp* app) : PostProcessingStage(app) {}
+#else
+	MotionDetectStage(int width, int height) : PostProcessingStage(width, height) {}
+#endif  // JETSON_BUILD
 
 	char const* Name() const override;
 
@@ -29,7 +62,11 @@ public:
 
 	void Configure() override;
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 	bool Process(CompletedRequestPtr& completed_request) override;
+#else
+	bool Process(JetsonCompletedRequestPtr& completed_request) override;
+#endif  // JETSON_BUILD
 
 
 	// In the Config, dimensions are given as fractions of the image size.
@@ -59,7 +96,9 @@ public:
 	static Config incoming_configuration;
 
 private:
+#ifndef JETSON_BUILD  // JETSON_STUB
 	Stream* stream_;
+#endif  // JETSON_BUILD
 	// Here we convert the dimensions to pixel locations in the image, as if subsampled
 	// by hskip and vskip.
 	uint roi_x_, roi_y_;
