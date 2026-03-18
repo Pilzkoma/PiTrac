@@ -23,7 +23,6 @@ add_global_arguments('-D_FILE_OFFSET_BITS=64', language : 'cpp')
 add_global_arguments('-DLIBCXX_ENABLE_INCOMPLETE_FEATURES=ON', language : 'cpp')
 add_global_arguments('-DBOOST_LOG_DYN_LINK', language : 'cpp')
 add_global_arguments('-DBOOST_BIND_GLOBAL_PLACEHOLDERS', language : 'cpp')
-add_global_arguments('-DBOOST_NO_CXX11_ALLOCATOR', language : 'cpp')  # Boost 1.71 + C++20 workaround (named_scope.hpp allocator::reference removed in C++20)
 # Enable XNNPACK execution provider for ONNX Runtime
 add_global_arguments('-DUSE_XNNPACK', language : 'cpp')
 
