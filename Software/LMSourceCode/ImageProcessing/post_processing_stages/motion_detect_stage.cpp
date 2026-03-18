@@ -155,15 +155,29 @@ void MotionDetectStage::Configure()
 	max_region_threshold_ = config_.max_region_threshold * (float)roi_width_ * (float)roi_height_;
 
 	// Ensure all values are valid
+#ifndef JETSON_BUILD
 	roi_x_ = std::clamp(roi_x_, 0u, info.width);
 	roi_y_ = std::clamp(roi_y_, 0u, info.height);
 	roi_width_ = std::clamp(roi_width_, 0u, info.width - roi_x_);
 	roi_height_ = std::clamp(roi_height_, 0u, info.height - roi_y_);
+#else  // JETSON_STUB: info.width/height are int on Jetson — cast to uint for std::clamp
+	roi_x_ = std::clamp(roi_x_, 0u, (uint)info.width);
+	roi_y_ = std::clamp(roi_y_, 0u, (uint)info.height);
+	roi_width_ = std::clamp(roi_width_, 0u, (uint)info.width - roi_x_);
+	roi_height_ = std::clamp(roi_height_, 0u, (uint)info.height - roi_y_);
+#endif
 	region_threshold_ = std::clamp(region_threshold_, 0u, roi_width_ * roi_height_);
 
-	if (config_.verbose)
+	if (config_.verbose) {
+#ifndef JETSON_BUILD
 		LOG(1, "Sampled (vskip/hskip) Image x,y (smaller): " << info.width << "x" << info.height << " roi: (" << roi_x_ << "," << roi_y_ << ") ROI Width/height: "
 						 << roi_width_ << "x" << roi_height_ << " threshold: " << region_threshold_);
+#else  // JETSON_STUB: LOG macro from rpicam-apps not available on Jetson
+		GS_LOG_MSG(trace, "Sampled (vskip/hskip) Image x,y (smaller): " + std::to_string(info.width) + "x" + std::to_string(info.height) +
+		           " roi: (" + std::to_string(roi_x_) + "," + std::to_string(roi_y_) + ") ROI Width/height: " +
+		           std::to_string(roi_width_) + "x" + std::to_string(roi_height_) + " threshold: " + std::to_string(region_threshold_));
+#endif
+	}
 
 	GS_LOG_MSG(trace, "    roi_width_: " + std::to_string(roi_width_));
 	GS_LOG_MSG(trace, "    roi_height_: " + std::to_string(roi_height_));
@@ -337,8 +351,13 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 			// TBD gs::GolfSimIpcSystem::SimulateCamera2ImageMessage();
 		}
 
-		if (config_.verbose)
+		if (config_.verbose) {
+#ifndef JETSON_BUILD
 			LOG(1, "Saving Image x,y: " << info.width << ", " << info.height << " .");
+#else  // JETSON_STUB: LOG macro from rpicam-apps not available on Jetson
+			GS_LOG_MSG(trace, "Saving Image x,y: " + std::to_string(info.width) + ", " + std::to_string(info.height) + " .");
+#endif
+		}
 
 		// For now, as soon as we detect motion (except for a few frames) we stop recording.  This 
 		// and reduces unnecessary processing overhead.
