@@ -84,6 +84,7 @@ opencv_dep = dependency('opencv4', required : true, version : '>=4.5.0', include
 fmt_dep = dependency('fmt', required : true)
 
 boost_dep = dependency('boost', method: 'pkg-config', version : '>=1.71.0', modules : ['timer', 'log', 'thread', 'filesystem', 'regex'])
+program_options_dep = dependency('boost', modules: ['program_options'], method: 'pkg-config', required: true)
 
 msgpack_dep = dependency('msgpack', required : true)
 yamlcpp_dep = dependency('yaml-cpp', required : true)
@@ -105,7 +106,7 @@ conf_data = configuration_data()
 
 pitrac_lm_module_deps = [
 	thread_dep, opencv_dep,
-	fmt_dep, boost_dep, activemq_dep, ssl_dep, apr_dep, msgpack_dep, yamlcpp_dep, onnxruntime_dep,]
+	fmt_dep, boost_dep, program_options_dep, activemq_dep, ssl_dep, apr_dep, msgpack_dep, yamlcpp_dep, onnxruntime_dep,]
 if not jetson_build  # JETSON_STUB
     pitrac_lm_module_deps += [libcamera_dep, lgpio_dep, rpicam_app_dep]
 endif  # JETSON_STUB
@@ -250,6 +251,10 @@ pitrac_lm_sources += ([
 pitrac_lm_sources += ([
 			rpicam_app_src,
 ])
+
+if jetson_build  # JETSON_STUB: post_processing_stages/ subdir is skipped on Jetson; add directly
+    pitrac_lm_sources += ['post_processing_stages/motion_detect_stage.cpp']
+endif
 
 
 pitrac_lm_include_dirs = ([ 
