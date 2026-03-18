@@ -131,6 +131,8 @@ namespace golf_sim {
 		static bool camera_location_found_;
 		static int previously_found_media_number_;
 		static int previously_found_device_number_;
+
+		static void SetLibCameraLoggingOff();
 	};
 
 	bool TakeRawPicture(const GolfSimCamera& camera, cv::Mat& img);
@@ -180,8 +182,6 @@ namespace golf_sim {
 	bool WaitForCam2Trigger(cv::Mat& return_image);
 
 	bool PerformCameraSystemStartup();
-
-	static void SetLibCameraLoggingOff();
 
 }
 

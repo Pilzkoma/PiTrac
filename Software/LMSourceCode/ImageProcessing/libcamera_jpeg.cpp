@@ -6,6 +6,8 @@
 
 #ifdef __unix__  // Ignore in Windows environment
 
+#ifndef JETSON_BUILD  // JETSON_STUB: entire file is RPi/libcamera-specific
+
 #include <chrono>
 #include <signal.h>
 #include <sys/stat.h>
@@ -508,5 +510,7 @@ bool ball_flight_camera_event_loop(LibcameraJpegApp& app, cv::Mat& returnImg)
 
 
 
+
+#endif // JETSON_BUILD
 
 #endif // #ifdef __unix__  // Ignore in Windows environment
