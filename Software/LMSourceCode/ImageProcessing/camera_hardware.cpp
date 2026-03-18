@@ -7,8 +7,10 @@
 
 // Prepare for conditional compilation in the Windows environment, where, for example,
 // there is no PiCamera
-#ifdef __unix__   
+#ifdef __unix__
+#ifndef JETSON_BUILD  // JETSON_STUB: libcamera does not exist on Jetson
 #include <libcamera/camera.h>
+#endif  // JETSON_BUILD
 #include <unistd.h>
 // using namespace boost::detail::win32;
 #elif defined(_WIN32) || defined(WIN32) 
