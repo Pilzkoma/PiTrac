@@ -13,7 +13,11 @@
 #include "gs_config.h"
 #include "gs_clubs.h"
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "libcamera_interface.h"
+#else
+#include "v4l2_interface.h"
+#endif  // JETSON_BUILD
 
 #include "gs_camera.h"
 #include "gs_calibration.h"

@@ -14,7 +14,11 @@
 #include "gs_clubs.h"
 #include "gs_shot_parameters.h"
 
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "libcamera_interface.h"
+#else
+#include "v4l2_interface.h"
+#endif  // JETSON_BUILD
 
 #include "gs_camera.h"
 #include "gs_web_api.h"

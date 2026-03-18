@@ -19,7 +19,11 @@
 #include "gs_options.h"
 
 // Having to set the constants in this way creates more entanglement than we'd like.  TBD - Re-architect
+#ifndef JETSON_BUILD  // JETSON_STUB
 #include "libcamera_interface.h"
+#else
+#include "v4l2_interface.h"
+#endif  // JETSON_BUILD
 
 
 
