@@ -24,8 +24,59 @@
 #include "motion_detect.h"
 #include "gs_config.h"
 #include "logging_tools.h"
+#include "pulse_strobe.h"
+#include "golf_ball.h"
+#include "gs_camera.h"
 
 namespace golf_sim {
+
+    // -----------------------------------------------------------------------
+    // LibCameraInterface static member definitions
+    // Copied from libcamera_interface.cpp — values are identical on Jetson.
+    // libcamera_app_[] type changed from LibcameraJpegApp* to JetsonCaptureApp*.
+    // -----------------------------------------------------------------------
+
+    uint LibCameraInterface::kMaxWatchingCropWidth  = 96;
+    uint LibCameraInterface::kMaxWatchingCropHeight = 88;
+
+    double LibCameraInterface::kCamera1Gain                    = 6.0;
+    double LibCameraInterface::kCamera1Saturation              = 1.0;
+    double LibCameraInterface::kCamera1HighFPSGain             = 15.0;
+    double LibCameraInterface::kCamera1Contrast                = 1.0;
+    double LibCameraInterface::kCamera2Gain                    = 6.0;
+    double LibCameraInterface::kCamera2Saturation              = 1.0;
+    double LibCameraInterface::kCamera2ComparisonGain          = 0.8;
+    double LibCameraInterface::kCamera2StrobedEnvironmentGain  = 0.8;
+    double LibCameraInterface::kCamera2Contrast                = 1.0;
+    double LibCameraInterface::kCamera2CalibrateOrLocationGain = 1.0;
+    double LibCameraInterface::kCamera2PuttingGain             = 4.0;
+    double LibCameraInterface::kCamera2PuttingContrast         = 1.0;
+
+    std::string LibCameraInterface::kCameraMotionDetectSettings = "./assets/motion_detect.json";
+
+    long LibCameraInterface::kCamera1StillShutterTimeuS = 15000;
+    long LibCameraInterface::kCamera2StillShutterTimeuS = 15000;
+
+    // Default values based on empirical measurements using a 6mm lens
+    int LibCameraInterface::kCroppedImagePixelOffsetLeft = -5;
+    int LibCameraInterface::kCroppedImagePixelOffsetUp   = -13;
+
+    LibCameraInterface::CropConfiguration LibCameraInterface::camera_crop_configuration_ = LibCameraInterface::kCropUnknown;
+    cv::Vec2i LibCameraInterface::current_watch_resolution_;
+    cv::Vec2i LibCameraInterface::current_watch_offset_;
+
+    LibCameraInterface::CameraConfiguration LibCameraInterface::libcamera_configuration_[] = {
+        LibCameraInterface::CameraConfiguration::kNotConfigured,
+        LibCameraInterface::CameraConfiguration::kNotConfigured
+    };
+
+    // JetsonCaptureApp* replaces LibcameraJpegApp* from the RPi build
+    JetsonCaptureApp* LibCameraInterface::libcamera_app_[] = { nullptr, nullptr };
+
+    bool camera_location_found_       = false;
+    int  previously_found_media_number_  = -1;
+    int  previously_found_device_number_ = -1;
+
 
     // -----------------------------------------------------------------------
     // SetLibCameraLoggingOff
@@ -122,6 +173,64 @@ namespace golf_sim {
                                bool& motion_detected) {
         // JETSON_STUB: two-camera IPC flow not yet validated on Jetson
         motion_detected = false;
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // PulseStrobe stubs
+    // pulse_strobe.cpp is entirely guarded by #ifndef JETSON_BUILD; these
+    // stubs satisfy the linker until the libgpiod/SPI Group 2 work is done.
+    // -----------------------------------------------------------------------
+
+    bool PulseStrobe::InitGPIOSystem(GsSignalCallback) {
+        // JETSON_STUB: GPIO init via libgpiod not yet implemented
+        return false;
+    }
+
+    bool PulseStrobe::DeinitGPIOSystem() {
+        // JETSON_STUB
+        return false;
+    }
+
+    bool PulseStrobe::SendCameraPrimingPulses(bool /*use_high_speed*/) {
+        // JETSON_STUB
+        return false;
+    }
+
+    bool PulseStrobe::SendExternalTrigger() {
+        // JETSON_STUB
+        return false;
+    }
+
+    const std::vector<float> PulseStrobe::GetPulseIntervals() {
+        // JETSON_STUB
+        return {};
+    }
+
+
+    // -----------------------------------------------------------------------
+    // Free-function stubs
+    // Defined in libcamera_interface.cpp on RPi; stubbed here for Jetson
+    // until Group 2 camera work is complete.
+    // -----------------------------------------------------------------------
+
+    bool TakeRawPicture(const GolfSimCamera& /*camera*/, cv::Mat& /*img*/) {
+        // JETSON_STUB
+        return false;
+    }
+
+    bool CheckForBall(GolfBall& /*ball*/, cv::Mat& /*return_image*/) {
+        // JETSON_STUB
+        return false;
+    }
+
+    bool WaitForCam2Trigger(cv::Mat& /*return_image*/) {
+        // JETSON_STUB
+        return false;
+    }
+
+    bool PerformCameraSystemStartup() {
+        // JETSON_STUB
         return false;
     }
 
