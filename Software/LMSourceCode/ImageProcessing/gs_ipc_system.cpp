@@ -5,6 +5,8 @@
 
 #ifdef __unix__  // Ignore in Windows environment
 
+#include <thread>
+
 #include "gs_globals.h"
 #include "logging_tools.h"
 
