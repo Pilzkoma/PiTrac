@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2025, Verdant Consultants, LLC.
  */
 
-
+#ifndef JETSON_BUILD  // JETSON_STUB: entire file is RPi lgpio/SPI-specific; Group 2 replacement pending
 
 #include "logging_tools.h"
 #include "gs_options.h"
@@ -766,4 +766,4 @@ namespace golf_sim {
 	}
 } // namespace golf_sim
 
-
+#endif // JETSON_BUILD
