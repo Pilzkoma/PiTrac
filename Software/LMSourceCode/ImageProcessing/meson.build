@@ -170,25 +170,27 @@ if enable_recompile_closed_source
     pitrac_lm_sources += ([ 'gs_e6_response.cpp' ])
 endif
 
-# Move the pre-compiled, closed-source object file(s) into place
-# This is a workaround to the fact that meson will not allow paths in the 
-# output and input parameters of a custom_target
-create_closed_source_objects = find_program('create_closed_source_objects.sh')
-closed_source_target = custom_target('copy_closed_source_object',
-    input : 'gs_e6_results.cpp',
-    output : 'gs_e6_response.cpp.o',
-    command : [ create_closed_source_objects, '@INPUT@', '@OUTPUT@'],
-)
+if not jetson_build  # JETSON_STUB: E6/TruGolf integration not needed on Jetson (GSPro only)
+    # Move the pre-compiled, closed-source object file(s) into place
+    # This is a workaround to the fact that meson will not allow paths in the
+    # output and input parameters of a custom_target
+    create_closed_source_objects = find_program('create_closed_source_objects.sh')
+    closed_source_target = custom_target('copy_closed_source_object',
+        input : 'gs_e6_results.cpp',
+        output : 'gs_e6_response.cpp.o',
+        command : [ create_closed_source_objects, '@INPUT@', '@OUTPUT@'],
+    )
 
-if not enable_recompile_closed_source 
-    message('Using pre-compiled closed object_code')
-    pitrac_lm_sources += ([ closed_source_target, ])
-    closed_source_object_files += (['gs_e6_response.cpp.o'])
-endif
+    if not enable_recompile_closed_source
+        message('Using pre-compiled closed object_code')
+        pitrac_lm_sources += ([ closed_source_target, ])
+        closed_source_object_files += (['gs_e6_response.cpp.o'])
+    endif
 
-if not enable_recompile_closed_source 
-    r = run_command ( 'cp', '-f', './ClosedSourceObjectFiles/gs_e6_response.cpp.o', '.', check:true)
-endif
+    if not enable_recompile_closed_source
+        r = run_command ( 'cp', '-f', './ClosedSourceObjectFiles/gs_e6_response.cpp.o', '.', check:true)
+    endif
+endif  # JETSON_STUB
 
 libav_dep_names = ['libavcodec', 'libavdevice', 'libavformat', 'libavutil', 'libswresample']
 libav_deps = []
@@ -229,8 +231,7 @@ pitrac_lm_sources += ([
 			'gs_gspro_response.cpp',
 			'gs_gspro_test_server.cpp',
 			'gs_sim_socket_interface.cpp',
-                        'gs_e6_interface.cpp',
-                        'gs_e6_results.cpp',
+                        # gs_e6_interface.cpp and gs_e6_results.cpp added conditionally below
 			'logging_tools.cpp',
 			'gs_events.cpp',
 			'worker_thread.cpp',
@@ -254,6 +255,8 @@ pitrac_lm_sources += ([
 
 if jetson_build  # JETSON_STUB: post_processing_stages/ subdir is skipped on Jetson; add directly
     pitrac_lm_sources += ['post_processing_stages/motion_detect_stage.cpp']
+else  # JETSON_STUB: E6/TruGolf integration not needed on Jetson (GSPro only)
+    pitrac_lm_sources += ['gs_e6_interface.cpp', 'gs_e6_results.cpp']
 endif
 
 
@@ -276,23 +279,25 @@ exec = executable('pitrac_lm',
 	dependencies : pitrac_lm_module_deps
 	)
 
-# Hacky two targets, because can't figure out how to execute more than one command
-# per  target.  TBD
-custom_target('post_build1',
-  depends: exec,  # Ensure the executable is built first
-  input: exec,
-  output: 'dummy_file1',  # NOTE - command will execute in the build directory
-  command: [ 'cp', '-f', './pitrac_lm.p/gs_e6_response.cpp.o', '../ClosedSourceObjectFiles'],
-  build_by_default : true
-)
+if not jetson_build  # JETSON_STUB: post_build targets copy gs_e6_response.cpp.o which is not built on Jetson
+    # Hacky two targets, because can't figure out how to execute more than one command
+    # per  target.  TBD
+    custom_target('post_build1',
+      depends: exec,  # Ensure the executable is built first
+      input: exec,
+      output: 'dummy_file1',  # NOTE - command will execute in the build directory
+      command: [ 'cp', '-f', './pitrac_lm.p/gs_e6_response.cpp.o', '../ClosedSourceObjectFiles'],
+      build_by_default : true
+    )
 
-custom_target('post_build2',
-  depends: exec,  # Ensure the executable is built first
-  input: exec,
-  output: 'dummy_file2',  # NOTE - command will execute in the build directory
-  command: [ 'cp', '-f', './pitrac_lm.p/gs_e6_response.cpp.o', '..'],
-  build_by_default : true
-)
+    custom_target('post_build2',
+      depends: exec,  # Ensure the executable is built first
+      input: exec,
+      output: 'dummy_file2',  # NOTE - command will execute in the build directory
+      command: [ 'cp', '-f', './pitrac_lm.p/gs_e6_response.cpp.o', '..'],
+      build_by_default : true
+    )
+endif  # JETSON_STUB
 
 if not jetson_build  # JETSON_STUB
     summary({
