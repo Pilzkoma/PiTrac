@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Core Vision System|HW + SW|Build|55%|🟡 In Progress|2026-03-16|
+|SP1 — Core Vision System|HW + SW|Build|70%|🟡 In Progress|2026-03-19|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Design|0%|🔵 Planning|2026-03-14|
@@ -133,6 +133,7 @@ Next step: run meson setup -Djetson_build=true on Jetson to find remaining error
 |3|SP2|Spin detection requires marked balls. Standard range balls will not work for spin. Must use balls with visible dot pattern (similar to Foresight approach).|🔵 Minor|☑ Yes|Accepted — user confirmed willingness to use marked balls|2026-03-14|
 |4|SP4|GSPro runs on Windows PC only — it cannot run on the Jetson. The Jetson sends JSON shot data over TCP to a separate Windows PC running GSPro. Firewall and network config required if on different subnets.|🔵 Minor|☑ Yes|Architectural decision logged — Jetson = compute, Windows PC = GSPro host|2026-03-14|
 |5|SP1|LiDAR excluded from v1. Camera-only trigger may log a topped/missed shot as a real shot in rare cases.|🔵 Minor|☑ Yes|Accepted for v1. LiDAR ball-launch confirmation planned for v2 second Jetson build.|2026-03-14|
+|6|SP1|pitrac_lm binary is not yet tested with real cameras — all camera functions return stub false values until Group 2 runtime implementations are complete|🟡 Annoying|☑ Yes|Expected — cameras not yet arrived. Will implement V4L2 capture, GPIO strobe when OV9281 cameras arrive|2026-03-19|
 
 \---
 
@@ -257,11 +258,11 @@ IMPORTANT RULES FOR THIS CHAT:
 |-|-|
 |Type|☑ Hardware ☑ Software|
 |Phase|Build|
-|% Complete|55%|
+|% Complete|70%|
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
-|Last Updated|2026-03-16|
+|Last Updated|2026-03-19|
 
 \---
 
@@ -420,6 +421,15 @@ PiTrac's key techniques:
 > Fix in progress: building Boost 1.74.0 from source on Jetson (~20 min). Left running overnight.
 > Also outstanding: libcamera_jpeg.cpp still pulls in rpicam headers — needs same JETSON_BUILD guard treatment as other files. v4l2_interface.cpp SetLibCameraLoggingOff declaration mismatch needs fixing.
 > Next session: confirm Boost 1.74 install, re-run ninja, fix remaining compile errors.
+
+**2026-03-19**
+
+> FIRST SUCCESSFUL BUILD. pitrac_lm binary produced on Jetson Xavier NX (46MB).
+> Binary starts correctly — signal handlers install, --help prints all command line options.
+> All 51 source files compile cleanly. All linker errors resolved.
+> Final fixes: E6 closed-source object excluded from Jetson build, GsE6Interface call sites guarded.
+> Build environment: JetPack 5.1.6, GCC 10, Boost 1.76 (from source), OpenCV 4.5.4, ONNX Runtime 1.16.3.
+> Next: cameras arrive → connect OV9281 → test V4L2 device detection → first live camera frame.
 
 \---
 
@@ -781,5 +791,5 @@ At the end of our session, tell me exactly what to update in my logbook.
 
 \---
 
-*Last updated: 2026-03-16 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
+*Last updated: 2026-03-19 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
 
