@@ -63,6 +63,7 @@ namespace golf_sim {
             }
         }
 
+#ifndef JETSON_BUILD
         if (GsE6Interface::InterfaceIsPresent()) {
             GS_LOG_TRACE_MSG(trace, "E6 simulator interface detected.");
             GsE6Interface* e6_sim = new GsE6Interface();
@@ -80,6 +81,7 @@ namespace golf_sim {
                 return false;
             }
         }
+#endif
 
         if (interfaces_.size() == 0) {
             GS_LOG_TRACE_MSG(trace, "No simulator interface detected.");

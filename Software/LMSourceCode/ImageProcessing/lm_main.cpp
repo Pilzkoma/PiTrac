@@ -769,14 +769,18 @@ bool TestExternalSimMessage() {
     // If we are interfacing with a TruGolf/E6 system, then we need to make sure that it is armed before
     // sending shot information.  For GSPro, the arming is not important.
 
+#ifndef JETSON_BUILD
     if (GsE6Interface::InterfaceIsPresent()) {
         GS_LOG_TRACE_MSG(trace, "Sleeping for a while in order have user setup E6 simulator to send 'Arm' message.");
         sleep(15);
     }
     else {
+#endif
         // We don't need to wait for an arm in the GSPro system
         sleep(5);
+#ifndef JETSON_BUILD
     }
+#endif
 #endif
     GsSimInterface::IncrementShotCounter();
 
