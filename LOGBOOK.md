@@ -17,7 +17,7 @@
 |SP1 — Core Vision System|HW + SW|Build|70%|🟡 In Progress|2026-03-19|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
-|SP4 — GSPro Integration + Session Data|SW|Build|10%|🟡 In Progress|2026-03-21|
+|SP4 — GSPro Integration + Session Data|SW|Build|20%|🟡 In Progress|2026-03-21|
 |SP5 — Video Recording + Enclosure|HW + 3D|Design|0%|🔵 Planning|2026-03-14|
 
 **Status legend:** 🔵 Planning → 🟡 In Progress → 🔴 Blocked → ✅ Done
@@ -94,7 +94,7 @@
 |GSPro Open Connect API|v1|Receives shot JSON over TCP from Jetson|SP4|☑ Installed ☑ Configured ☑ In use|
 |Python|3.8 (Jetson)|GSPro sender, future session data layer|SP4|☑ Installed ☑ Configured ☑ In use|
 |OpenShotGolf|Latest (Godot 4.6)|Free GSPro-compatible driving range simulator for development testing|SP4|☑ Installed ☑ Configured ☑ In use|
-|SQLite or similar|TBD|Local session data storage — per player, per club, over time|SP4|☐ Installed ☐ Configured ☐ In use|
+|SQLite|3.x (Python stdlib)|Local session/shot data storage on Jetson|SP4|☑ Installed ☑ Configured ☑ In use|
 |Web app (lightweight)|TBD|Session stats dashboard, player profiles|SP4|☐ Installed ☐ Configured ☐ In use|
 |USB camera recording SW|TBD|Trigger-based swing video capture and file management|SP5|☐ Installed ☐ Configured ☐ In use|
 
@@ -123,6 +123,7 @@
 8. SP4: OpenShotGolf cloned on Windows from github.com/jhauck2/OpenShotGolf — runs in Godot 4.6 .NET
 9. Windows: .NET SDK 8.0 installed, Godot 4.6 .NET edition, C# solution built before first run
 10. Windows firewall rule "OpenShotGolf TCP" allows inbound TCP 49152
+11. SP4: shot_db.py on Jetson in ~/JetsonLM/sp4_gspro/ — creates jetson_lm.db automatically on first run
 
 Next step: run meson setup -Djetson_build=true on Jetson to find remaining errors
 ```
@@ -644,6 +645,9 @@ JSON shot data fields available:
 | 2026-03-21 | DeviceID: "Jetson LM 1.0" | Unique identifier for our launch monitor in the GSPro Open Connect protocol | Any string works, this is descriptive |
 | 2026-03-21 | Dummy shot values based on 7-iron template with random variation | Realistic test data (~132 mph ball speed, 18° VLA, ~3200 RPM spin). Each shot varies ±8% so balls land in different spots. | Random values (less realistic, harder to validate visually) |
 | 2026-03-21 | Interactive + --once modes in sender | Interactive for manual testing, --once for future C++ pipeline integration | Interactive only (less flexible for automation) |
+| 2026-03-21 | SQLite with 4 tables: players, courses, sessions, shots | All ball/club data stored as individual columns (not JSON blob) for direct SQL queries like "avg 7I carry". Courses table supports both range and course play. Sessions link player to course with timestamps. | Single shots table (no session tracking), JSON blob storage (harder to query) |
+| 2026-03-21 | Database auto-created on first run, seeded with two default courses | Zero-config experience — just run the sender and it works. OpenShotGolf Driving Range and GSPro Driving Range pre-populated. | Manual setup required (worse UX) |
+| 2026-03-21 | --no-db flag to disable logging | Allows quick testing without database overhead. Also gracefully degrades if shot_db.py is missing. | Always require DB (inflexible) |
 
 \---
 
@@ -654,19 +658,22 @@ JSON shot data fields available:
 | 2026-03-21 | TCP connection Jetson → Windows OpenShotGolf port 49152 | gspro_sender.py --ip 192.168.178.20 | ✅ PASS | First end-to-end connectivity test |
 | 2026-03-21 | Dummy 7-iron shot → ball flight visible in OpenShotGolf | Visual confirmation on Windows screen | ✅ PASS | Ball launched with correct trajectory, telemetry displayed (distance, spin, angles) |
 | 2026-03-21 | Shot data values match between sender and receiver | Compared Jetson terminal output with OpenShotGolf HUD | ✅ PASS | Speed, SpinAxis, HLA all matched on both sides |
+| 2026-03-21 | SQLite database creation and schema | Automatic on first run of gspro_sender.py | ✅ PASS | jetson_lm.db created with all 4 tables, 2 default courses seeded |
+| 2026-03-21 | Shot logging during live session | 6 shots sent to OpenShotGolf, all logged to DB | ✅ PASS | Player "Max" created, session started/ended, all shots recorded with ball data |
+| 2026-03-21 | Session summary on exit | Quit with 'q' after 6 shots | ✅ PASS | Showed avg 134.3, min 122.9, max 141.3 mph ball speed |
+| 2026-03-21 | SQL query on logged data | sqlite3 jetson_lm.db "SELECT * FROM shots;" | ✅ PASS | All 6 shots retrievable with full ball data fields |
 
 \---
 
 ### ✅ Next Steps
 
-* ☐ Test all three club templates (7-iron, driver, pitching-wedge) and verify distances are plausible
-* ☐ Send 10+ shots in sequence to verify TCP connection stability
-* ☐ Test --once mode for single-shot pipeline use
-* ☐ Design SQLite schema: shots, players, sessions tables
-* ☐ Add SQLite logging to gspro_sender.py — every sent shot gets recorded
+* ☐ Test multiple sessions — verify session IDs increment and data stays separate
+* ☐ Test --club driver and --club pitching-wedge with DB logging — verify club codes (DR, PW) stored correctly
+* ☐ Test get_club_averages() and get_player_summary() queries with real logged data
 * ☐ Design the local socket interface between pitrac_lm (C++) and gspro_sender.py
-* ☐ Begin Flask/FastAPI stats dashboard skeleton
-* ☐ Buy GSPro with Open API license when cameras arrive and real shots need visual validation on simulator courses
+* ☐ Begin Flask/FastAPI stats dashboard skeleton (reads from jetson_lm.db)
+* ☐ Add more courses to DB as GSPro courses are played
+* ☐ Buy GSPro (Open API license) when cameras arrive and real shots need visual validation
 
 \---
 
@@ -691,6 +698,16 @@ JSON shot data fields available:
 > (7-iron, driver, pitching-wedge) with ±8% random variation per shot.
 > GSPro purchase deferred — switching later requires only --port 921.
 > Next: test stability with multiple shots, then design SQLite schema.
+>
+> Second part of session: SQLite database designed and integrated into sender.
+> Schema: 4 tables (players, courses, sessions, shots) with individual columns for
+> all BallData and ClubData fields. Database auto-creates on first run with two
+> seeded courses (OpenShotGolf Driving Range, GSPro Driving Range).
+> Tested with 6 live shots: Player "Max" created (ID 1), session started/ended
+> cleanly, all shots logged with full ball data. Session summary shows
+> avg/min/max ball speed on exit.
+> New CLI args: --player "Name", --no-db for testing without logging.
+> Files: shot_db.py (DB module) + updated gspro_sender.py (with integrated logging).
 
 \---
 
