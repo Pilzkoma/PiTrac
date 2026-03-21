@@ -17,7 +17,7 @@
 |SP1 — Core Vision System|HW + SW|Build|70%|🟡 In Progress|2026-03-19|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
-|SP4 — GSPro Integration + Session Data|SW|Build|20%|🟡 In Progress|2026-03-21|
+|SP4 — GSPro Integration + Session Data|SW|Build|35%|🟡 In Progress|2026-03-21|
 |SP5 — Video Recording + Enclosure|HW + 3D|Design|0%|🔵 Planning|2026-03-14|
 
 **Status legend:** 🔵 Planning → 🟡 In Progress → 🔴 Blocked → ✅ Done
@@ -92,10 +92,11 @@
 |PiTrac (open source)|Latest from github.com/PiTracLM/PiTrac|Core vision pipeline — ball detection, speed, angles, spin. Will be adapted from RPi to Jetson|SP1, SP2|☑ Installed ☐ Configured ☐ In use|
 |OpenCV|TBD (PiTrac dependency)|Computer vision — circle detection, strobe frame analysis, spin calculation|SP1, SP2, SP3|☐ Installed ☐ Configured ☐ In use|
 |GSPro Open Connect API|v1|Receives shot JSON over TCP from Jetson|SP4|☑ Installed ☑ Configured ☑ In use|
-|Python|3.8 (Jetson)|GSPro sender, future session data layer|SP4|☑ Installed ☑ Configured ☑ In use|
-|OpenShotGolf|Latest (Godot 4.6)|Free GSPro-compatible driving range simulator for development testing|SP4|☑ Installed ☑ Configured ☑ In use|
+|Python|3.8 (Jetson)|GSPro sender, shot receiver, session data, dashboard|SP4|☑ Installed ☑ Configured ☑ In use|
+|OpenShotGolf|Latest (Godot 4.6)|Free GSPro-compatible driving range for development testing|SP4|☑ Installed ☑ Configured ☑ In use|
 |SQLite|3.x (Python stdlib)|Local session/shot data storage on Jetson|SP4|☑ Installed ☑ Configured ☑ In use|
-|Web app (lightweight)|TBD|Session stats dashboard, player profiles|SP4|☐ Installed ☐ Configured ☐ In use|
+|Flask|3.0.3|Stats dashboard web server on Jetson|SP4|☑ Installed ☑ Configured ☑ In use|
+|Chart.js|4.4.7 (CDN)|Dispersion scatter plot in dashboard|SP4|☑ Installed ☑ Configured ☑ In use|
 |USB camera recording SW|TBD|Trigger-based swing video capture and file management|SP5|☐ Installed ☐ Configured ☐ In use|
 
 **Programming language(s) confirmed:** *PiTrac codebase is C++. GSPro sender and session layer likely Python. To be confirmed once PiTrac is studied in depth.*
@@ -119,11 +120,15 @@
 4. CLAUDE.md and PORTING_TASKS.md created in repo — 24 porting tasks tracked
 5. All 14 Group 1 compile blockers resolved via #ifdef JETSON_BUILD guards
 6. Build dependencies on Jetson still to be installed (next session)
-7. SP4: gspro_sender.py on Jetson in ~/JetsonLM/sp4_gspro/ — Python 3 stdlib only (typing.Optional for 3.8 compat)
-8. SP4: OpenShotGolf cloned on Windows from github.com/jhauck2/OpenShotGolf — runs in Godot 4.6 .NET
-9. Windows: .NET SDK 8.0 installed, Godot 4.6 .NET edition, C# solution built before first run
-10. Windows firewall rule "OpenShotGolf TCP" allows inbound TCP 49152
-11. SP4: shot_db.py on Jetson in ~/JetsonLM/sp4_gspro/ — creates jetson_lm.db automatically on first run
+7. SP4: gspro_sender.py on Jetson in ~/JetsonLM/sp4_gspro/ — Python 3 stdlib only
+8. SP4: OpenShotGolf cloned on Windows from github.com/jhauck2/OpenShotGolf — Godot 4.6 .NET
+9. Windows: .NET SDK 8.0, Godot 4.6 .NET, C# solution built, firewall TCP 49152 open
+10. SP4: shot_db.py — creates jetson_lm.db automatically, check_same_thread=False for Flask
+11. SP4: Flask installed on Jetson via pip3 install flask
+12. SP4: dashboard.py serves on port 5000, accessible from any LAN device
+13. SP4: shot_receiver.py listens on /tmp/jetson_lm.sock for C++ pipeline shots
+14. SP4: test_client.py simulates C++ pipeline for testing without pitrac_lm
+15. SP4: shot_sender.h — C++ header ready to integrate into pitrac_lm source
 
 Next step: run meson setup -Djetson_build=true on Jetson to find remaining errors
 ```
@@ -140,7 +145,10 @@ Next step: run meson setup -Djetson_build=true on Jetson to find remaining error
 |4|SP4|GSPro runs on Windows PC only — it cannot run on the Jetson. The Jetson sends JSON shot data over TCP to a separate Windows PC running GSPro. Firewall and network config required if on different subnets.|🔵 Minor|☑ Yes|Architectural decision logged — Jetson = compute, Windows PC = GSPro host|2026-03-14|
 |5|SP1|LiDAR excluded from v1. Camera-only trigger may log a topped/missed shot as a real shot in rare cases.|🔵 Minor|☑ Yes|Accepted for v1. LiDAR ball-launch confirmation planned for v2 second Jetson build.|2026-03-14|
 |6|SP1|pitrac_lm binary is not yet tested with real cameras — all camera functions return stub false values until Group 2 runtime implementations are complete|🟡 Annoying|☑ Yes|Expected — cameras not yet arrived. Will implement V4L2 capture, GPIO strobe when OV9281 cameras arrive|2026-03-19|
-|7|SP4|OpenShotGolf requires Godot 4.6 .NET + .NET SDK 8.0 + C# solution build on Windows. PhysicsLogger autoload fails until C# is compiled.|🔵 Minor|☑ Yes|Build C# solution in Godot before first run. One-time setup.|2026-03-21|
+|7|SP4|OpenShotGolf requires Godot 4.6 .NET + .NET SDK 8.0 + C# build. PhysicsLogger autoload fails until C# compiled.|🔵 Minor|☑ Yes|One-time: build C# solution in Godot before first run|2026-03-21|
+|8|SP4|OpenShotGolf returns 501 for heartbeat messages (expects shot data only)|🔵 Minor|☑ Yes|Harmless — heartbeat is optional in protocol, does not affect shot sending|2026-03-21|
+|9|SP4|Python 3.8 on JetPack 5.1.6 does not support dict|None syntax (requires 3.10+)|🔵 Minor|☑ Yes|Use typing.Optional[dict] instead. All scripts updated.|2026-03-21|
+|10|SP4|pip3 on JetPack 5.1.6 does not support --break-system-packages flag|🔵 Minor|☑ Yes|Use pip3 install without the flag — works fine on this version|2026-03-21|
 
 \---
 
@@ -599,7 +607,7 @@ After a shot, the system outputs club head speed, club face angle (open/closed a
 |-|-|
 |Type|☑ Software|
 |Phase|Build|
-|% Complete|10%|
+|% Complete|35%|
 |Status|🟡 In Progress|
 |Depends On|SP1 (minimum to start), SP2 + SP3 for full data|
 |Started|2026-03-14|
@@ -640,14 +648,14 @@ JSON shot data fields available:
 |2026-03-14|GSPro runs on separate Windows PC, Jetson sends over TCP|GSPro is Windows-only. Jetson is the compute unit, not the simulator.|Run simulation on Jetson (not possible — GSPro is Windows only)|
 |2026-03-14|Session data stored in SQLite on Jetson|Simple, file-based, no server required, easy to back up|PostgreSQL (overkill), cloud DB (unnecessary complexity for v1)|
 |2026-03-14|Stats dashboard as local web app|Accessible from phone/tablet without installing anything. Works on local WiFi only.|Native app (too much development overhead for v1)|
-| 2026-03-21 | OpenShotGolf as free test target instead of GSPro | Free, open source, built for PiTrac, accepts identical GSPro Open Connect v1 JSON on TCP. Saves €230/year during development. Visual ball flight confirmation on 3D driving range. | GSPro ($250/yr — unnecessary before cameras work), Mock server (no visual feedback) |
-| 2026-03-21 | Default port 49152 (OpenShotGolf), --port 921 for GSPro | Both use GSPro Open Connect v1 protocol. Only the port differs. Sender script works with both targets. | Hardcode 921 (can't test without GSPro license) |
-| 2026-03-21 | DeviceID: "Jetson LM 1.0" | Unique identifier for our launch monitor in the GSPro Open Connect protocol | Any string works, this is descriptive |
-| 2026-03-21 | Dummy shot values based on 7-iron template with random variation | Realistic test data (~132 mph ball speed, 18° VLA, ~3200 RPM spin). Each shot varies ±8% so balls land in different spots. | Random values (less realistic, harder to validate visually) |
-| 2026-03-21 | Interactive + --once modes in sender | Interactive for manual testing, --once for future C++ pipeline integration | Interactive only (less flexible for automation) |
-| 2026-03-21 | SQLite with 4 tables: players, courses, sessions, shots | All ball/club data stored as individual columns (not JSON blob) for direct SQL queries like "avg 7I carry". Courses table supports both range and course play. Sessions link player to course with timestamps. | Single shots table (no session tracking), JSON blob storage (harder to query) |
-| 2026-03-21 | Database auto-created on first run, seeded with two default courses | Zero-config experience — just run the sender and it works. OpenShotGolf Driving Range and GSPro Driving Range pre-populated. | Manual setup required (worse UX) |
-| 2026-03-21 | --no-db flag to disable logging | Allows quick testing without database overhead. Also gracefully degrades if shot_db.py is missing. | Always require DB (inflexible) |
+| 2026-03-21 | OpenShotGolf as free test target instead of GSPro | Free, open source, built for PiTrac, accepts identical GSPro Open Connect v1 JSON on TCP port 49152. Visual ball flight on 3D driving range. Saves €230/year during development. | GSPro ($250/yr — unnecessary before cameras), Mock server (no visual feedback), Awesome Golf (no open API), E6 Connect (proprietary protocol) |
+| 2026-03-21 | Default port 49152 (OpenShotGolf), --port 921 for GSPro | Both use identical GSPro Open Connect v1 JSON protocol. Only port differs. All scripts support both. | Hardcode 921 (can't test without GSPro license) |
+| 2026-03-21 | DeviceID: "Jetson LM 1.0" | Unique identifier for our launch monitor in the GSPro Open Connect protocol | Any string works |
+| 2026-03-21 | Dummy shot templates: 7-iron, driver, pitching-wedge with ±8% random variation | Realistic test data easier to validate visually. Variation prevents identical shots. | Random values (less realistic) |
+| 2026-03-21 | SQLite with 4 tables: players, courses, sessions, shots | All ball/club data as individual columns for direct SQL queries. Courses table supports range + course play. Sessions link player to course. DB auto-creates on first run with seeded data. | JSON blob storage (harder to query), PostgreSQL (overkill) |
+| 2026-03-21 | Unix domain socket for C++ → Python interface | Real-time, clean, bidirectional. C++ sends JSON, Python responds with status + shot_id. Socket path: /tmp/jetson_lm.sock | JSON file drop (simpler but latent), Named pipe (fragile) |
+| 2026-03-21 | Flask for stats dashboard | Lightweight, stdlib-friendly, serves on local WiFi. Single-file app with embedded HTML/JS. Chart.js for dispersion plot. | FastAPI (more complex), static HTML (no live data) |
+| 2026-03-21 | Player dropdown in dashboard for multi-player support | All API routes accept optional player_id filter. Dropdown switches all views instantly. | Single player only (insufficient for shared use) |
 
 \---
 
@@ -656,24 +664,27 @@ JSON shot data fields available:
 |Date|What Was Tested|Method|Result|Notes|
 |-|-|-|-|-|
 | 2026-03-21 | TCP connection Jetson → Windows OpenShotGolf port 49152 | gspro_sender.py --ip 192.168.178.20 | ✅ PASS | First end-to-end connectivity test |
-| 2026-03-21 | Dummy 7-iron shot → ball flight visible in OpenShotGolf | Visual confirmation on Windows screen | ✅ PASS | Ball launched with correct trajectory, telemetry displayed (distance, spin, angles) |
-| 2026-03-21 | Shot data values match between sender and receiver | Compared Jetson terminal output with OpenShotGolf HUD | ✅ PASS | Speed, SpinAxis, HLA all matched on both sides |
-| 2026-03-21 | SQLite database creation and schema | Automatic on first run of gspro_sender.py | ✅ PASS | jetson_lm.db created with all 4 tables, 2 default courses seeded |
-| 2026-03-21 | Shot logging during live session | 6 shots sent to OpenShotGolf, all logged to DB | ✅ PASS | Player "Max" created, session started/ended, all shots recorded with ball data |
-| 2026-03-21 | Session summary on exit | Quit with 'q' after 6 shots | ✅ PASS | Showed avg 134.3, min 122.9, max 141.3 mph ball speed |
-| 2026-03-21 | SQL query on logged data | sqlite3 jetson_lm.db "SELECT * FROM shots;" | ✅ PASS | All 6 shots retrievable with full ball data fields |
+| 2026-03-21 | Dummy 7-iron shot → ball flight visible in OpenShotGolf | Visual on Windows screen | ✅ PASS | Ball launched with correct trajectory and telemetry |
+| 2026-03-21 | Shot data values match sender and receiver | Compared terminal output with OpenShotGolf HUD | ✅ PASS | Speed, SpinAxis, HLA all matched |
+| 2026-03-21 | SQLite DB creation and schema | Auto on first run | ✅ PASS | 4 tables created, 2 courses seeded |
+| 2026-03-21 | Shot logging during live session | 6+ shots logged | ✅ PASS | Player, session, shots all recorded correctly |
+| 2026-03-21 | Session summary on exit | Quit with 'q' | ✅ PASS | Avg/min/max ball speed displayed |
+| 2026-03-21 | Flask dashboard — all 4 tabs | Browser on Jetson LAN | ✅ PASS | Home, Sessions, Club Averages, Dispersion all working |
+| 2026-03-21 | Dashboard player switching | Dropdown with multiple players | ✅ PASS | All views filter correctly per player |
+| 2026-03-21 | Unix socket: shot_receiver.py + test_client.py | Two terminals on Jetson | ✅ PASS | Full chain: test_client → Unix socket → receiver → TCP → OpenShotGolf + DB |
+| 2026-03-21 | Ctrl+C clean shutdown of receiver | Signal handling | ✅ PASS | Session ended cleanly, DB closed, socket removed |
 
 \---
 
 ### ✅ Next Steps
 
-* ☐ Test multiple sessions — verify session IDs increment and data stays separate
-* ☐ Test --club driver and --club pitching-wedge with DB logging — verify club codes (DR, PW) stored correctly
-* ☐ Test get_club_averages() and get_player_summary() queries with real logged data
-* ☐ Design the local socket interface between pitrac_lm (C++) and gspro_sender.py
-* ☐ Begin Flask/FastAPI stats dashboard skeleton (reads from jetson_lm.db)
-* ☐ Add more courses to DB as GSPro courses are played
-* ☐ Buy GSPro (Open API license) when cameras arrive and real shots need visual validation
+* ☐ Test burst mode: python3 test_client.py --burst 20 — verify stability under rapid fire
+* ☐ Test all club codes (DR, 7I, PW, 5I, SW) through the full receiver chain
+* ☐ Run dashboard + receiver + test_client simultaneously — verify live data appears
+* ☐ Integrate shot_sender.h into pitrac_lm C++ codebase (when cameras arrive)
+* ☐ Add more GSPro courses to DB as they are played
+* ☐ Dashboard improvements: session comparison, shot trail visualization, export CSV
+* ☐ Buy GSPro (Open API license) when cameras arrive and real shots need course play
 
 \---
 
@@ -684,30 +695,39 @@ JSON shot data fields available:
 > Architecture designed at high level. Depends on SP1 for real data.
 > Can prototype the GSPro TCP sender with dummy data independently of vision work.
 
-**2026-03-21**
-> SP4 moved from Design to Build. First successful end-to-end test completed.
-> Created gspro_sender.py on Jetson (Python 3 stdlib only, Python 3.8 compatible).
-> Test target: OpenShotGolf on Windows PC — free open-source golf simulator built
-> for PiTrac, accepts GSPro Open Connect v1 JSON on TCP port 49152.
-> Full test chain: Jetson Xavier NX → TCP/49152 → Windows 11 PC → OpenShotGolf →
-> 3D ball flight visible on driving range with full telemetry (distance, spin, angles).
-> Fixed Python 3.8 compatibility issue (dict | None → Optional[dict]).
-> OpenShotGolf required building C# solution in Godot 4.6 .NET (PhysicsLogger autoload
-> depends on compiled C# classes).
-> Sender supports interactive mode, --once flag, and three club templates
-> (7-iron, driver, pitching-wedge) with ±8% random variation per shot.
-> GSPro purchase deferred — switching later requires only --port 921.
-> Next: test stability with multiple shots, then design SQLite schema.
+**2026-03-21 — Major SP4 build session**
+> SP4 moved from 0% to ~35% in one session. Built the complete software stack:
 >
-> Second part of session: SQLite database designed and integrated into sender.
-> Schema: 4 tables (players, courses, sessions, shots) with individual columns for
-> all BallData and ClubData fields. Database auto-creates on first run with two
-> seeded courses (OpenShotGolf Driving Range, GSPro Driving Range).
-> Tested with 6 live shots: Player "Max" created (ID 1), session started/ended
-> cleanly, all shots logged with full ball data. Session summary shows
-> avg/min/max ball speed on exit.
-> New CLI args: --player "Name", --no-db for testing without logging.
-> Files: shot_db.py (DB module) + updated gspro_sender.py (with integrated logging).
+> 1. TCP Sender (gspro_sender.py): Sends GSPro Open Connect v1 JSON to simulator.
+>    Three club templates (7I, DR, PW) with random variation. Interactive + --once modes.
+>    Fixed Python 3.8 compat (dict|None → Optional[dict]).
+>
+> 2. OpenShotGolf: Free open-source simulator as GSPro stand-in. Built for PiTrac,
+>    identical JSON protocol on TCP port 49152. Required Godot 4.6 .NET + C# solution
+>    build (PhysicsLogger autoload depends on compiled C# classes). Investigated
+>    Awesome Golf (no open API) and E6 Connect (proprietary protocol) — neither usable.
+>
+> 3. SQLite Database (shot_db.py): 4 tables — players, courses, sessions, shots.
+>    All ball/club data as individual columns. Auto-creates DB on first run with
+>    seeded courses. check_same_thread=False for Flask compatibility.
+>
+> 4. Flask Dashboard (dashboard.py): 4 tabs — Home (summary stats), Sessions
+>    (list + detail view), Club Averages (per-club table), Dispersion (Chart.js
+>    scatter plot). Player dropdown for multi-player filtering. Dark theme,
+>    mobile-friendly, accessible on local WiFi at http://<jetson-ip>:5000.
+>
+> 5. Unix Socket Interface: shot_receiver.py as persistent service.
+>    Receives shots from C++ pipeline via /tmp/jetson_lm.sock, forwards to
+>    simulator over TCP, logs to SQLite. test_client.py simulates pitrac_lm
+>    for testing. shot_sender.h ready to drop into C++ codebase.
+>    Accept timeout (1s) for clean Ctrl+C shutdown.
+>
+> Architecture proven end-to-end:
+> pitrac_lm (C++) → Unix Socket → shot_receiver.py → TCP/49152 → OpenShotGolf
+>                                       ↓
+>                                   SQLite DB → dashboard.py (Flask)
+>
+> GSPro purchase deferred — switching requires only --port 921.
 
 \---
 
