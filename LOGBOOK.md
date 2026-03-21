@@ -133,6 +133,8 @@
 16. SP4: Windows firewall rule TCP 49152 for OpenShotGolf
 17. SP4: systemd services installed via setup_services.sh — auto-start on boot
 18. SP4: Dashboard auto-refreshes every 5 seconds when new shots arrive
+19. SP1: camera_test.py in ~/JetsonLM/sp1_vision/ — camera detection tool, ready for OV9281 arrival
+20. SP1: v4l-utils to be installed: sudo apt install v4l-utils
 
 Next step: run meson setup -Djetson_build=true on Jetson to find remaining errors
 ```
@@ -342,6 +344,7 @@ PiTrac's key techniques:
 |2026-03-16|JetsonCompletedRequest struct replaces CompletedRequestPtr|libcamera::CompletedRequest does not exist on Jetson. New struct holds cv::Mat frame, sequence, framerate, post_process_metadata map|Pass cv::Mat directly (loses metadata bag needed by MotionDetectStage)|
 |2026-03-16|Strobe is SPI not simple GPIO|PiTrac analysis revealed strobe uses lgSpiWrite — pre-built pulse train over SPI MOSI wired to IR LED driver. Simple GPIO toggle will not work.|GPIO toggle (insufficient timing precision for multi-pulse strobe train)|
 |2026-03-16|Dev workflow: laptop Claude Code → GitHub → Jetson compile|Cannot compile on laptop (x86 vs ARM64). Laptop used for code editing with Claude Code, Jetson for compile and test.|Edit directly on Jetson (slower, no Claude Code integration)|
+|2026-03-21|V3 long-term goal: standalone simulator system in single enclosure|Jetson renders OpenShotGolf directly via HDMI to projector/screen, no gaming PC needed. Requires Godot ARM64 Linux build and C#→GDScript port of physics. Not started — goal after V1 and V2 are working.|Always require Windows PC (limits portability)|
 
 \---
 
@@ -382,6 +385,11 @@ PiTrac's key techniques:
 
 ### ✅ Next Steps
 
+* \[ ] When OV9281 cameras arrive: plug into USB3, run python3 camera_test.py in ~/JetsonLM/sp1_vision/
+* \[ ] Verify V4L2 device detection: both cameras show as /dev/video0 and /dev/video1
+* \[ ] Capture test frames: python3 camera_test.py --capture — verify monochrome output
+* \[ ] Test live preview: python3 camera_test.py --monitor 0 — verify FPS meets expectations
+* \[ ] Prerequisite installed: sudo apt install v4l-utils (do this now before cameras arrive)
 * \[ ] Confirm Boost 1.74.0 built and installed correctly: pkg-config --modversion boost
 * \[ ] Re-run: meson setup build_jetson -Djetson_build=true --wipe && ninja -C build_jetson
 * \[x] Complete Group 3 stubs (7 no-op functions) — SetLibCameraLoggingOff, ConfigurePostProcessing pipeline half, ConfigureLibCameraOptions, WatchForHitAndTrigger, SetLibcameraTuningFileEnvVariable, kGatherClubData=false, kUsePreImageSubtraction=false
@@ -451,6 +459,12 @@ PiTrac's key techniques:
 > Final fixes: E6 closed-source object excluded from Jetson build, GsE6Interface call sites guarded.
 > Build environment: JetPack 5.1.6, GCC 10, Boost 1.76 (from source), OpenCV 4.5.4, ONNX Runtime 1.16.3.
 > Next: cameras arrive → connect OV9281 → test V4L2 device detection → first live camera frame.
+
+**2026-03-21**
+> Created camera_test.py in ~/JetsonLM/sp1_vision/ — camera detection and test tool
+> ready for when OV9281 cameras arrive. Detects USB cameras, queries V4L2 capabilities,
+> captures test frames, live preview with FPS counter. Auto-identifies OV9281 and
+> verifies monochrome sensor output.
 
 \---
 
@@ -644,6 +658,9 @@ JSON shot data fields available:
 * Lightweight web server (Flask or FastAPI) serves a stats dashboard on local network
 
 **Player profiles:** Multiple players supported. Club selection communicated from GSPro back to the Jetson via the 2-way Open Connect protocol (GSPro sends club selection events).
+
+**V3 Vision — Standalone Simulator System:**
+Long-term goal: Run OpenShotGolf directly on the Jetson Xavier NX, output via HDMI to projector/screen. No Windows gaming PC required. The entire launch monitor + simulator in one enclosure. Requires: Godot 4.x ARM64 Linux build on Jetson, porting PhysicsLogger and BallPhysics C# code to GDScript, and validating GPU performance for simultaneous vision pipeline + 3D rendering. This is a post-V2 goal — V1 and V2 must work first.
 
 \---
 
