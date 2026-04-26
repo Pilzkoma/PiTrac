@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Core Vision System|HW + SW|Build|70%|🟡 In Progress|2026-03-19|
+|SP1 — Hardware & Build|HW+SW|Build|75%|🟡 In Progress|2026-04-26|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -90,7 +90,8 @@
 |Tool / Software|Version|What It Is Used For|Sub-Projects|Status|
 |-|-|-|-|-|
 |PiTrac (open source)|Latest from github.com/PiTracLM/PiTrac|Core vision pipeline — ball detection, speed, angles, spin. Will be adapted from RPi to Jetson|SP1, SP2|☑ Installed ☐ Configured ☐ In use|
-|OpenCV|TBD (PiTrac dependency)|Computer vision — circle detection, strobe frame analysis, spin calculation|SP1, SP2, SP3|☐ Installed ☐ Configured ☐ In use|
+|OpenCV|4.5.4 (no CUDA)|Camera capture and image processing|SP1|☑ Installed ☑ Configured ☑ In use|
+|v4l-utils|System|V4L2 camera detection and configuration|SP1|☑ Installed ☑ Configured ☑ In use|
 |GSPro Open Connect API|v1|Shot JSON protocol over TCP|SP4|☑ Installed ☑ Configured ☑ In use|
 |Python|3.8 (Jetson)|Sender, receiver, DB, physics, dashboard|SP4|☑ Installed ☑ Configured ☑ In use|
 |OpenShotGolf|Latest (Godot 4.6)|Free GSPro-compatible driving range for testing|SP4|☑ Installed ☑ Configured ☑ In use|
@@ -112,7 +113,7 @@
 
 > Fill in after first successful Jetson build.
 
-**Last verified working on:** *14.03.2026*
+**Last verified working on:** *26.04.2026*
 
 ```
 1. JetPack 5.1.6 (L4T 35.6.4) confirmed installed — do not reflash
@@ -133,10 +134,15 @@
 16. SP4: Windows firewall rule TCP 49152 for OpenShotGolf
 17. SP4: systemd services installed via setup_services.sh — auto-start on boot
 18. SP4: Dashboard auto-refreshes every 5 seconds when new shots arrive
-19. SP1: camera_test.py in ~/JetsonLM/sp1_vision/ — camera detection tool, ready for OV9281 arrival
-20. SP1: v4l-utils to be installed: sudo apt install v4l-utils
+19. SP1: camera_test.py in ~/JetsonLM/sp1_vision/ — camera detection and test tool
+20. SP1: v4l-utils installed (sudo apt install v4l-utils)
+21. SP1: OV9281 Camera 1 → /dev/video0 (USB bus xhci-2.2.4)
+22. SP1: OV9281 Camera 2 → /dev/video2 (USB bus xhci-2.3)
+23. SP1: /dev/video1 and /dev/video3 are metadata devices — ignore
+24. SP1: dual_camera_test.py in sp1_vision/ — sustained-FPS dual capture test (committed to repo)
+25. SP1: v4l2-ctl --stream-mmap is the canonical way to validate raw camera throughput, bypassing OpenCV decode
 
-Next step: run meson setup -Djetson_build=true on Jetson to find remaining errors
+Next step: implement real V4L2 capture in Software/LMSourceCode/ImageProcessing/v4l2_interface.cpp (currently 5 stub functions)
 ```
 
 \---
@@ -157,6 +163,10 @@ Next step: run meson setup -Djetson_build=true on Jetson to find remaining error
 |10|SP4|pip3 on JetPack 5.1.6 doesn't support --break-system-packages|🔵 Minor|☑ Yes|Use pip3 install without the flag|2026-03-21|
 |11|SP4|Receiver shows "Simulator connection lost: timed out" when OpenShotGolf is not running|🔵 Minor|☑ Yes|By design — receiver auto-reconnects and logs to DB regardless. Shots are never lost.|2026-03-21|
 |12|SP4|Carry distance is physics-estimated, not from simulator|🔵 Minor|☑ Yes|GSPro Open Connect v1 protocol does not return carry data. Physics engine uses same aerodynamic model as OpenShotGolf. Accurate enough for training analysis.|2026-03-21|
+|13|SP1|OpenCV 4.5.4 on JetPack has no CUDA support. May need CUDA-enabled build for GPU-accelerated frame processing.|🟡 Medium|☑ Yes|PiTrac may include its own OpenCV build with CUDA. Check before rebuilding system OpenCV.|2026-03-21|
+|14|SP1|OpenCV defaults to YUYV format (10 FPS). Must explicitly set MJPG fourcc for 120 FPS from OV9281.|🔵 Minor|☑ Yes|Set cv2.CAP_PROP_FOURCC to cv2.VideoWriter_fourcc('M','J','P','G') in capture code|2026-03-21|
+|15|SP1|OpenCV cv2.VideoCapture.read() caps Python at ~60 FPS per camera even with MJPG fourcc set. CPU-bound JPEG decode + BGR conversion is the bottleneck — not USB, not the camera. Raw v4l2-ctl streaming hits the full 120 FPS on both cameras simultaneously.|🔵 Minor|☑ Yes|Not a blocker — C++ v4l2_interface.cpp will use V4L2 ioctl directly + libjpeg-turbo or nvJPEG (Jetson hardware decoder), bypassing OpenCV's VideoCapture. Python test scripts accept the cap.|2026-04-26|
+|16|SP1|UVC auto-exposure (exposure_auto=3) silently caps frame rate when integration time exceeds the frame interval. At default exposure_absolute=157 (15.7ms), max achievable is ~64 FPS regardless of requested rate.|🔵 Minor|☑ Yes|Irrelevant for production: IR strobe is the effective shutter (10–15µs pulse), camera exposure stays open. For bench testing without strobe, set exposure_auto=1 + low exposure_absolute via v4l2-ctl.|2026-04-26|
 
 \---
 
@@ -281,11 +291,11 @@ IMPORTANT RULES FOR THIS CHAT:
 |-|-|
 |Type|☑ Hardware ☑ Software|
 |Phase|Build|
-|% Complete|70%|
+|% Complete|75%|
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
-|Last Updated|2026-03-19|
+|Last Updated|2026-04-26|
 
 \---
 
@@ -345,6 +355,11 @@ PiTrac's key techniques:
 |2026-03-16|Strobe is SPI not simple GPIO|PiTrac analysis revealed strobe uses lgSpiWrite — pre-built pulse train over SPI MOSI wired to IR LED driver. Simple GPIO toggle will not work.|GPIO toggle (insufficient timing precision for multi-pulse strobe train)|
 |2026-03-16|Dev workflow: laptop Claude Code → GitHub → Jetson compile|Cannot compile on laptop (x86 vs ARM64). Laptop used for code editing with Claude Code, Jetson for compile and test.|Edit directly on Jetson (slower, no Claude Code integration)|
 |2026-03-21|V3 long-term goal: standalone simulator system in single enclosure|Jetson renders OpenShotGolf directly via HDMI to projector/screen, no gaming PC needed. Requires Godot ARM64 Linux build and C#→GDScript port of physics. Not started — goal after V1 and V2 are working.|Always require Windows PC (limits portability)|
+|2026-03-21|OV9281 USB cameras use /dev/video0 and /dev/video2 (video1 and video3 are UVC metadata devices)|Each USB camera creates two /dev/video devices. Only even-numbered devices (0, 2) are capture devices. Odd-numbered (1, 3) are metadata — no formats, can't be opened.|N/A — UVC standard behavior|
+|2026-03-21|Cameras on separate USB buses (xhci-2.2.4 and xhci-2.3)|No bandwidth conflict — both can stream 1280x800 @ 120 FPS simultaneously.|Same bus (would halve available bandwidth)|
+|2026-03-21|MJPG format for 120 FPS, YUYV limited to 10 FPS|OpenCV defaults to YUYV (10 FPS). PiTrac pipeline must explicitly request MJPG fourcc for 120 FPS.|YUYV at 10 FPS (too slow for ball tracking)|
+|2026-04-26|Both OV9281 cameras verified at sustained 120 FPS @ 1280x800 MJPG, in parallel|v4l2-ctl raw streaming hits 120 FPS on each camera and on both simultaneously. Confirms the kernel/USB/camera path is not a bottleneck. Separate USB buses (xhci-2.2.4 / xhci-2.3) eliminate bandwidth contention.|None — this was a verification milestone|
+|2026-04-26|C++ v4l2_interface.cpp will bypass OpenCV VideoCapture, use V4L2 ioctl directly|OpenCV's cap.read() caps Python at ~60 FPS due to CPU-bound MJPG decode. The C++ port must talk to V4L2 directly (open/ioctl/mmap) and decode with libjpeg-turbo or nvJPEG, not via cv::VideoCapture which inherits the same decode bottleneck.|cv::VideoCapture (rejected — same decode bottleneck), GStreamer pipeline (more complex, defer to later optimization)|
 
 \---
 
@@ -377,29 +392,29 @@ PiTrac's key techniques:
 
 ### 🧪 Tests This Sub-Project
 
-|Date|What Was Tested|Result|Notes|
-|-|-|-|-|
-|—|—|—|—|
+|Date|What Was Tested|Method|Result|Notes|
+|-|-|-|-|-|
+|2026-03-21|OV9281 Camera 1 detected via V4L2|camera_test.py auto-detect|✅ PASS|/dev/video0, Arducam OV9281, uvcvideo driver, 1280x800 @ 120fps MJPG|
+|2026-03-21|OV9281 Camera 2 detected via V4L2|camera_test.py auto-detect|✅ PASS|/dev/video2, Arducam OV9281, uvcvideo driver, 1280x800 @ 120fps MJPG|
+|2026-03-21|Test frame capture Camera 1|camera_test.py --capture --device 0|✅ PASS|1280x800 PNG saved, valid image data|
+|2026-03-21|Test frame capture Camera 2|camera_test.py --capture --device 2|✅ PASS|1280x800 PNG saved, valid image data|
+|2026-04-26|Single camera sustained 120 FPS @ 1280x800 MJPG (raw V4L2)|v4l2-ctl --stream-mmap --stream-count=600 --stream-to=/dev/null on /dev/video0 and /dev/video2|✅ PASS|Both cameras: 111→116→120→120→120 FPS (1s warm-up then locked at 120)|
+|2026-04-26|Dual camera parallel sustained 120 FPS @ 1280x800 MJPG (raw V4L2)|Both v4l2-ctl streams running simultaneously via shell &|✅ PASS|Both cameras: 111→116→120→120→120 FPS each — no degradation from parallel streaming, separate USB buses confirmed independent|
+|2026-04-26|Dual camera OpenCV cv2.VideoCapture.read() throughput|sp1_vision/dual_camera_test.py (with and without --exposure)|⚠ PARTIAL|Both cameras cap at ~55–60 FPS regardless of exposure setting. Confirmed via v4l2-ctl that this is a Python/OpenCV decode bottleneck, NOT a camera/USB limitation. Acceptable — production C++ pipeline will not use cv::VideoCapture. Issue #15 logged.|
 
 \---
 
 ### ✅ Next Steps
 
-* \[ ] When OV9281 cameras arrive: plug into USB3, run python3 camera_test.py in ~/JetsonLM/sp1_vision/
-* \[ ] Verify V4L2 device detection: both cameras show as /dev/video0 and /dev/video1
-* \[ ] Capture test frames: python3 camera_test.py --capture — verify monochrome output
-* \[ ] Test live preview: python3 camera_test.py --monitor 0 — verify FPS meets expectations
-* \[ ] Prerequisite installed: sudo apt install v4l-utils (do this now before cameras arrive)
-* \[ ] Confirm Boost 1.74.0 built and installed correctly: pkg-config --modversion boost
-* \[ ] Re-run: meson setup build_jetson -Djetson_build=true --wipe && ninja -C build_jetson
-* \[x] Complete Group 3 stubs (7 no-op functions) — SetLibCameraLoggingOff, ConfigurePostProcessing pipeline half, ConfigureLibCameraOptions, WatchForHitAndTrigger, SetLibcameraTuningFileEnvVariable, kGatherClubData=false, kUsePreImageSubtraction=false
-* \[ ] Clone repo on Jetson: git clone https://github.com/Pilzkoma/PiTrac.git ~/JetsonLM
-* \[ ] Install apt dependencies on Jetson: meson ninja-build libboost-all-dev libmsgpack-dev default-jdk maven v4l-utils libv4l-dev libgpiod-dev
-* \[ ] Build ActiveMQ-CPP 3.9.5 from source on Jetson
-* \[ ] Run: meson setup build_jetson -Djetson_build=true --wipe — paste output
-* \[ ] Fix any meson configure errors
-* \[ ] Begin Group 2 runtime implementations once cameras arrive
-* \[ ] Order IR LED array 850nm ~10W (e.g. Chanzon) — not yet ordered
+* ☑ OV9281 cameras arrived and detected on Jetson
+* ☑ Test frames captured from both cameras
+* ☑ Sustained 120 FPS @ 1280x800 MJPG verified on both cameras simultaneously (via v4l2-ctl raw stream)
+* ☑ OpenCV cv2.VideoCapture decode benchmarked — caps at ~60 FPS due to CPU MJPG decode (Issue #15, not a blocker for C++ pipeline)
+* ☐ Implement real V4L2 capture in Software/LMSourceCode/ImageProcessing/v4l2_interface.cpp — replace 5 stub functions with V4L2 ioctl + libjpeg-turbo (or nvJPEG) decode
+* ☐ Mount cameras in enclosure at correct angles for stereo ball tracking
+* ☐ Configure PiTrac pitrac_lm to use /dev/video0 and /dev/video2
+* ☐ Run PiTrac calibration procedure with both cameras
+* ☐ First ball detection test with live camera feed
 
 \---
 
@@ -465,6 +480,37 @@ PiTrac's key techniques:
 > ready for when OV9281 cameras arrive. Detects USB cameras, queries V4L2 capabilities,
 > captures test frames, live preview with FPS counter. Auto-identifies OV9281 and
 > verifies monochrome sensor output.
+
+**2026-03-21**
+> OV9281 cameras arrived and tested. Both cameras detected immediately via V4L2
+> (uvcvideo driver). Device mapping: /dev/video0 (bus xhci-2.2.4) and /dev/video2
+> (bus xhci-2.3). /dev/video1 and /dev/video3 are UVC metadata devices (no formats).
+> Test frames captured successfully from both cameras at 1280x800.
+> OpenCV defaults to YUYV (10 FPS) — PiTrac pipeline must request MJPG for 120 FPS.
+> CUDA not enabled in system OpenCV 4.5.4 — may need to rebuild with CUDA for
+> GPU-accelerated processing, or use PiTrac's own OpenCV build.
+> camera_test.py tool created in ~/JetsonLM/sp1_vision/ for future camera validation.
+
+**2026-04-26**
+> Verified sustained 120 FPS dual-camera capture at the kernel/USB level.
+> Wrote sp1_vision/dual_camera_test.py (with optional --exposure flag for
+> manual exposure control via v4l2-ctl). OpenCV cv2.VideoCapture caps at
+> ~55-60 FPS per camera regardless of exposure setting — diagnosed as
+> CPU-bound MJPG decode in cap.read(), not a camera or USB limitation.
+> Confirmed via v4l2-ctl --stream-mmap that both cameras independently
+> sustain the full 120 FPS @ 1280x800 MJPG even when streaming in parallel
+> (separate USB buses, no bandwidth contention). Issues #15 and #16 logged.
+>
+> Conclusion: camera infrastructure is production-ready. The Python test
+> harness's decode bottleneck is irrelevant — the C++ port of v4l2_interface.cpp
+> will use V4L2 ioctl directly (open/mmap/dequeue) and decode with
+> libjpeg-turbo or nvJPEG, both faster than OpenCV's generic decode path.
+>
+> Next session: design and implement the 5 real V4L2 capture functions
+> in Software/LMSourceCode/ImageProcessing/v4l2_interface.cpp (currently
+> all stubs from Group 3 of PORTING_TASKS.md). This is the work that
+> unblocks calibration, ball detection, and connecting real shots to
+> the SP4 GSPro/SQLite pipeline.
 
 \---
 
@@ -660,7 +706,11 @@ JSON shot data fields available:
 **Player profiles:** Multiple players supported. Club selection communicated from GSPro back to the Jetson via the 2-way Open Connect protocol (GSPro sends club selection events).
 
 **V3 Vision — Standalone Simulator System:**
-Long-term goal: Run OpenShotGolf directly on the Jetson Xavier NX, output via HDMI to projector/screen. No Windows gaming PC required. The entire launch monitor + simulator in one enclosure. Requires: Godot 4.x ARM64 Linux build on Jetson, porting PhysicsLogger and BallPhysics C# code to GDScript, and validating GPU performance for simultaneous vision pipeline + 3D rendering. This is a post-V2 goal — V1 and V2 must work first.
+Long-term goal: Run OpenShotGolf directly on the Jetson Xavier NX, output via HDMI
+to projector/screen. No Windows gaming PC required — entire launch monitor + simulator
+in one enclosure. Requires: Godot 4.x ARM64 Linux build, porting PhysicsLogger and
+BallPhysics C# to GDScript, validating GPU can handle simultaneous vision pipeline +
+3D rendering. Post-V2 goal — V1 and V2 must work first.
 
 \---
 
