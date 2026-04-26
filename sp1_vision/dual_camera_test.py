@@ -6,13 +6,22 @@ Confirms both USB cameras sustain 120 FPS at 1280x800 MJPG in parallel.
 Cameras sit on separate USB buses (xhci-2.2.4 and xhci-2.3) so no shared
 USB3 bandwidth conflict is expected — this test proves it.
 
+By default runs with auto-exposure (will be capped by integration time
+in normal room light). Use --exposure N to force manual exposure to
+N * 100µs — required to validate 120 FPS, since the real pipeline
+uses a sub-millisecond IR strobe as the effective shutter.
+
 Run on Jetson:
-    python3 sp1_vision/dual_camera_test.py
+    python3 sp1_vision/dual_camera_test.py                # auto exposure
+    python3 sp1_vision/dual_camera_test.py --exposure 10  # 1 ms manual exposure
 """
 
+import argparse
+import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 import cv2
 
@@ -40,6 +49,29 @@ class CameraResult:
 def fourcc_to_str(code: float) -> str:
     code = int(code)
     return "".join(chr((code >> (8 * i)) & 0xFF) for i in range(4))
+
+
+def set_exposure(device: int, exposure_units: Optional[int]) -> None:
+    """Set V4L2 exposure controls before OpenCV opens the device.
+
+    exposure_units=None → restore auto-exposure (exposure_auto=3).
+    exposure_units=N    → manual mode (exposure_auto=1) with exposure_absolute=N
+                          (units of 100µs).
+    Done via v4l2-ctl subprocess because OpenCV's CAP_PROP_AUTO_EXPOSURE
+    semantics vary across versions and are unreliable on V4L2 backend.
+    """
+    dev = f"/dev/video{device}"
+    if exposure_units is None:
+        ctrl = "exposure_auto=3"
+    else:
+        ctrl = f"exposure_auto=1,exposure_absolute={exposure_units}"
+    try:
+        subprocess.run(
+            ["v4l2-ctl", f"--device={dev}", f"--set-ctrl={ctrl}"],
+            check=True, capture_output=True, text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"WARNING: failed to set exposure on {dev}: {e}")
 
 
 def capture_worker(device: int, duration_s: float,
@@ -85,6 +117,21 @@ def capture_worker(device: int, duration_s: float,
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--exposure", type=int, default=None, metavar="N",
+        help="Manual exposure in units of 100µs (e.g. 10 = 1ms). "
+             "If omitted, auto-exposure is used.",
+    )
+    args = parser.parse_args()
+
+    if args.exposure is not None:
+        for d in DEVICES:
+            set_exposure(d, args.exposure)
+        exposure_desc = f"manual {args.exposure} ({args.exposure * 100}µs)"
+    else:
+        exposure_desc = "auto"
+
     results = [CameraResult(device=d) for d in DEVICES]
     barrier = threading.Barrier(len(DEVICES))
     threads = [
@@ -95,13 +142,18 @@ def main():
 
     print(f"Dual-camera test: {len(DEVICES)} cameras, "
           f"target {TARGET_FPS} FPS @ {TARGET_W}x{TARGET_H} MJPG, "
-          f"duration {DURATION_S}s")
+          f"duration {DURATION_S}s, exposure={exposure_desc}")
     print("Starting capture in parallel...")
 
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        if args.exposure is not None:
+            for d in DEVICES:
+                set_exposure(d, None)
 
     print()
     print("=" * 70)
