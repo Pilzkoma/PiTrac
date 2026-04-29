@@ -546,9 +546,40 @@ namespace golf_sim {
     // until Group 2 camera work is complete.
     // -----------------------------------------------------------------------
 
-    bool TakeRawPicture(const GolfSimCamera& /*camera*/, cv::Mat& /*img*/) {
-        // JETSON_STUB
-        return false;
+    bool TakeRawPicture(const GolfSimCamera& camera, cv::Mat& img) {
+        const GsCameraNumber camera_number = camera.camera_hardware_.camera_number_;
+        const int slot = (camera_number == GsCameraNumber::kGsCamera1) ? 0 : 1;
+
+        JetsonCaptureApp* app = LibCameraInterface::libcamera_app_[slot];
+        if (!app) {
+            GS_LOG_MSG(error, "TakeRawPicture - camera slot " + std::to_string(slot)
+                              + " not initialised; call PerformCameraSystemStartup first");
+            return false;
+        }
+
+        if (!app->cap.isOpened()) {
+            if (!app->cap.open(app->device_path)) {
+                GS_LOG_MSG(error, "TakeRawPicture - failed to open " + app->device_path);
+                return false;
+            }
+            // Apply per-camera config.  Order matters: format/FPS before
+            // EXPOSURE/GAIN so that pending controls land on the
+            // streaming device.
+            app->cap.set(cv::CAP_PROP_FRAME_WIDTH,  static_cast<double>(app->width));
+            app->cap.set(cv::CAP_PROP_FRAME_HEIGHT, static_cast<double>(app->height));
+            app->cap.set(cv::CAP_PROP_FOURCC,
+                         static_cast<double>(V4L2_PIX_FMT_MJPEG));
+            app->cap.set(cv::CAP_PROP_FPS, 120.0);
+            app->cap.set(cv::CAP_PROP_EXPOSURE,
+                         static_cast<double>(app->shutter_time_us));
+            app->cap.set(cv::CAP_PROP_GAIN, app->gain);
+        }
+
+        if (!app->cap.read(img) || img.empty()) {
+            GS_LOG_MSG(error, "TakeRawPicture - cap.read() failed for " + app->device_path);
+            return false;
+        }
+        return true;
     }
 
     bool CheckForBall(GolfBall& /*ball*/, cv::Mat& /*return_image*/) {
