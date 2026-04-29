@@ -35,6 +35,9 @@
 #include <linux/videodev2.h>
 #include <turbojpeg.h>
 
+#include <cerrno>
+#include <cstring>
+
 #include <opencv2/imgproc.hpp>
 
 
@@ -53,8 +56,34 @@ V4L2Capture::~V4L2Capture() {
     release();
 }
 
-bool V4L2Capture::open(const std::string& /*path*/, int /*api_pref*/) {
-    return false;   // implemented in next commit
+bool V4L2Capture::open(const std::string& path, int /*api_pref*/) {
+    if (isOpened()) {
+        release();
+    }
+
+    int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        GS_LOG_MSG(error, "V4L2Capture::open - ::open(\"" + path + "\") failed: "
+                          + std::strerror(errno));
+        return false;
+    }
+
+    v4l2_capability caps{};
+    if (::ioctl(fd, VIDIOC_QUERYCAP, &caps) < 0) {
+        GS_LOG_MSG(error, "V4L2Capture::open - VIDIOC_QUERYCAP failed: "
+                          + std::string(std::strerror(errno)));
+        ::close(fd);
+        return false;
+    }
+    if (!(caps.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
+        GS_LOG_MSG(error, "V4L2Capture::open - device does not advertise VIDEO_CAPTURE: "
+                          + path);
+        ::close(fd);
+        return false;
+    }
+
+    fd_ = fd;
+    return true;
 }
 
 bool V4L2Capture::isOpened() const {
@@ -62,7 +91,31 @@ bool V4L2Capture::isOpened() const {
 }
 
 void V4L2Capture::release() {
-    // implemented in next commit
+    if (streaming_) {
+        v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        ::ioctl(fd_, VIDIOC_STREAMOFF, &type);
+        streaming_ = false;
+    }
+
+    for (auto& b : bufs_) {
+        if (b.start && b.length) {
+            ::munmap(b.start, b.length);
+        }
+    }
+    bufs_.clear();
+
+    if (tj_handle_) {
+        tjDestroy(static_cast<tjhandle>(tj_handle_));
+        tj_handle_ = nullptr;
+    }
+
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+
+    pending_ctrls_.clear();
+    gray_scratch_.release();
 }
 
 bool V4L2Capture::read(cv::Mat& /*out*/) {
