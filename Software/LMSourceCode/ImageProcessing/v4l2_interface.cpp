@@ -149,13 +149,14 @@ bool V4L2Capture::read(cv::Mat& out) {
         return false;
     }
 
-    // Per-instance FPS log: prints once per ~120 frames (≈ once per second
-    // at 120 FPS).  Lets us measure sustained capture rate from the trace
-    // log without depending on any downstream consumer.
+    // Per-instance FPS log: timestamps the first frame, then prints a
+    // running rate every 10 frames so we get useful data from short
+    // ball_watcher loops (which exit on first motion detect, often
+    // within ~1 second).
     ++frame_count_;
     if (frame_count_ == 1) {
         fps_log_start_ = std::chrono::steady_clock::now();
-    } else if (frame_count_ % 120 == 0) {
+    } else if (frame_count_ % 10 == 0) {
         auto now = std::chrono::steady_clock::now();
         const double elapsed_s = std::chrono::duration<double>(now - fps_log_start_).count();
         const double avg_fps   = static_cast<double>(frame_count_) / elapsed_s;
@@ -363,6 +364,12 @@ bool V4L2Capture::ensure_streaming() {
     }
 
     streaming_ = true;
+
+    // Reset per-stream FPS counters so each ensure_streaming session
+    // reports its own rate (rather than accumulated across reopens).
+    frame_count_   = 0;
+    fps_log_start_ = std::chrono::steady_clock::now();
+
     return true;
 }
 
