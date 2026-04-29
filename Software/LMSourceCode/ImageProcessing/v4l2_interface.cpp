@@ -720,6 +720,15 @@ namespace golf_sim {
         if (!probe_v4l2_capture_device(kSlot0Path)) return false;
         if (!probe_v4l2_capture_device(kSlot1Path)) return false;
 
+        // Tell PiTrac's CameraHardware layer to expect OV9281's native
+        // 1280x800 instead of the PiGS-default 1456x1088.  Without this,
+        // the consumer-side resolution check at camera_hardware.cpp:205
+        // rejects every frame our V4L2 engine returns.  This same override
+        // mechanism is used elsewhere (gs_automated_testing.cpp:425,
+        // lm_main.cpp:654) for non-default resolutions.
+        CameraHardware::resolution_x_override_ = 1280;
+        CameraHardware::resolution_y_override_ = 800;
+
         // Replace any previously allocated app pointers (idempotent re-init).
         delete LibCameraInterface::libcamera_app_[0];
         delete LibCameraInterface::libcamera_app_[1];
@@ -732,7 +741,8 @@ namespace golf_sim {
             LibCameraInterface::CameraConfiguration::kExternallyStrobed;
 
         GS_LOG_TRACE_MSG(trace, "PerformCameraSystemStartup - Jetson camera apps allocated for "
-                                + std::string(kSlot0Path) + " and " + std::string(kSlot1Path));
+                                + std::string(kSlot0Path) + " and " + std::string(kSlot1Path)
+                                + "; CameraHardware resolution override = 1280x800");
         return true;
     }
 
