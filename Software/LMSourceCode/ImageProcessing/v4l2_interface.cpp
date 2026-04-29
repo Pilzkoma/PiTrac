@@ -119,8 +119,30 @@ void V4L2Capture::release() {
     gray_scratch_.release();
 }
 
-bool V4L2Capture::read(cv::Mat& /*out*/) {
-    return false;   // implemented in a later commit
+bool V4L2Capture::read(cv::Mat& out) {
+    if (!isOpened()) return false;
+    if (!streaming_ && !ensure_streaming()) return false;
+
+    v4l2_buffer buf{};
+    buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    if (::ioctl(fd_, VIDIOC_DQBUF, &buf) < 0) {
+        GS_LOG_MSG(error, std::string("V4L2Capture::read - VIDIOC_DQBUF failed: ")
+                          + std::strerror(errno));
+        return false;
+    }
+
+    const bool decoded = decode_into(static_cast<const uint8_t*>(bufs_[buf.index].start),
+                                     buf.bytesused, out);
+
+    // Re-queue regardless of decode success so the camera doesn't stall.
+    if (::ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+        GS_LOG_MSG(error, "V4L2Capture::read - VIDIOC_QBUF[" + std::to_string(buf.index)
+                          + "] failed: " + std::strerror(errno));
+        return false;
+    }
+
+    return decoded;
 }
 
 bool V4L2Capture::set(int prop_id, double value) {
@@ -206,11 +228,135 @@ double V4L2Capture::get(int prop_id) const {
 }
 
 bool V4L2Capture::ensure_streaming() {
-    return false;   // implemented in a later commit
+    if (streaming_) return true;
+    if (!isOpened()) return false;
+
+    // 1. VIDIOC_S_FMT
+    v4l2_format fmt{};
+    fmt.type                = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width       = static_cast<__u32>(width_);
+    fmt.fmt.pix.height      = static_cast<__u32>(height_);
+    fmt.fmt.pix.pixelformat = fourcc_;
+    fmt.fmt.pix.field       = V4L2_FIELD_NONE;
+    if (::ioctl(fd_, VIDIOC_S_FMT, &fmt) < 0) {
+        GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_S_FMT failed: ")
+                          + std::strerror(errno));
+        return false;
+    }
+    width_  = static_cast<int>(fmt.fmt.pix.width);
+    height_ = static_cast<int>(fmt.fmt.pix.height);
+
+    // 2. VIDIOC_S_PARM (frame rate)
+    v4l2_streamparm parm{};
+    parm.type                                   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    parm.parm.capture.timeperframe.numerator    = 1;
+    parm.parm.capture.timeperframe.denominator  = static_cast<__u32>(fps_);
+    if (::ioctl(fd_, VIDIOC_S_PARM, &parm) < 0) {
+        GS_LOG_MSG(warning, std::string("V4L2Capture::ensure_streaming - VIDIOC_S_PARM failed: ")
+                            + std::strerror(errno) + " (continuing with driver default FPS)");
+    }
+
+    // 3. Apply queued controls (exposure, gain, …)
+    for (const auto& [id, val] : pending_ctrls_) {
+        v4l2_control c{};
+        c.id    = id;
+        c.value = val;
+        if (::ioctl(fd_, VIDIOC_S_CTRL, &c) < 0) {
+            GS_LOG_MSG(warning, std::string("V4L2Capture::ensure_streaming - VIDIOC_S_CTRL(0x")
+                                + std::to_string(id) + ") failed: "
+                                + std::strerror(errno));
+        }
+    }
+    pending_ctrls_.clear();
+
+    // 4. VIDIOC_REQBUFS
+    constexpr __u32 kBufCount = 4;
+    v4l2_requestbuffers req{};
+    req.count  = kBufCount;
+    req.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory = V4L2_MEMORY_MMAP;
+    if (::ioctl(fd_, VIDIOC_REQBUFS, &req) < 0) {
+        GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_REQBUFS failed: ")
+                          + std::strerror(errno));
+        return false;
+    }
+    if (req.count < 2) {
+        GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - driver granted "
+                          + std::to_string(req.count) + " buffers, need >= 2");
+        return false;
+    }
+
+    // 5. VIDIOC_QUERYBUF + mmap each
+    bufs_.assign(req.count, MmapBuf{});
+    for (__u32 i = 0; i < req.count; ++i) {
+        v4l2_buffer buf{};
+        buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index  = i;
+        if (::ioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
+            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - VIDIOC_QUERYBUF["
+                              + std::to_string(i) + "] failed: " + std::strerror(errno));
+            return false;
+        }
+        void* p = ::mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, fd_, buf.m.offset);
+        if (p == MAP_FAILED) {
+            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - mmap[" + std::to_string(i)
+                              + "] failed: " + std::strerror(errno));
+            return false;
+        }
+        bufs_[i].start  = p;
+        bufs_[i].length = buf.length;
+    }
+
+    // 6. VIDIOC_QBUF for every buffer
+    for (__u32 i = 0; i < req.count; ++i) {
+        v4l2_buffer buf{};
+        buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index  = i;
+        if (::ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - VIDIOC_QBUF["
+                              + std::to_string(i) + "] failed: " + std::strerror(errno));
+            return false;
+        }
+    }
+
+    // 7. VIDIOC_STREAMON
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (::ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
+        GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_STREAMON failed: ")
+                          + std::strerror(errno));
+        return false;
+    }
+
+    // 8. Allocate decode scratch + decoder handle
+    gray_scratch_.create(height_, width_, CV_8UC1);
+    if (!tj_handle_) {
+        tj_handle_ = tjInitDecompress();
+        if (!tj_handle_) {
+            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - tjInitDecompress failed");
+            return false;
+        }
+    }
+
+    streaming_ = true;
+    return true;
 }
 
-bool V4L2Capture::decode_into(const uint8_t* /*jpeg*/, size_t /*bytes*/, cv::Mat& /*out*/) {
-    return false;   // implemented in a later commit
+bool V4L2Capture::decode_into(const uint8_t* jpeg, size_t bytes, cv::Mat& out) {
+    const int rc = tjDecompress2(static_cast<tjhandle>(tj_handle_),
+                                  jpeg, static_cast<unsigned long>(bytes),
+                                  gray_scratch_.data,
+                                  width_, /*pitch=*/width_, height_,
+                                  TJPF_GRAY, /*flags=*/0);
+    if (rc != 0) {
+        GS_LOG_MSG(error, std::string("V4L2Capture::decode_into - tjDecompress2 failed: ")
+                          + tjGetErrorStr2(static_cast<tjhandle>(tj_handle_)));
+        return false;
+    }
+    cv::cvtColor(gray_scratch_, out, cv::COLOR_GRAY2BGR);
+    return true;
 }
 
 
