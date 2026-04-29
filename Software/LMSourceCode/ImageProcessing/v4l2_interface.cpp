@@ -29,6 +29,7 @@
 #include "gs_camera.h"
 #include "camera_hardware.h"
 #include "gs_options.h"
+#include "ball_watcher.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -503,11 +504,22 @@ namespace golf_sim {
     // camera 2 to fire.  Stubbed until the two-camera IPC flow is validated
     // end-to-end on Jetson hardware.
     // -----------------------------------------------------------------------
-    bool WatchForHitAndTrigger(const GolfBall& ball, cv::Mat& return_image,
+    bool WatchForHitAndTrigger(const GolfBall& /*ball*/, cv::Mat& /*return_image*/,
                                bool& motion_detected) {
-        // JETSON_STUB: two-camera IPC flow not yet validated on Jetson
+        // Jetson: motion-only.  PulseStrobe::SendExternalTrigger() inside
+        // the motion-detect path is currently a stub (Group 2 strobe-SPI
+        // work is separate from this engine).  Returning the motion
+        // result is enough for the upstream FSM to advance.
         motion_detected = false;
-        return false;
+
+        JetsonCaptureApp* app = LibCameraInterface::libcamera_app_[0];
+        if (!app) {
+            GS_LOG_MSG(error, "WatchForHitAndTrigger - camera 1 slot not initialised; "
+                              "call PerformCameraSystemStartup first");
+            return false;
+        }
+
+        return ball_watcher_event_loop(*app, motion_detected);
     }
 
     // -----------------------------------------------------------------------
