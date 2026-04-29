@@ -40,6 +40,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <chrono>
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
@@ -143,6 +144,21 @@ bool V4L2Capture::read(cv::Mat& out) {
         GS_LOG_MSG(error, "V4L2Capture::read - VIDIOC_QBUF[" + std::to_string(buf.index)
                           + "] failed: " + std::strerror(errno));
         return false;
+    }
+
+    // Per-instance FPS log: prints once per ~120 frames (≈ once per second
+    // at 120 FPS).  Lets us measure sustained capture rate from the trace
+    // log without depending on any downstream consumer.
+    ++frame_count_;
+    if (frame_count_ == 1) {
+        fps_log_start_ = std::chrono::steady_clock::now();
+    } else if (frame_count_ % 120 == 0) {
+        auto now = std::chrono::steady_clock::now();
+        const double elapsed_s = std::chrono::duration<double>(now - fps_log_start_).count();
+        const double avg_fps   = static_cast<double>(frame_count_) / elapsed_s;
+        GS_LOG_TRACE_MSG(trace, "V4L2Capture - frame=" + std::to_string(frame_count_)
+                                + " elapsed=" + std::to_string(elapsed_s) + "s avg_fps="
+                                + std::to_string(avg_fps));
     }
 
     return decoded;

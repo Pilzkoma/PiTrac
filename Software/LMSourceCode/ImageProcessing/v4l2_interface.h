@@ -19,6 +19,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <chrono>
+
 #include <opencv2/core.hpp>
 
 #include <linux/videodev2.h>
@@ -74,6 +76,11 @@ private:
     cv::Mat gray_scratch_;                   // CV_8UC1, height_ × width_
 
     std::vector<std::pair<uint32_t, int32_t>> pending_ctrls_;
+
+    // FPS instrumentation — counts every successful read() per instance,
+    // logs once every 120 frames so trace output is bounded.
+    uint64_t                                       frame_count_   = 0;
+    std::chrono::steady_clock::time_point          fps_log_start_;
 };
 
 
