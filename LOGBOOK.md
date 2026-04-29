@@ -54,6 +54,9 @@
 |IR LED array|850nm \~10W array board (e.g. Chanzon)|IR illumination for strobe capture|Strobe driver circuit|TBD|☐ Ordered ☐ In hand ☐ In use|
 |IR strobe driver|Jetson GPIO (v1) — Teensy 4.0 reserved for v2|Drives IR LED pulses at \~10µs|Jetson GPIO + IR LED array|TBD|☐ Ordered ☐ In hand ☐ In use|
 |Video recording camera (not used in v1 - v2 only)|TBD — USB, lower cost|Records swing from behind or in front for AI coaching upload|Jetson USB port|TBD|☐ Ordered ☐ In hand ☐ In use|
+|Sound trigger (optional v1 backup, candidate v2)|SparkFun SEN-14262|Acoustic impact detection — redundant or alternative to camera motion trigger. Used in OpenFlight as primary trigger.|Jetson GPIO (digital interrupt)|TBD (~$18)|☐ Considered ☐ Ordered ☐ In hand ☐ In use|
+|Doppler radar (v2 only)|OmniPreSense OPS243-A 24 GHz|Ball/club speed via Doppler shift, spin via I/Q analysis. Validated by OpenFlight project. ±0.5% speed accuracy.|Jetson USB serial|TBD (~$249)|☐ Considered ☐ Ordered ☐ In hand ☐ In use|
+|Angle radar x2 (v2 stretch)|RFbeam K-LD7|Launch angle and club path measurement, USB serial. Used in OpenFlight.|Jetson USB|TBD (~$140 ea)|☐ Considered ☐ Ordered ☐ In hand ☐ In use|
 
 **Power supply:** *Not yet decided. Indoor garage use. Likely mains-powered via USB-C PD or DC barrel jack on carrier board.*
 
@@ -155,7 +158,7 @@ Next step: implement real V4L2 capture in Software/LMSourceCode/ImageProcessing/
 |2|SP1|IR strobe pulse timing on RPi uses hardware hacks to the Pi GS camera. Jetson GPIO timing characteristics are different — may need external microcontroller for sub-microsecond strobe control.|🟡 Annoying|☑ Yes|Investigate Jetson GPIO latency vs dedicated Arduino/Teensy strobe controller|2026-03-14|
 |3|SP2|Spin detection requires marked balls. Standard range balls will not work for spin. Must use balls with visible dot pattern (similar to Foresight approach).|🔵 Minor|☑ Yes|Accepted — user confirmed willingness to use marked balls|2026-03-14|
 |4|SP4|GSPro runs on Windows PC only — it cannot run on the Jetson. The Jetson sends JSON shot data over TCP to a separate Windows PC running GSPro. Firewall and network config required if on different subnets.|🔵 Minor|☑ Yes|Architectural decision logged — Jetson = compute, Windows PC = GSPro host|2026-03-14|
-|5|SP1|LiDAR excluded from v1. Camera-only trigger may log a topped/missed shot as a real shot in rare cases.|🔵 Minor|☑ Yes|Accepted for v1. LiDAR ball-launch confirmation planned for v2 second Jetson build.|2026-03-14|
+|5|SP1|LiDAR excluded from v1. Camera-only trigger may log a topped/missed shot as a real shot in rare cases.|🔵 Minor|☑ Yes|Accepted for v1. V2 trigger/speed sensor: open choice between LiDAR (trigger only) and 24 GHz Doppler radar (trigger + ball speed ±0.5% + spin fallback). OpenFlight (github.com/jewbetcha/openflight) validates OPS243-A radar for golf ball Doppler — primary V2 reference.|2026-03-14|
 |6|SP1|pitrac_lm binary is not yet tested with real cameras — all camera functions return stub false values until Group 2 runtime implementations are complete|🟡 Annoying|☑ Yes|Expected — cameras not yet arrived. Will implement V4L2 capture, GPIO strobe when OV9281 cameras arrive|2026-03-19|
 |7|SP4|OpenShotGolf requires Godot 4.6 .NET + .NET SDK 8.0 + C# build|🔵 Minor|☑ Yes|One-time: build C# solution in Godot before first run|2026-03-21|
 |8|SP4|OpenShotGolf returns 501 for heartbeat messages|🔵 Minor|☑ Yes|Harmless — heartbeat optional in protocol|2026-03-21|
@@ -194,6 +197,16 @@ Next step: implement real V4L2 capture in Software/LMSourceCode/ImageProcessing/
 |—|—|—|—|—|—|
 
 \---
+
+## 🔗 External References
+
+> External projects, papers, and resources useful as design input or comparison.
+
+|Project / Resource|URL|Relevance|License|Use For|
+|-|-|-|-|-|
+|PiTrac|github.com/PiTracLM/PiTrac|Base codebase — adapted from RPi to Jetson|GPL-3.0|All vision pipeline, ball detection, spin, GSPro|
+|OpenShotGolf|github.com/(see SP4 notes)|Free GSPro-protocol-compatible simulator (Godot 4.6 .NET) — used as test target|MIT (Godot project)|SP4 testing without GSPro license. V3 vision: porting to Jetson HDMI output.|
+|OpenFlight|github.com/jewbetcha/openflight|Doppler-radar-based DIY launch monitor (24 GHz OPS243-A + K-LD7 angle radars + sound trigger). Primary V2 reference if radar feature added. Hardware validated for golf ball Doppler.|AGPL-3.0|V2 radar hardware reference (OPS243-A, K-LD7), sound trigger pattern (SEN-14262). Do NOT copy code directly — AGPL conflicts with PiTrac GPL-3 + would put Flask dashboard / TCP sender under AGPL network terms. Re-implement clean-room if used.|
 
 \---
 
