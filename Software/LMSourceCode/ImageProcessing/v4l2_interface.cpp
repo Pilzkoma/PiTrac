@@ -62,6 +62,8 @@ V4L2Capture::~V4L2Capture() {
 }
 
 bool V4L2Capture::open(const std::string& path, int /*api_pref*/) {
+    GS_LOG_TRACE_MSG(trace, "V4L2Capture::open(" + path + ") - was_open="
+                            + std::string(isOpened() ? "true" : "false"));
     if (isOpened()) {
         release();
     }
@@ -88,6 +90,7 @@ bool V4L2Capture::open(const std::string& path, int /*api_pref*/) {
     }
 
     fd_ = fd;
+    GS_LOG_TRACE_MSG(trace, "V4L2Capture::open(" + path + ") - success, fd=" + std::to_string(fd_));
     return true;
 }
 
@@ -526,6 +529,7 @@ namespace golf_sim {
         // the motion-detect path is currently a stub (Group 2 strobe-SPI
         // work is separate from this engine).  Returning the motion
         // result is enough for the upstream FSM to advance.
+        GS_LOG_TRACE_MSG(trace, "WatchForHitAndTrigger - entry");
         motion_detected = false;
 
         JetsonCaptureApp* app = LibCameraInterface::libcamera_app_[0];
@@ -535,7 +539,16 @@ namespace golf_sim {
             return false;
         }
 
-        return ball_watcher_event_loop(*app, motion_detected);
+        GS_LOG_TRACE_MSG(trace, "WatchForHitAndTrigger - calling ball_watcher_event_loop "
+                                "(app=" + app->device_path
+                                + ", w=" + std::to_string(app->width)
+                                + ", h=" + std::to_string(app->height) + ")");
+        const bool result = ball_watcher_event_loop(*app, motion_detected);
+        GS_LOG_TRACE_MSG(trace, "WatchForHitAndTrigger - returned "
+                                + std::string(result ? "true" : "false")
+                                + " motion_detected="
+                                + std::string(motion_detected ? "true" : "false"));
+        return result;
     }
 
     // -----------------------------------------------------------------------
