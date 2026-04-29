@@ -561,9 +561,80 @@ namespace golf_sim {
         return false;
     }
 
+    namespace {
+
+    bool probe_v4l2_capture_device(const std::string& path) {
+        int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+        if (fd < 0) {
+            GS_LOG_MSG(error, "probe_v4l2_capture_device - cannot open " + path
+                              + ": " + std::strerror(errno));
+            return false;
+        }
+        v4l2_capability caps{};
+        const int rc = ::ioctl(fd, VIDIOC_QUERYCAP, &caps);
+        ::close(fd);
+        if (rc < 0) {
+            GS_LOG_MSG(error, "probe_v4l2_capture_device - QUERYCAP failed on " + path);
+            return false;
+        }
+        if (!(caps.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
+            GS_LOG_MSG(error, "probe_v4l2_capture_device - " + path + " is not a capture device");
+            return false;
+        }
+        GS_LOG_TRACE_MSG(trace, std::string("Probed ") + path + " — driver=\""
+                                + reinterpret_cast<const char*>(caps.driver) + "\" card=\""
+                                + reinterpret_cast<const char*>(caps.card) + "\"");
+        return true;
+    }
+
+    JetsonCaptureApp* build_app(int slot, const std::string& path) {
+        auto* app = new JetsonCaptureApp;
+        app->camera_slot     = slot;
+        app->device_path     = path;
+        app->width           = 1280;
+        app->height          = 800;
+        if (slot == 0) {
+            app->gain            = LibCameraInterface::kCamera1Gain;
+            app->contrast        = LibCameraInterface::kCamera1Contrast;
+            app->saturation      = LibCameraInterface::kCamera1Saturation;
+            app->shutter_time_us = LibCameraInterface::kCamera1StillShutterTimeuS;
+        } else {
+            app->gain            = LibCameraInterface::kCamera2Gain;
+            app->contrast        = LibCameraInterface::kCamera2Contrast;
+            app->saturation      = LibCameraInterface::kCamera2Saturation;
+            app->shutter_time_us = LibCameraInterface::kCamera2StillShutterTimeuS;
+        }
+        app->flip_vertical = false;
+        return app;
+    }
+
+    }  // namespace
+
     bool PerformCameraSystemStartup() {
-        // JETSON_STUB
-        return false;
+        // OV9281 device mapping confirmed in LOGBOOK 2026-03-21:
+        //   /dev/video0  → camera 1 (USB bus xhci-2.2.4)
+        //   /dev/video2  → camera 2 (USB bus xhci-2.3)
+        // /dev/video1 and /dev/video3 are UVC metadata devices and are skipped.
+        static const char* kSlot0Path = "/dev/video0";
+        static const char* kSlot1Path = "/dev/video2";
+
+        if (!probe_v4l2_capture_device(kSlot0Path)) return false;
+        if (!probe_v4l2_capture_device(kSlot1Path)) return false;
+
+        // Replace any previously allocated app pointers (idempotent re-init).
+        delete LibCameraInterface::libcamera_app_[0];
+        delete LibCameraInterface::libcamera_app_[1];
+        LibCameraInterface::libcamera_app_[0] = build_app(0, kSlot0Path);
+        LibCameraInterface::libcamera_app_[1] = build_app(1, kSlot1Path);
+
+        LibCameraInterface::libcamera_configuration_[0] =
+            LibCameraInterface::CameraConfiguration::kHighSpeedWatching;
+        LibCameraInterface::libcamera_configuration_[1] =
+            LibCameraInterface::CameraConfiguration::kExternallyStrobed;
+
+        GS_LOG_TRACE_MSG(trace, "PerformCameraSystemStartup - Jetson camera apps allocated for "
+                                + std::string(kSlot0Path) + " and " + std::string(kSlot1Path));
+        return true;
     }
 
 }  // namespace golf_sim
