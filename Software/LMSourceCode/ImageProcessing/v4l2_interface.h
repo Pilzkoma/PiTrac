@@ -20,7 +20,6 @@
 #include <unordered_map>
 
 #include <opencv2/core.hpp>
-#include <opencv2/videoio.hpp>
 
 #include <linux/videodev2.h>
 
@@ -30,16 +29,65 @@
 
 
 // ---------------------------------------------------------------------------
+// V4L2Capture — synchronous V4L2 + libjpeg-turbo capture engine.
+// Public method names mirror cv::VideoCapture so JetsonCaptureApp::cap
+// can swap types without forcing edits to ball_watcher.cpp.  Defaults
+// match the OV9281 high-FPS UVC mode (1280x800 MJPG @ 120 FPS, 4 mmap
+// buffers).  Stream-on is lazy: open() only opens the fd; the first
+// read() does VIDIOC_S_FMT / REQBUFS / mmap / STREAMON.
+//
+// THIS IS NOT A cv::VideoCapture.  Calling code that depends on
+// cv::VideoCapture-specific semantics (e.g. backend internals) will
+// not work — only the six methods declared below are supported.
+// ---------------------------------------------------------------------------
+
+class V4L2Capture {
+public:
+    V4L2Capture();
+    ~V4L2Capture();
+
+    V4L2Capture(const V4L2Capture&)            = delete;
+    V4L2Capture& operator=(const V4L2Capture&) = delete;
+
+    bool   open(const std::string& path, int /*api_pref*/ = 0);
+    bool   isOpened() const;
+    void   release();
+    bool   read(cv::Mat& out);              // returns CV_8UC3 BGR
+    bool   set(int prop_id, double value);
+    double get(int prop_id) const;
+
+private:
+    bool ensure_streaming();                 // lazy stream-on
+    bool decode_into(const uint8_t* jpeg, size_t bytes, cv::Mat& out);
+
+    int      fd_       = -1;
+    int      width_    = 1280;
+    int      height_   = 800;
+    int      fps_      = 120;
+    uint32_t fourcc_   = 0;                  // initialised to V4L2_PIX_FMT_MJPEG in ctor
+    bool     streaming_ = false;
+
+    struct MmapBuf { void* start = nullptr; size_t length = 0; };
+    std::vector<MmapBuf> bufs_;
+
+    void*   tj_handle_ = nullptr;            // tjhandle from tjInitDecompress
+    cv::Mat gray_scratch_;                   // CV_8UC1, height_ × width_
+
+    std::vector<std::pair<uint32_t, int32_t>> pending_ctrls_;
+};
+
+
+// ---------------------------------------------------------------------------
 // JetsonCaptureApp — replaces LibcameraJpegApp (which subclassed RPiCamApp).
-// Holds one V4L2/OpenCV capture device plus all per-camera configuration
+// Holds one V4L2 capture device plus all per-camera configuration
 // parameters that ConfigureForLibcameraStill() would previously have written
 // into a StillOptions bag.  Actual open/configure/read/release logic lives in
 // v4l2_interface.cpp.
 // ---------------------------------------------------------------------------
 
 struct JetsonCaptureApp {
-    cv::VideoCapture cap;          // the V4L2 capture device
-    std::string      device_path;  // e.g. "/dev/video0" for this camera slot
+    V4L2Capture cap;               // the V4L2 capture engine (was cv::VideoCapture)
+    std::string device_path;       // e.g. "/dev/video0" for this camera slot
     int              camera_slot  = 0;       // 0 = camera1, 1 = camera2
     double           gain         = 1.0;     // maps to CAP_PROP_GAIN
     double           contrast     = 1.0;     // maps to CAP_PROP_CONTRAST

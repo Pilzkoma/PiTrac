@@ -28,6 +28,64 @@
 #include "golf_ball.h"
 #include "gs_camera.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <linux/videodev2.h>
+#include <turbojpeg.h>
+
+#include <opencv2/imgproc.hpp>
+
+
+// ---------------------------------------------------------------------------
+// V4L2Capture skeleton — full bodies land in subsequent commits.
+// Skeleton bodies make the class linkable so the build stays green.
+// Lives in the global namespace, matching the JetsonCaptureApp struct
+// declared in v4l2_interface.h.
+// ---------------------------------------------------------------------------
+
+V4L2Capture::V4L2Capture() {
+    fourcc_ = V4L2_PIX_FMT_MJPEG;
+}
+
+V4L2Capture::~V4L2Capture() {
+    release();
+}
+
+bool V4L2Capture::open(const std::string& /*path*/, int /*api_pref*/) {
+    return false;   // implemented in next commit
+}
+
+bool V4L2Capture::isOpened() const {
+    return fd_ >= 0;
+}
+
+void V4L2Capture::release() {
+    // implemented in next commit
+}
+
+bool V4L2Capture::read(cv::Mat& /*out*/) {
+    return false;   // implemented in a later commit
+}
+
+bool V4L2Capture::set(int /*prop_id*/, double /*value*/) {
+    return false;   // implemented in next commit
+}
+
+double V4L2Capture::get(int /*prop_id*/) const {
+    return 0.0;     // implemented in next commit
+}
+
+bool V4L2Capture::ensure_streaming() {
+    return false;   // implemented in a later commit
+}
+
+bool V4L2Capture::decode_into(const uint8_t* /*jpeg*/, size_t /*bytes*/, cv::Mat& /*out*/) {
+    return false;   // implemented in a later commit
+}
+
+
 namespace golf_sim {
 
     // -----------------------------------------------------------------------
