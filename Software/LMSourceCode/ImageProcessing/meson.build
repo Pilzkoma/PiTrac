@@ -78,6 +78,13 @@ if not jetson_build  # JETSON_STUB
     lgpio_dep = dependency('lgpio', required : true)
 endif  # JETSON_STUB
 
+if jetson_build
+    turbojpeg_dep = dependency('libturbojpeg', required : false)
+    if not turbojpeg_dep.found()
+        turbojpeg_dep = cxx.find_library('turbojpeg', required : true)
+    endif
+endif  # JETSON_STUB
+
 thread_dep = dependency('threads', required : true)
 opencv_dep = dependency('opencv4', required : true, version : '>=4.5.0', include_type: 'system',)
 
@@ -109,6 +116,8 @@ pitrac_lm_module_deps = [
 	fmt_dep, boost_dep, program_options_dep, activemq_dep, ssl_dep, apr_dep, msgpack_dep, yamlcpp_dep, onnxruntime_dep,]
 if not jetson_build  # JETSON_STUB
     pitrac_lm_module_deps += [libcamera_dep, lgpio_dep, rpicam_app_dep]
+else  # JETSON_STUB
+    pitrac_lm_module_deps += [turbojpeg_dep]
 endif  # JETSON_STUB
 
 
