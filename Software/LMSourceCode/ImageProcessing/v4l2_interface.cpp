@@ -528,24 +528,30 @@ namespace golf_sim {
     // stubs satisfy the linker until the libgpiod/SPI Group 2 work is done.
     // -----------------------------------------------------------------------
 
+    // PulseStrobe stubs return true ("succeeded as a no-op") rather than
+    // false so the FSM init chain advances past GPIO setup.  The real
+    // libgpiod / SPI implementation lands when the IR LED array is
+    // ordered (Group 2 strobe-SPI work, separate from this engine).
+    // No GPIO is actually claimed; SendExternalTrigger is genuinely a
+    // no-op until that work happens.
     bool PulseStrobe::InitGPIOSystem(GsSignalCallback) {
         // JETSON_STUB: GPIO init via libgpiod not yet implemented
-        return false;
+        return true;
     }
 
     bool PulseStrobe::DeinitGPIOSystem() {
         // JETSON_STUB
-        return false;
+        return true;
     }
 
     bool PulseStrobe::SendCameraPrimingPulses(bool /*use_high_speed*/) {
         // JETSON_STUB
-        return false;
+        return true;
     }
 
     bool PulseStrobe::SendExternalTrigger() {
         // JETSON_STUB
-        return false;
+        return true;
     }
 
     const std::vector<float> PulseStrobe::GetPulseIntervals() {
