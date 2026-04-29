@@ -39,6 +39,7 @@
 #include <cstring>
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 
 // ---------------------------------------------------------------------------
@@ -122,12 +123,86 @@ bool V4L2Capture::read(cv::Mat& /*out*/) {
     return false;   // implemented in a later commit
 }
 
-bool V4L2Capture::set(int /*prop_id*/, double /*value*/) {
-    return false;   // implemented in next commit
+bool V4L2Capture::set(int prop_id, double value) {
+    if (!isOpened()) return false;
+
+    auto apply_or_queue_ctrl = [&](uint32_t v4l2_id, int32_t v) -> bool {
+        if (streaming_) {
+            v4l2_control c{};
+            c.id    = v4l2_id;
+            c.value = v;
+            if (::ioctl(fd_, VIDIOC_S_CTRL, &c) < 0) {
+                GS_LOG_MSG(error, std::string("V4L2Capture::set - VIDIOC_S_CTRL(0x")
+                                  + std::to_string(v4l2_id) + ") failed: "
+                                  + std::strerror(errno));
+                return false;
+            }
+        } else {
+            pending_ctrls_.emplace_back(v4l2_id, v);
+        }
+        return true;
+    };
+
+    switch (prop_id) {
+    case cv::CAP_PROP_FRAME_WIDTH:
+        if (streaming_) return false;
+        width_ = static_cast<int>(value);
+        return true;
+
+    case cv::CAP_PROP_FRAME_HEIGHT:
+        if (streaming_) return false;
+        height_ = static_cast<int>(value);
+        return true;
+
+    case cv::CAP_PROP_FPS:
+        if (streaming_) return false;
+        fps_ = static_cast<int>(value);
+        return true;
+
+    case cv::CAP_PROP_FOURCC: {
+        if (streaming_) return false;
+        const uint32_t requested = static_cast<uint32_t>(value);
+        if (requested != V4L2_PIX_FMT_MJPEG) {
+            GS_LOG_MSG(error, "V4L2Capture::set - only MJPEG fourcc is supported");
+            return false;
+        }
+        fourcc_ = requested;
+        return true;
+    }
+
+    case cv::CAP_PROP_EXPOSURE:
+        // OV9281 / UVC: V4L2_CID_EXPOSURE_ABSOLUTE is in 100µs units.
+        // Caller passes microseconds; convert.
+        return apply_or_queue_ctrl(V4L2_CID_EXPOSURE_ABSOLUTE,
+                                   static_cast<int32_t>(value / 100.0));
+
+    case cv::CAP_PROP_GAIN:
+        return apply_or_queue_ctrl(V4L2_CID_GAIN, static_cast<int32_t>(value));
+
+    default:
+        return false;
+    }
 }
 
-double V4L2Capture::get(int /*prop_id*/) const {
-    return 0.0;     // implemented in next commit
+double V4L2Capture::get(int prop_id) const {
+    switch (prop_id) {
+    case cv::CAP_PROP_FRAME_WIDTH:  return static_cast<double>(width_);
+    case cv::CAP_PROP_FRAME_HEIGHT: return static_cast<double>(height_);
+    case cv::CAP_PROP_FOURCC:       return static_cast<double>(fourcc_);
+    case cv::CAP_PROP_FPS: {
+        if (!isOpened()) return static_cast<double>(fps_);
+        v4l2_streamparm parm{};
+        parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if (::ioctl(fd_, VIDIOC_G_PARM, &parm) < 0) {
+            return static_cast<double>(fps_);
+        }
+        const auto& tpf = parm.parm.capture.timeperframe;
+        if (tpf.numerator == 0) return static_cast<double>(fps_);
+        return static_cast<double>(tpf.denominator) / static_cast<double>(tpf.numerator);
+    }
+    default:
+        return 0.0;
+    }
 }
 
 bool V4L2Capture::ensure_streaming() {
