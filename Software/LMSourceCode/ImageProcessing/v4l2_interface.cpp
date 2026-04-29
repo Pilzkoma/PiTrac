@@ -27,6 +27,8 @@
 #include "pulse_strobe.h"
 #include "golf_ball.h"
 #include "gs_camera.h"
+#include "camera_hardware.h"
+#include "gs_options.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -582,9 +584,41 @@ namespace golf_sim {
         return true;
     }
 
-    bool CheckForBall(GolfBall& /*ball*/, cv::Mat& /*return_image*/) {
-        // JETSON_STUB
-        return false;
+    // Body adapted from CheckForBallLegacy in libcamera_interface.cpp:1366.
+    // The RPi-side libcamera_interface.cpp is fully #ifndef JETSON_BUILD-
+    // guarded, so this is duplicated rather than reused.  Only hardware-
+    // independent code is touched: GolfSimCamera, BallImageProc.
+    bool CheckForBall(GolfBall& ball, cv::Mat& img) {
+        GsCameraNumber camera_number =
+            GolfSimOptions::GetCommandLineOptions().GetCameraNumber();
+
+        const CameraHardware::CameraModel camera_model =
+            (camera_number == GsCameraNumber::kGsCamera1)
+                ? GolfSimCamera::kSystemSlot1CameraType
+                : GolfSimCamera::kSystemSlot2CameraType;
+        const CameraHardware::LensType camera_lens_type =
+            (camera_number == GsCameraNumber::kGsCamera1)
+                ? GolfSimCamera::kSystemSlot1LensType
+                : GolfSimCamera::kSystemSlot2LensType;
+        const CameraHardware::CameraOrientation camera_orientation =
+            (camera_number == GsCameraNumber::kGsCamera1)
+                ? GolfSimCamera::kSystemSlot1CameraOrientation
+                : GolfSimCamera::kSystemSlot2CameraOrientation;
+
+        GolfSimCamera camera;
+        camera.camera_hardware_.init_camera_parameters(camera_number,
+                                                        camera_model,
+                                                        camera_lens_type,
+                                                        camera_orientation);
+
+        if (!TakeRawPicture(camera, img)) {
+            GS_LOG_MSG(error, "CheckForBall - TakeRawPicture failed");
+            return false;
+        }
+
+        cv::Vec2i search_area_center = camera.GetExpectedBallCenter();
+        bool expectBall = false;
+        return camera.GetCalibratedBall(camera, img, ball, search_area_center, expectBall);
     }
 
     bool WaitForCam2Trigger(cv::Mat& /*return_image*/) {
