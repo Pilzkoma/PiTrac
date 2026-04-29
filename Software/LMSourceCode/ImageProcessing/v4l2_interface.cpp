@@ -149,18 +149,22 @@ bool V4L2Capture::read(cv::Mat& out) {
         return false;
     }
 
-    // Per-instance FPS log: timestamps the first frame, then prints a
-    // running rate every 10 frames so we get useful data from short
-    // ball_watcher loops (which exit on first motion detect, often
-    // within ~1 second).
+    // Per-instance FPS log.  Logs every frame for the first 5 (so we see
+    // even very short loops), then every 10 frames thereafter, so we get
+    // both short-burst and long-loop measurements.
     ++frame_count_;
+    auto now = std::chrono::steady_clock::now();
     if (frame_count_ == 1) {
-        fps_log_start_ = std::chrono::steady_clock::now();
-    } else if (frame_count_ % 10 == 0) {
-        auto now = std::chrono::steady_clock::now();
+        fps_log_start_ = now;
+    }
+    const bool log_this = (frame_count_ <= 5) || (frame_count_ % 10 == 0);
+    if (log_this) {
         const double elapsed_s = std::chrono::duration<double>(now - fps_log_start_).count();
-        const double avg_fps   = static_cast<double>(frame_count_) / elapsed_s;
+        const double avg_fps   = (elapsed_s > 0.0)
+                                 ? (static_cast<double>(frame_count_) / elapsed_s)
+                                 : 0.0;
         GS_LOG_TRACE_MSG(trace, "V4L2Capture - frame=" + std::to_string(frame_count_)
+                                + " decoded=" + std::string(decoded ? "1" : "0")
                                 + " elapsed=" + std::to_string(elapsed_s) + "s avg_fps="
                                 + std::to_string(avg_fps));
     }
