@@ -454,6 +454,43 @@ namespace golf_sim {
 
 
     // -----------------------------------------------------------------------
+    // undistort_camera_image
+    // Body copied verbatim from libcamera_interface.cpp:950 — pure OpenCV
+    // (initUndistortRectifyMap + remap), no libcamera/rpicam-apps dependency.
+    // Returns the input image unchanged when use_undistortion_matrix_ is false,
+    // so it's safe to call before camera calibration loads a real matrix.
+    // -----------------------------------------------------------------------
+    cv::Mat LibCameraInterface::undistort_camera_image(const cv::Mat& img, const GolfSimCamera& camera) {
+
+        if (!camera.camera_hardware_.use_undistortion_matrix_) {
+            GS_LOG_MSG(trace, "undistort_camera_image ignoring camera with no undistortion matrix. Returning original image.");
+            return img;
+        }
+
+        cv::Mat cameracalibrationMatrix_ = camera.camera_hardware_.calibrationMatrix_;
+        cv::Mat cameraDistortionVector_  = camera.camera_hardware_.cameraDistortionVector_;
+
+        cv::Mat unDistortedBall1Img;
+        cv::Mat m_undistMap1, m_undistMap2;
+
+        if (camera.camera_hardware_.camera_is_mono()) {
+            cv::initUndistortRectifyMap(cameracalibrationMatrix_, cameraDistortionVector_, cv::Mat(),
+                                        cameracalibrationMatrix_, cv::Size(img.cols, img.rows),
+                                        CV_8UC1, m_undistMap1, m_undistMap2);
+        }
+        else {
+            cv::initUndistortRectifyMap(cameracalibrationMatrix_, cameraDistortionVector_, cv::Mat(),
+                                        cameracalibrationMatrix_, cv::Size(img.cols, img.rows),
+                                        CV_32FC1, m_undistMap1, m_undistMap2);
+        }
+
+        cv::remap(img, unDistortedBall1Img, m_undistMap1, m_undistMap2, cv::INTER_LINEAR);
+
+        return unDistortedBall1Img;
+    }
+
+
+    // -----------------------------------------------------------------------
     // ConfigurePostProcessing
     // Identical to the RPi implementation: all body lines are
     // GolfSimConfiguration::SetConstant calls and
@@ -651,6 +688,12 @@ namespace golf_sim {
             GS_LOG_MSG(error, "TakeRawPicture - cap.read() failed for " + app->device_path);
             return false;
         }
+
+        // Match RPi TakeRawPicture (libcamera_interface.cpp:1295) — downstream
+        // ball-detect / stereo geometry expects rectified frames.  No-op when
+        // the camera has no calibration matrix loaded.
+        img = LibCameraInterface::undistort_camera_image(img, camera);
+
         return true;
     }
 
