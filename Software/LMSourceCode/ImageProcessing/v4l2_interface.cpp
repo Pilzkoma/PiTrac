@@ -550,6 +550,18 @@ namespace golf_sim {
             return false;
         }
 
+        // Populate MotionDetectStage::incoming_configuration from gs_config so the
+        // stage's Read() picks it up instead of falling through to the hard-coded
+        // 1x1-ROI / region_threshold=0 defaults that trip on the first comparison
+        // frame.  Full-frame ROI is the v1 default (no cropping yet — Jetson
+        // SendCameraCroppingCommand is still TODO in PORTING_TASKS Group 2).
+        const cv::Vec2i roi_size  (app->width, app->height);
+        const cv::Vec2i roi_offset(0, 0);
+        if (!ConfigurePostProcessing(roi_size, roi_offset)) {
+            GS_LOG_MSG(error, "WatchForHitAndTrigger - ConfigurePostProcessing failed");
+            return false;
+        }
+
         GS_LOG_TRACE_MSG(trace, "WatchForHitAndTrigger - calling ball_watcher_event_loop "
                                 "(app=" + app->device_path
                                 + ", w=" + std::to_string(app->width)

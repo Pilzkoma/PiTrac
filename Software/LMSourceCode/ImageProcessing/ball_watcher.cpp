@@ -182,6 +182,20 @@ bool ball_watcher_event_loop(JetsonCaptureApp& app, bool& motion_detected)
 	static const int kMaxConsecutiveReadFailures = 5;
 	int consecutive_failures = 0;
 
+	// Discard warm-up frames after stream-on.  The first decoded frame after
+	// VIDIOC_STREAMON can be partially exposed / pre-AGC and looks "different
+	// enough" from a steady-state frame to trip MotionDetectStage on the first
+	// comparison cycle.  Two frames is empirically enough at 120 FPS (~17 ms).
+	{
+		cv::Mat warmup;
+		for (int i = 0; i < 2; ++i) {
+			if (!app.cap.read(warmup)) {
+				GS_LOG_MSG(error, "ball_watcher_event_loop - warm-up read failed at i=" + std::to_string(i));
+				break;
+			}
+		}
+	}
+
 	for (uint sequence = 0; ; sequence++)
 	{
 		if (!gs::GolfSimGlobals::golf_sim_running_) {
