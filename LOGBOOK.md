@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|88%|🟡 In Progress|2026-05-02|
+|SP1 — Hardware & Build|HW+SW|Build|92%|🟡 In Progress|2026-05-02|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -52,7 +52,11 @@
 |Primary Camera x2|Arducam OV9281 Monochrome USB3|Ball imaging — strobe capture|Jetson USB3 port|TBD|☐ Ordered ☐ In hand ☐ In use|
 |LiDAR sensor (not used in v1 - v2 only)|TBD|Motion/trigger detection — detects ball or club movement to wake cameras|Jetson GPIO / serial|TBD|☐ Ordered ☐ In hand ☐ In use|
 |IR LED array|850nm \~10W array board (e.g. Chanzon)|IR illumination for strobe capture|Strobe driver circuit|TBD|☐ Ordered ☐ In hand ☐ In use|
-|IR strobe driver|Jetson GPIO (v1) — Teensy 4.0 reserved for v2|Drives IR LED pulses at \~10µs|Jetson GPIO + IR LED array|TBD|☐ Ordered ☐ In hand ☐ In use|
+|IR strobe driver|Teensy 4.0 (DEV-15583) — pulled forward from v2 plan|Drives IR LED pulses at \~10µs via Hardware-Timer-backed delayMicroseconds; Jetson sends single GPIO trigger + setup over USB serial|Jetson Pin 29 (fire trigger) + USB + MOSFET → IR LED array|SparkFun|☑ In hand|
+|IR LED array|Cenpek 4× 850nm 12V CCTV-style board (FY-S54-F)|IR illumination for strobe capture|MOSFET (low-side switch on 12V power line)|—|☑ In hand|
+|MOSFET (LED gate)|IRLZ44N (or SparkFun PRT-12959 breakout) — TBD|Switches 12V LED-array supply on Teensy gate signal|Teensy Pin 3 → MOSFET gate; LED-array J1− → MOSFET drain|TBD|☐ Ordered|
+|Bench-test transistor + LED|2N3904 NPN + 5mm LED + 1kΩ|Smoke-test for the Teensy gate output before MOSFET arrives|Teensy Pin 3 → 1kΩ → LED → GND (no transistor needed for visible blink)|—|☑ In hand|
+|12V supply|Industrial 12V/15A PSU|Powers Jetson + LED array + Teensy in final lab build|Barrel jack to Jetson; +/− to MOSFET high-side|—|☑ In hand|
 |Video recording camera (not used in v1 - v2 only)|TBD — USB, lower cost|Records swing from behind or in front for AI coaching upload|Jetson USB port|TBD|☐ Ordered ☐ In hand ☐ In use|
 |Sound trigger (optional v1 backup, candidate v2)|SparkFun SEN-14262|Acoustic impact detection — redundant or alternative to camera motion trigger. Used in OpenFlight as primary trigger.|Jetson GPIO (digital interrupt)|TBD (~$18)|☐ Considered ☐ Ordered ☐ In hand ☐ In use|
 |Doppler radar (v2 only)|OmniPreSense OPS243-A 24 GHz|Ball/club speed via Doppler shift, spin via I/Q analysis. Validated by OpenFlight project. ±0.5% speed accuracy.|Jetson USB serial|TBD (~$249)|☐ Considered ☐ Ordered ☐ In hand ☐ In use|
@@ -153,8 +157,13 @@
 32. SP1: undistort_camera_image ported into v4l2_interface.cpp; called from TakeRawPicture. No-op until camera calibration loads a matrix (use_undistortion_matrix_=false), then OpenCV initUndistortRectifyMap+remap kicks in. Needs opencv2/calib3d.hpp include.
 33. SP1: ConfigurePostProcessing must be called from WatchForHitAndTrigger BEFORE ball_watcher_event_loop on Jetson — the RPi side called it inside ConfigCameraForCropping which is RPi-only. Without this call, MotionDetectStage::Read falls through to cpp defaults (1x1 ROI, threshold=0) and trips on the first comparison frame.
 34. SP1: ball_watcher_event_loop discards 2 warm-up frames after V4L2 stream-on so first decoded frame's pre-AGC content can't bias previous_frame_.
+35. SP1: Teensy 4.0 strobe-controller firmware in Hardware/teensy_strobe/teensy_strobe.ino. Flash via Arduino IDE + Teensyduino add-on. Text protocol over USB serial: PULSES_FAST/SLOW,intervals... + ON_BITS,N + BAUD,N + MODE,FAST|SLOW + READY? + STATUS + TEST_FIRE. Pin 2=FIRE input (RISING-edge ISR), Pin 3=LED_GATE output, Pin 13=onboard status LED.
+36. SP1: Jetson PulseStrobe Jetson-side impl in Software/LMSourceCode/ImageProcessing/pulse_strobe_jetson.cpp (~470 lines). Replaces no-op stubs from v4l2_interface.cpp. Uses libgpiod (apt: libgpiod-dev) for the fire pin + termios for /dev/ttyACM0 USB serial to Teensy. Soft fallback on every HW failure (Teensy missing, GPIO claim refused) — InitGPIOSystem still returns true and SendExternalTrigger no-ops, so dev runs continue without strobe rig wired.
+37. SP1: Fire trigger pin = physical Pin 29 = PQ.05 = gpiochip1 line 105. Discovered authoritatively via Jetson.GPIO pin-data table at /usr/lib/python3/dist-packages/Jetson/GPIO/gpio_pin_data.py. Pin 29 is pure GPIO with no PWM/SPI/I2S/UART alternate (verified clean 0V↔3.3V toggle at 1Hz). The "user GPIO" pins 15/32/33 in the J202 datasheet ALL have PWM controllers attached (c340000.pwm, 32f0000.pwm, 3280000.pwm) and produce garbage voltages when driven via libgpiod — avoid them.
+38. SP1: gpiod CLI installed (apt: gpiod). Useful for verification: `sudo gpiodetect`, `sudo gpioinfo gpiochipN`, `sudo gpioset --mode=signal gpiochipN line=value` (hold until Ctrl+C) or `--mode=time --sec=N` (timed). Bare `gpioset` (no --mode) releases the line immediately and does NOT visibly hold.
+39. SP1: Three new strobing config keys in golf_sim_config.json — kJetsonTeensySerialDevice (default /dev/ttyACM0), kJetsonGpioChipName (gpiochip1), kJetsonFireGpioOffset (105). All overridable.
 
-Next step: SP4 wiring (placed-ball + manual trigger to GSPro round-trip) OR IR LED hardware (Group 2 strobe SPI). Calibration run will verify undistort wire-in.
+Next step: solder pins on Teensy when they arrive, wire Jetson Pin 29 ↔ Teensy Pin 2, GND ↔ GND, USB. Then Phase C-Test 1 (2N3904 + LED on Teensy Pin 3 — verify pulse train comes through). Then order MOSFET (IRLZ44N), wire to Cenpek 12V IR board for Phase C-Test 2.
 ```
 
 \---
@@ -392,6 +401,11 @@ PiTrac's key techniques:
 |2026-05-02|ball_watcher_event_loop discards 2 warm-up frames after V4L2 stream-on|First decoded frame after VIDIOC_STREAMON can be partially exposed / pre-AGC. With frame_period=5, sequence=0 stores that junk frame as previous_frame_, then sequence=5 (settled) compares against junk and trips. 2 warm-up frames at 120 FPS = ~17ms, invisible in normal operation.|Skip the first MotionDetectStage::Process call (would require changes to motion_detect_stage.cpp first_time_ logic); higher warm-up count (no benefit observed at 2)|
 |2026-05-02|undistort_camera_image ported verbatim from libcamera_interface.cpp:950 into v4l2_interface.cpp; called from TakeRawPicture|Pure OpenCV (initUndistortRectifyMap + remap), no libcamera/rpicam-apps dep. Matches RPi behavior so downstream ball-detect / stereo geometry consistently sees rectified frames once a calibration matrix is loaded. No-op until then (use_undistortion_matrix_=false). Required adding `#include <opencv2/calib3d.hpp>` — RPi side picked it up transitively.|Skip the port (rejected — would diverge from RPi when calibration eventually runs); call undistort at consumer site (rejected — multiple consumers)|
 |2026-05-02|motion_detect_stage thresholds tuned for bench (no-strobe) testing in golf_sim_config.json: kDifferenceM 0.9→0.3, kDifferenceC 3.0→5.0, kFramePeriod 0→5|Diagnostic confirmed regions=0 across 1200+ frames at the original gs_config defaults — even with the lens fully covered. The 0.9 per-pixel multiplier required near-saturation contrast change to count any pixel; frame_period=0 (compare adjacent frames at 8ms apart) made hand-wave transitions too small to see. Closer to assets/motion_detect.json RPi-tested defaults but with slack since we have no IR strobe yet (production path uses the strobe as effective shutter and gets sharp on/off contrast). Verified: static-scene noise floor 10-19 regions vs threshold 12800 (~675x headroom); hand-wave trip in <30 frames.|Keep gs_config defaults (rejected — confirmed unworkable on bench); use assets/motion_detect.json values verbatim (looser frame_period and hskip/vskip than necessary at our 120 FPS)|
+|2026-05-02|Strobe architecture: Teensy 4.0 as offloaded pulse-train controller, Jetson sends single fire trigger + USB-serial setup|Pulled the Teensy 4.0 forward from the v2 plan. Linux on Jetson Xavier NX cannot reliably hit sub-10µs GPIO timing under load (V4L2 + motion-detect run concurrently). Teensy 4.0 has 600 MHz Cortex-M7 + hardware timers and gives ns-precision pulse-train generation, completely deterministic. Jetson computes intervals/on-bits/baud once at startup, sends via USB serial; runtime fire is one GPIO pulse. PiTrac's BuildPulseTrain math stays unmodified on Jetson side (we just re-package the result for the Teensy protocol). Cleaner architecture than the RPi SPI bit-bang.|RPi SPI bit-bang ported 1:1 (rejected — Linux jitter > pulse width); Jetson GPIO direct via libgpiod (rejected — same jitter issue, still in Linux land); Arduino Nano (rejected — slower MCU, less margin)|
+|2026-05-02|Fire-trigger pin = Pin 29 = PQ.05 = gpiochip1 line 105|Discovered authoritatively via Jetson.GPIO's pin-data table at /usr/lib/python3/dist-packages/Jetson/GPIO/gpio_pin_data.py. Initial picks Pin 15 / Pin 32 / Pin 33 ("user GPIO" per the J202 datasheet) all have PWM controllers attached (c340000.pwm, 32f0000.pwm, 3280000.pwm) — kernel PWM driver fights libgpiod writes, multimeter reads garbage 1.5V averages. Pin 29 has no PWM/SPI/I2S/UART alternate (only "General Purpose Clock #0" which isn't active). Verified: clean 0V↔3.3V toggle at 1Hz via Jetson.GPIO Python.|Pin 15 (PWM-occupied), Pin 32/33 (PWM-occupied), AON gpiochip2 lines (PCC/PEE — uncertain header routing on J202), pure-SPI pins like 23/24 (would work but feel weird as user GPIO)|
+|2026-05-02|Cenpek IR LED board switched via low-side N-channel MOSFET (IRLZ44N) — not via on-board Q-transistors|Cenpek FY-S54-F-style boards have an LDR-based dusk-to-dawn auto-on circuit and Q-transistors that switch the LED branches. Modifying that circuit is invasive and undocumented (no schematic). Cleaner: leave the board untouched, gate the 12V-/return path via an external MOSFET driven from Teensy Pin 3. The board sees power-cycled supply; LDR-control is bypassed because the supply itself is gated.|Hack the on-board Q-transistor gate (rejected — invasive, irreversible if wrong); replace the Cenpek board with a custom MOSFET+LED board (rejected — extra design+order work)|
+|2026-05-02|Jetson PulseStrobe Jetson-side impl in dedicated pulse_strobe_jetson.cpp, NOT mixed into v4l2_interface.cpp|Mirrors v4l2_interface.cpp vs libcamera_interface.cpp split — clean per-file ownership. The 5 PulseStrobe stubs that lived in v4l2_interface.cpp until 2026-05-02 were placeholders, now removed. New file owns the full PulseStrobe Jetson surface (5 method implementations + all static member definitions + libgpiod + termios + Teensy text-protocol handshake).|Add to v4l2_interface.cpp (rejected — file already owns camera bring-up, would dilute responsibility); subdir under Hardware/ (rejected — needs to compile into pitrac_lm, not a separate target)|
+|2026-05-02|Strobe init failures degrade soft (warn + continue + SendExternalTrigger no-ops), not hard|During development the Teensy isn't always plugged in, the GPIO line might be in use, /dev/ttyACM0 might rename. Hard fail would block every dev run that doesn't have the strobe rig wired. Soft fallback lets us iterate on camera + motion-detect without the strobe sub-system, and the warning logs make the silent no-op visible.|Hard fail on init (rejected — too restrictive for dev); silent no-op without log (rejected — masks misconfiguration in production)|
 
 \---
 
@@ -436,6 +450,9 @@ PiTrac's key techniques:
 |2026-04-29|C++ V4L2Capture engine sustained ≥120 FPS via WatchForHitAndTrigger / ball_watcher_event_loop|`./pitrac_lm --system_mode=camera1_test_standalone --msg_broker_address=tcp://127.0.0.1:61616` with cam1 connected; per-frame log inside V4L2Capture::read()|✅ PASS|Per-frame intervals 7.7–8.1 ms (avg ~7.9 ms) = 123–130 FPS sustained over the tight read loop. Loop exits early on motion-detect after open/release recycling, so only ~5 frames captured per loop run, but the per-frame interval directly proves engine rate. cv::VideoCapture replaced by V4L2 ioctl + libjpeg-turbo gray decode + cv::cvtColor → BGR. CheckForBall path runs ~8 FPS due to FSM/IPC overhead per call (config reload, image save, MQ send) — engine is not the bottleneck.|
 |2026-05-02|Motion-detect static-scene baseline (false-positive check)|Same launch command, lens steady, no movement. Diagnostic log of `regions` per processed frame.|✅ PASS|Across 1060 frames at 120 FPS (~9 s loop), `regions` ranged 0-19 vs `region_threshold_=12800`. Loop ran to pkill timeout with no `motion_detect.result=true`. Confirms tuned thresholds (kDifferenceM=0.3, kDifferenceC=5.0, kFramePeriod=5) leave ~675× headroom over sensor/lighting noise floor.|
 |2026-05-02|Motion-detect hand-wave positive trigger|Same launch, hand moved across camera 1 FoV during seconds 22-28 of the 30 s session.|✅ PASS|`WatchForHitAndTrigger - calling` at 17:23:53.851, `WatchForHitAndTrigger - returned true motion_detected=true` at 17:23:54.937. Trip occurred within ~30 frames (~250 ms) of loop start, well before the diagnostic's first scheduled log point. Loop exited cleanly without pkill.|
+|2026-05-02|Teensy 4.0 firmware standalone test (no Jetson, no MOSFET)|Flash teensy_strobe.ino via Arduino IDE + Teensyduino. USB to Windows. Arduino Serial Monitor at 115200, line ending Newline. Sent: PULSES_FAST,5,5,5,5,5,5,0 / ON_BITS,4 / BAUD,38400 / MODE,FAST / STATUS / TEST_FIRE.|✅ PASS|All four setup commands → `OK`. STATUS dump returned `STATE=READY MODE=FAST ON_BITS=4 BAUD=38400 ON_PULSE_US=104 N_FAST=7 N_SLOW=0` — exactly matching the spec (104 µs = 4/38400×1e6). TEST_FIRE produced `FIRED` with brief LED13 dim during the pulse train. ISR detach/reattach worked (no double-fire). No MOSFET needed for this test.|
+|2026-05-02|Pin 29 GPIO toggle verification (Jetson.GPIO Python)|Jetson.GPIO setmode(BOARD), setup(29, OUT), toggle in 1-second loop, multimeter probing physical Pin 29.|✅ PASS|Clean 0V↔3.3V wechsel im Sekundentakt, korreliert mit `Pin 29 = 0/1` Console-Output. Earlier failed candidates (Pin 12, 15, 32) were either wrong physical mapping (PCC.04≠Pin 12) or PWM-controller-occupied (15/32/33). Pin 29 / PQ.05 / gpiochip1 line 105 is the locked-in fire-trigger pin.|
+|2026-05-02|Jetson PulseStrobe build (no HW yet)|`meson setup build_jetson --wipe -Djetson_build=true && ninja -C build_jetson` after pulse_strobe_jetson.cpp + meson dep + JSON keys landed.|✅ PASS|libgpiod-1.4.1 found via pkg-config. After fix-commit b9d51ac for the protected-member access bug (anonymous-namespace helper couldn't reach PulseStrobe::pulse_intervals_*; passed through as parameters), all 470 lines compiled, all PulseStrobe symbols resolved, binary produced clean.|
 
 \---
 
@@ -450,14 +467,23 @@ PiTrac's key techniques:
 * ☑ pitrac_lm advances through full FSM (Initializing → WaitingForBall → WaitingForBallStabilization → WaitingForBallHit → WatchForHitAndTrigger) with real OV9281 cameras
 * ☑ `undistort_camera_image` ported into v4l2_interface.cpp and wired into TakeRawPicture (no-op until calibration loads a matrix; OpenCV initUndistortRectifyMap+remap kicks in then)
 * ☑ `motion_detect_stage` tuned for bench testing: ConfigurePostProcessing wired into Jetson watch path, 2 warm-up frames discarded after stream-on, gs_config thresholds loosened (kDifferenceM 0.9→0.3, kFramePeriod 0→5). Static scene: 0-19 regions vs 12800 threshold; hand-wave trip in <30 frames.
+* ☑ Teensy 4.0 strobe-controller firmware written + standalone-tested (Hardware/teensy_strobe/teensy_strobe.ino — TEST_FIRE returns FIRED via Arduino Serial Monitor, no Jetson needed)
+* ☑ Jetson PulseStrobe Jetson-side impl in pulse_strobe_jetson.cpp (libgpiod fire-pin + termios USB-serial setup handshake + soft-fallback architecture). Builds clean.
+* ☑ Fire-pin locked: Pin 29 = PQ.05 = gpiochip1 line 105. JSON defaults updated. Verified via Jetson.GPIO Python toggle + multimeter.
+* ☐ **NEXT SESSION HANDOFF — Phase C wiring + smoke test:**
+   1. Pins auf Teensy löten (warten auf Lieferung)
+   2. Wire Jetson Pin 29 ↔ Teensy Pin 2 (FIRE_PIN), Jetson GND (z.B. Pin 30) ↔ Teensy GND, plus USB-Kabel Jetson↔Teensy
+   3. `cd ~/JetsonLM/Software/LMSourceCode/ImageProcessing && ./build_jetson/pitrac_lm --system_mode=camera1_test_standalone --msg_broker_address=tcp://127.0.0.1:61616 --logging_level=trace > /tmp/pitrac.log 2>&1` und im Log nach `Teensy READY, GPIO line claimed. Strobe pipeline live.` suchen
+   4. Hand wedeln → Motion-Detect trippt → `SendExternalTrigger - fire pulse sent to Teensy` Trace-Zeile → Teensy LED13 blinkt kurz (FIRING-Visual)
+   5. Phase C-Test 1: 2N3904 + 5mm-LED + 1kΩ an Teensy Pin 3 — verify Pulse-Train kommt durch (Test-LED flackert beim Fire-Trigger; Bench-Test ohne Risiko für die IR-LEDs)
+* ☐ MOSFET (IRLZ44N oder SparkFun PRT-12959) bestellen für Phase C-Test 2 (12V Cenpek IR-Board switching)
+* ☐ Cenpek-Board hooked up + first IR strobe burst verified (Phase C-Test 2)
 * ☐ V4L2Capture::ensure_streaming() failure-path fd leak — release() on failure so a retry can recover (see Issue #17)
 * ☐ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption (Issue #18) — works today only because cvtColor(GRAY→BGR) makes B=G=R; fix is `hskip * frame.channels()`
 * ☐ Verify `undistort_camera_image` end-to-end during the calibration run (currently no-op since use_undistortion_matrix_=false)
-* ☐ IR LED hardware + libgpiod / SPI strobe driver (gates `WaitForCam2Trigger`, spin measurement, full shot pipeline)
 * ☐ Mount cameras in enclosure at correct angles for stereo ball tracking
 * ☐ Run PiTrac calibration procedure with both cameras
-* ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → shot data → SP4 GSPro JSON)
-* ☐ Decide next session focus: SP4 wiring (placed-ball + manual-trigger TCP round-trip to GSPro) vs IR strobe hardware procurement
+* ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → strobe-lit shot capture → shot data → SP4 GSPro JSON)
 
 \---
 
@@ -676,6 +702,89 @@ PiTrac's key techniques:
 >   * Camera calibration run will verify the undistort wire-in.
 >   * Issues #17 and #18 are good "small cleanup" tasks if the next
 >     session has a slow window.
+
+**2026-05-02 (continued — same day, second half: strobe pipeline)**
+> Strobe hardware arrived (Teensy 4.0 DEV-15583 + Cenpek 850nm 12V
+> 4-LED IR board + 12V/15A industrial PSU).  Pivoted to Group 2 strobe
+> work right after the motion-detect milestone.
+>
+> Architecture decision up front: pulled the Teensy 4.0 forward from
+> the v2 plan instead of porting the RPi SPI bit-bang pulse generator
+> 1:1.  Linux on Xavier NX with V4L2 + motion-detect already running
+> can't reliably hit sub-10µs GPIO timing (jitter > pulse width).
+> Teensy 4.0 has hardware timers and gives ns-precision pulse-train
+> generation completely deterministically.  Jetson computes intervals
+> + on-bits + baud once at startup, sends via USB serial; runtime fire
+> is a single GPIO pulse.  PiTrac's BuildPulseTrain math stays
+> unmodified on the Jetson side — we just re-package the result
+> (pulse interval vector + ON-bit count) for the Teensy text protocol.
+>
+> Phase A — Teensy firmware (Hardware/teensy_strobe/teensy_strobe.ino,
+> ~260 lines): text protocol over USB serial (PULSES_FAST, PULSES_SLOW,
+> ON_BITS, BAUD, MODE, READY?, STATUS, TEST_FIRE), Pin 2 = FIRE input
+> (RISING-edge ISR), Pin 3 = LED_GATE output, Pin 13 = onboard status
+> LED.  Standalone-tested via Arduino Serial Monitor — `OK / FIRED`
+> chain confirmed without any Jetson present.  Commit eec3c50.
+>
+> Phase B — Jetson PulseStrobe Jetson-side impl
+> (pulse_strobe_jetson.cpp, ~470 lines): replaces the 5 no-op stubs
+> from v4l2_interface.cpp.  Real libgpiod fire-pin claim + termios
+> /dev/ttyACM0 USB-serial setup handshake.  Soft-fallback architecture
+> on every HW failure (Teensy missing, GPIO claim refused) so dev runs
+> without the strobe rig still work — InitGPIOSystem returns true,
+> SendExternalTrigger no-ops with a warning.  Builds clean after one
+> compile fix (anonymous-namespace helper couldn't reach
+> protected static members; refactored to take them as parameters).
+> Commits efe0fe6, b9d51ac.
+>
+> Phase B GPIO pin discovery — long debug arc, eventually nailed:
+>   * Initial guess gpiochip0 line 148 (PMIC chip — only 8 lines, wrong)
+>   * Switched to gpiochip2 line 14 (PCC.02) — multimeter found no
+>     toggling header pin (PCC.02 likely not routed to header)
+>   * Tried gpiochip2 line 28 (PEE.05) — no datasheet confirmation it
+>     was on header
+>   * Tried gpiochip2 line 16 (PCC.04) — discovered my port-adjacency
+>     theory was wrong (PCC.04 is Pin 15, not Pin 12 as I assumed)
+>   * Pin 15 toggle test failed (line stayed 0V) — turned out the
+>     "user GPIO" pins 15/32/33 in the J202 datasheet ALL have PWM
+>     controllers attached (c340000.pwm / 32f0000.pwm / 3280000.pwm)
+>     per Jetson.GPIO's pin-data table.  Kernel PWM driver fights our
+>     libgpiod writes and produces garbage 1.5V averages on the
+>     multimeter
+>   * Final pick: Pin 29 = PQ.05 = gpiochip1 line 105.  No PWM/SPI/
+>     I2S/UART alternate (only "General Purpose Clock #0" which isn't
+>     active).  Verified clean 0V↔3.3V toggle at 1Hz via Jetson.GPIO
+>     Python (after fixing a cable contact issue that had been
+>     polluting earlier multimeter readings).
+> Commits 2ca5915, cd949d9, 01b521b, e8bd72d.
+>
+> Lessons saved as memory: (1) Jetson.GPIO pin-data file location at
+> /usr/lib/python3/dist-packages/Jetson/GPIO/gpio_pin_data.py is the
+> authoritative pinmap for any Jetson; (2) `gpioset` without
+> `--mode=signal` or `--mode=time` releases the line immediately —
+> apparent toggle-loop failures are usually this, not the pin.
+>
+> Status at end of session: Phase A (firmware) and Phase B (Jetson
+> code) both complete and committed.  Phase C (wiring + bench tests)
+> blocks on (a) header pins to solder onto the Teensy (waiting on
+> shipment), and (b) IRLZ44N MOSFET to order for the 12V Cenpek
+> board switching.  2N3904 + LED + 1kΩ already in hand for the
+> intermediate Phase C-Test 1 (proof-of-life on Teensy Pin 3 gate
+> output without the IR-LED-array risk).
+>
+> Hardware Components Registry updated: Teensy 4.0 / Cenpek IR /
+> 12V PSU all marked "in hand"; MOSFET marked "TBD ordered."
+> SP1 progress 88% → 92%.
+>
+> Handoff for next session is in SP1 Next Steps.  When the soldered
+> Teensy is wired up, single command sequence will validate the full
+> strobe pipeline:
+>   1. cd ~/JetsonLM/Software/LMSourceCode/ImageProcessing
+>   2. ./build_jetson/pitrac_lm --system_mode=camera1_test_standalone
+>      --msg_broker_address=tcp://127.0.0.1:61616 --logging_level=trace
+>   3. grep for "Teensy READY, GPIO line claimed" in the log
+>   4. Wave hand → check for "SendExternalTrigger - fire pulse sent
+>      to Teensy" + LED13 blip on Teensy
 
 \---
 
