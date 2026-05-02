@@ -381,9 +381,9 @@
     "motion_detect_stage": {
       "kCroppedImagePixelOffsetLeft": "0",
       "kCroppedImagePixelOffsetUp": "-3",
-      "kDifferenceC": "3.0",
-      "kDifferenceM": "0.9",
-      "kFramePeriod": "0",
+      "kDifferenceC": "5.0",
+      "kDifferenceM": "0.3",
+      "kFramePeriod": "5",
       "kHSkip": "2",
       "kMaxRegionThreshold": "0.05",
       "kRegionThreshold": "0.05",
