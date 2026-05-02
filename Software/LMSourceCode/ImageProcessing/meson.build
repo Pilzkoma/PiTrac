@@ -83,6 +83,10 @@ if jetson_build
     if not turbojpeg_dep.found()
         turbojpeg_dep = cxx.find_library('turbojpeg', required : true)
     endif
+    libgpiod_dep = dependency('libgpiod', required : false)
+    if not libgpiod_dep.found()
+        libgpiod_dep = cxx.find_library('gpiod', required : true)
+    endif
 endif  # JETSON_STUB
 
 thread_dep = dependency('threads', required : true)
@@ -117,7 +121,7 @@ pitrac_lm_module_deps = [
 if not jetson_build  # JETSON_STUB
     pitrac_lm_module_deps += [libcamera_dep, lgpio_dep, rpicam_app_dep]
 else  # JETSON_STUB
-    pitrac_lm_module_deps += [turbojpeg_dep]
+    pitrac_lm_module_deps += [turbojpeg_dep, libgpiod_dep]
 endif  # JETSON_STUB
 
 
@@ -264,6 +268,8 @@ pitrac_lm_sources += ([
 
 if jetson_build  # JETSON_STUB: post_processing_stages/ subdir is skipped on Jetson; add directly
     pitrac_lm_sources += ['post_processing_stages/motion_detect_stage.cpp']
+    # JETSON_STUB: real PulseStrobe symbols for the Jetson build (Teensy + libgpiod path)
+    pitrac_lm_sources += ['pulse_strobe_jetson.cpp']
 else  # JETSON_STUB: E6/TruGolf integration not needed on Jetson (GSPro only)
     pitrac_lm_sources += ['gs_e6_interface.cpp', 'gs_e6_results.cpp']
 endif
