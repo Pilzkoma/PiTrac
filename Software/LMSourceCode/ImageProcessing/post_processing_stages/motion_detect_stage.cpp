@@ -333,6 +333,19 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 		}
 	}
 
+#ifdef JETSON_BUILD  // JETSON_STUB: temporary diagnostic — see how close to the
+	// region_threshold_ we actually get on the bench (no IR strobe).  Logs every
+	// 30th frame to keep output bounded at ~4 lines/sec at 120 FPS.  Remove once
+	// motion-detect tuning is settled.
+	if ((completed_request->sequence % 30) == 0) {
+		GS_LOG_MSG(trace, "MotionDetectStage::Process - seq=" + std::to_string(completed_request->sequence)
+		           + " regions=" + std::to_string(regions)
+		           + " threshold=" + std::to_string(region_threshold_)
+		           + " sample_pixels=" + std::to_string(roi_width_ * roi_height_)
+		           + " trip=" + std::string(local_motion_detected ? "1" : "0"));
+	}
+#endif
+
 	// TBD - Only for testing - REMOVE
 	// std::cout << regions << std::endl;
 
