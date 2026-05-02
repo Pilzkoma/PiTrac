@@ -310,14 +310,15 @@ namespace golf_sim {
 
         // Jetson-specific config (added 2026-05-02 for the Teensy strobe path).
         std::string teensy_device   = "/dev/ttyACM0";
-        std::string gpio_chip_name  = "gpiochip2";
-        // PCC.04 on Xavier NX AON GPIO bank.  Maps to physical Pin 12
-        // (I2S0_SCLK) on the Seeed reComputer J202 carrier per the J202x
-        // datasheet page 18.  Default usage column is "GPIO" — kernel
-        // does not auto-claim it.  Adjacent PCC.03 (Pin 7 / AUD_MCLK) is
-        // the audio mclk that the kernel claims via "mux", so we sit one
-        // line up.  Override here if your wiring differs.
-        int         fire_gpio_offset = 16;
+        std::string gpio_chip_name  = "gpiochip1";
+        // PQ.05 on the main tegra194-gpio chip.  Maps to physical Pin 29
+        // (GPIO01 / SOC_GPIO41) on the Jetson Xavier NX 40-pin header per
+        // the Jetson.GPIO pin-data table.  No PWM/SPI/I2S/UART alternate
+        // function — pure GPIO, verified clean toggle 0V <-> 3.3V at 1Hz
+        // via Jetson.GPIO Python (2026-05-02).  The "GPIO12" alternate
+        // pins (15/32/33) all have PWM controllers attached and were
+        // unreliable.  Override here if your wiring uses a different pin.
+        int         fire_gpio_offset = 105;
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonTeensySerialDevice", teensy_device);
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonGpioChipName",       gpio_chip_name);
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonFireGpioOffset",     fire_gpio_offset);
