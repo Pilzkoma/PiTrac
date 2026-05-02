@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|85%|🟡 In Progress|2026-04-29|
+|SP1 — Hardware & Build|HW+SW|Build|88%|🟡 In Progress|2026-05-02|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -116,7 +116,7 @@
 
 > Fill in after first successful Jetson build.
 
-**Last verified working on:** *26.04.2026*
+**Last verified working on:** *02.05.2026*
 
 ```
 1. JetPack 5.1.6 (L4T 35.6.4) confirmed installed — do not reflash
@@ -149,8 +149,12 @@
 28. SP1: ActiveMQ apt package installed; default instance enabled via `sudo ln -s /etc/activemq/instances-available/main /etc/activemq/instances-enabled/main`; broker runs as systemd service `activemq` listening on tcp://127.0.0.1:61616.
 29. SP1: libturbojpeg0-dev required for the V4L2 capture engine (apt install).
 30. SP1: V4L2 device cleanup: `timeout` SIGTERM does NOT cleanly release /dev/video0 — use `( cmd ) & sleep N; pkill -9 pitrac_lm` instead. If stuck: `sudo rmmod uvcvideo && sudo modprobe uvcvideo`.
+31. SP1: motion_detect_stage tuned for bench testing (no IR strobe) in golf_sim_config.json — kDifferenceM=0.3, kDifferenceC=5.0, kFramePeriod=5. Static-scene noise floor ~10-19 regions vs threshold 12800 (~675x headroom); hand-wave tripped in <30 frames.
+32. SP1: undistort_camera_image ported into v4l2_interface.cpp; called from TakeRawPicture. No-op until camera calibration loads a matrix (use_undistortion_matrix_=false), then OpenCV initUndistortRectifyMap+remap kicks in. Needs opencv2/calib3d.hpp include.
+33. SP1: ConfigurePostProcessing must be called from WatchForHitAndTrigger BEFORE ball_watcher_event_loop on Jetson — the RPi side called it inside ConfigCameraForCropping which is RPi-only. Without this call, MotionDetectStage::Read falls through to cpp defaults (1x1 ROI, threshold=0) and trips on the first comparison frame.
+34. SP1: ball_watcher_event_loop discards 2 warm-up frames after V4L2 stream-on so first decoded frame's pre-AGC content can't bias previous_frame_.
 
-Next step: undistort_camera_image port + motion_detect tuning + IR LED hardware (Group 2 strobe SPI work).
+Next step: SP4 wiring (placed-ball + manual trigger to GSPro round-trip) OR IR LED hardware (Group 2 strobe SPI). Calibration run will verify undistort wire-in.
 ```
 
 \---
@@ -175,6 +179,8 @@ Next step: undistort_camera_image port + motion_detect tuning + IR LED hardware 
 |14|SP1|OpenCV defaults to YUYV format (10 FPS). Must explicitly set MJPG fourcc for 120 FPS from OV9281.|🔵 Minor|☑ Yes|Set cv2.CAP_PROP_FOURCC to cv2.VideoWriter_fourcc('M','J','P','G') in capture code|2026-03-21|
 |15|SP1|OpenCV cv2.VideoCapture.read() caps Python at ~60 FPS per camera even with MJPG fourcc set. CPU-bound JPEG decode + BGR conversion is the bottleneck — not USB, not the camera. Raw v4l2-ctl streaming hits the full 120 FPS on both cameras simultaneously.|🔵 Minor|☑ Yes|Not a blocker — C++ v4l2_interface.cpp will use V4L2 ioctl directly + libjpeg-turbo or nvJPEG (Jetson hardware decoder), bypassing OpenCV's VideoCapture. Python test scripts accept the cap.|2026-04-26|
 |16|SP1|UVC auto-exposure (exposure_auto=3) silently caps frame rate when integration time exceeds the frame interval. At default exposure_absolute=157 (15.7ms), max achievable is ~64 FPS regardless of requested rate.|🔵 Minor|☑ Yes|Irrelevant for production: IR strobe is the effective shutter (10–15µs pulse), camera exposure stays open. For bench testing without strobe, set exposure_auto=1 + low exposure_absolute via v4l2-ctl.|2026-04-26|
+|17|SP1|V4L2Capture::ensure_streaming() leaks the open fd on any failure path (REQBUFS, mmap, STREAMON). `streaming_=false` stays set, so subsequent `read()` calls re-attempt ensure_streaming against the same already-failed fd and never recover. /dev/videoX gets stuck and only `rmmod uvcvideo && modprobe uvcvideo` clears it.|🔵 Minor|☑ Yes|Fix: call release() on every ensure_streaming failure path, not just shutdown. Documented but not yet implemented — has not bitten in normal runs because the happy path works. ~1 hour of work.|2026-04-29|
+|18|SP1|motion_detect_stage.cpp horizontal hskip step is in BYTES not PIXELS. Assumes CV_8UC1 input but V4L2Capture engine delivers CV_8UC3 BGR (after cvtColor(GRAY2BGR) inside decode_into). Today this still produces sensible motion-detect because B=G=R per pixel, but the effective horizontal pixel coverage is reduced from 640 samples to ~213 actual pixels per row.|🔵 Minor|☑ Yes|Either change V4L2Capture::decode_into to deliver CV_8UC1 directly (smaller change, but breaks consumers expecting BGR) or fix motion_detect_stage to multiply hskip by frame.channels() (one-line fix, JETSON-guarded). Documented but not yet implemented — coverage is still sufficient for motion-detect to work reliably today (verified 2026-05-02).|2026-05-02|
 
 \---
 
@@ -382,6 +388,10 @@ PiTrac's key techniques:
 |2026-04-29|PerformCameraSystemStartup writes CameraHardware::resolution_x_override_=1280, resolution_y_override_=800|PiTrac's PiGS CameraModel default is 1456×1088 — every captured 1280×800 frame failed the resolution check at camera_hardware.cpp:205. Setting the existing override (already used by gs_automated_testing.cpp and lm_main.cpp) is the in-scope fix that lets PiTrac's downstream code accept OV9281 frames without touching gs_camera.cpp / camera_hardware.cpp.|Adding a new `OV9281_USB_Mono = 6` entry to the CameraModel enum (out of scope — touches camera_hardware.{h,cpp} and gs_camera.cpp); patching the resolution check to log warning instead of error (out of scope, same files)|
 |2026-04-29|PulseStrobe::* GPIO/SPI stubs return true (no-op success) instead of false|gs_fsm.cpp:959 + lm_main.cpp:1159 treat false as a fatal init error and abort before reaching camera capture. Returning true ("succeeded as a no-op") lets the FSM advance; SendExternalTrigger remains a no-op until the IR LED hardware lands and the real libgpiod / SPI implementation can be written.|False return (rejected — abort path); skip-GPIO CLI flag (would require touching lm_main.cpp/gs_options.h)|
 |2026-04-29|ActiveMQ broker required at runtime; broker = system apt activemq, addr passed via --msg_broker_address|PiTrac's IPC layer (consumer + producer threads, ipcResults messages) is mandatory in every system_mode. The broker is now installed via the Debian apt package on the Jetson, with the default `main` instance enabled at /etc/activemq/instances-enabled/main, listening on tcp://127.0.0.1:61616. CLI flag `--msg_broker_address` overrides the JSON config's empty `kWebActiveMQHostAddress` so we don't have to edit golf_sim_config.json.|Edit golf_sim_config.json (rejected — out of scope for this session; CLI flag is cleaner); skip the IPC init (would require code changes to lm_main / gs_fsm)|
+|2026-05-02|ConfigurePostProcessing wired into Jetson WatchForHitAndTrigger before ball_watcher_event_loop, with full-frame ROI (1280x800)|RPi side called it inside ConfigCameraForCropping which is RPi-only — on Jetson the call was missing, MotionDetectStage::Read fell through to cpp defaults (1x1 ROI, threshold=0), and any non-zero `regions` count tripped on the first comparison frame. Full-frame ROI is the v1 default since SendCameraCroppingCommand is still TODO (Group 2). Verified by `MotionDetectStage::Read - using internal data.` trace.|Hardcode params inline in ball_watcher.cpp Jetson branch (rejected — scatters config); keep ConfigurePostProcessing call in PerformCameraSystemStartup (rejected — wrong scope; needs camera-specific roi which is a watch-time concern)|
+|2026-05-02|ball_watcher_event_loop discards 2 warm-up frames after V4L2 stream-on|First decoded frame after VIDIOC_STREAMON can be partially exposed / pre-AGC. With frame_period=5, sequence=0 stores that junk frame as previous_frame_, then sequence=5 (settled) compares against junk and trips. 2 warm-up frames at 120 FPS = ~17ms, invisible in normal operation.|Skip the first MotionDetectStage::Process call (would require changes to motion_detect_stage.cpp first_time_ logic); higher warm-up count (no benefit observed at 2)|
+|2026-05-02|undistort_camera_image ported verbatim from libcamera_interface.cpp:950 into v4l2_interface.cpp; called from TakeRawPicture|Pure OpenCV (initUndistortRectifyMap + remap), no libcamera/rpicam-apps dep. Matches RPi behavior so downstream ball-detect / stereo geometry consistently sees rectified frames once a calibration matrix is loaded. No-op until then (use_undistortion_matrix_=false). Required adding `#include <opencv2/calib3d.hpp>` — RPi side picked it up transitively.|Skip the port (rejected — would diverge from RPi when calibration eventually runs); call undistort at consumer site (rejected — multiple consumers)|
+|2026-05-02|motion_detect_stage thresholds tuned for bench (no-strobe) testing in golf_sim_config.json: kDifferenceM 0.9→0.3, kDifferenceC 3.0→5.0, kFramePeriod 0→5|Diagnostic confirmed regions=0 across 1200+ frames at the original gs_config defaults — even with the lens fully covered. The 0.9 per-pixel multiplier required near-saturation contrast change to count any pixel; frame_period=0 (compare adjacent frames at 8ms apart) made hand-wave transitions too small to see. Closer to assets/motion_detect.json RPi-tested defaults but with slack since we have no IR strobe yet (production path uses the strobe as effective shutter and gets sharp on/off contrast). Verified: static-scene noise floor 10-19 regions vs threshold 12800 (~675x headroom); hand-wave trip in <30 frames.|Keep gs_config defaults (rejected — confirmed unworkable on bench); use assets/motion_detect.json values verbatim (looser frame_period and hskip/vskip than necessary at our 120 FPS)|
 
 \---
 
@@ -424,6 +434,8 @@ PiTrac's key techniques:
 |2026-04-26|Dual camera parallel sustained 120 FPS @ 1280x800 MJPG (raw V4L2)|Both v4l2-ctl streams running simultaneously via shell &|✅ PASS|Both cameras: 111→116→120→120→120 FPS each — no degradation from parallel streaming, separate USB buses confirmed independent|
 |2026-04-26|Dual camera OpenCV cv2.VideoCapture.read() throughput|sp1_vision/dual_camera_test.py (with and without --exposure)|⚠ PARTIAL|Both cameras cap at ~55–60 FPS regardless of exposure setting. Confirmed via v4l2-ctl that this is a Python/OpenCV decode bottleneck, NOT a camera/USB limitation. Acceptable — production C++ pipeline will not use cv::VideoCapture. Issue #15 logged.|
 |2026-04-29|C++ V4L2Capture engine sustained ≥120 FPS via WatchForHitAndTrigger / ball_watcher_event_loop|`./pitrac_lm --system_mode=camera1_test_standalone --msg_broker_address=tcp://127.0.0.1:61616` with cam1 connected; per-frame log inside V4L2Capture::read()|✅ PASS|Per-frame intervals 7.7–8.1 ms (avg ~7.9 ms) = 123–130 FPS sustained over the tight read loop. Loop exits early on motion-detect after open/release recycling, so only ~5 frames captured per loop run, but the per-frame interval directly proves engine rate. cv::VideoCapture replaced by V4L2 ioctl + libjpeg-turbo gray decode + cv::cvtColor → BGR. CheckForBall path runs ~8 FPS due to FSM/IPC overhead per call (config reload, image save, MQ send) — engine is not the bottleneck.|
+|2026-05-02|Motion-detect static-scene baseline (false-positive check)|Same launch command, lens steady, no movement. Diagnostic log of `regions` per processed frame.|✅ PASS|Across 1060 frames at 120 FPS (~9 s loop), `regions` ranged 0-19 vs `region_threshold_=12800`. Loop ran to pkill timeout with no `motion_detect.result=true`. Confirms tuned thresholds (kDifferenceM=0.3, kDifferenceC=5.0, kFramePeriod=5) leave ~675× headroom over sensor/lighting noise floor.|
+|2026-05-02|Motion-detect hand-wave positive trigger|Same launch, hand moved across camera 1 FoV during seconds 22-28 of the 30 s session.|✅ PASS|`WatchForHitAndTrigger - calling` at 17:23:53.851, `WatchForHitAndTrigger - returned true motion_detected=true` at 17:23:54.937. Trip occurred within ~30 frames (~250 ms) of loop start, well before the diagnostic's first scheduled log point. Loop exited cleanly without pkill.|
 
 \---
 
@@ -436,12 +448,16 @@ PiTrac's key techniques:
 * ☑ Real V4L2 capture engine implemented in v4l2_interface.cpp — V4L2Capture class with mmap + libjpeg-turbo decode; sustains 125–130 FPS in ball_watcher_event_loop
 * ☑ ActiveMQ broker installed and configured on Jetson; PiTrac IPC runs end-to-end
 * ☑ pitrac_lm advances through full FSM (Initializing → WaitingForBall → WaitingForBallStabilization → WaitingForBallHit → WatchForHitAndTrigger) with real OV9281 cameras
-* ☐ Port `undistort_camera_image` (currently skipped in TakeRawPicture for Jetson — frames not lens-corrected)
-* ☐ Tighten `motion_detect_stage` so ball_watcher_event_loop doesn't exit on the first-frame edge case after open/release recycling
+* ☑ `undistort_camera_image` ported into v4l2_interface.cpp and wired into TakeRawPicture (no-op until calibration loads a matrix; OpenCV initUndistortRectifyMap+remap kicks in then)
+* ☑ `motion_detect_stage` tuned for bench testing: ConfigurePostProcessing wired into Jetson watch path, 2 warm-up frames discarded after stream-on, gs_config thresholds loosened (kDifferenceM 0.9→0.3, kFramePeriod 0→5). Static scene: 0-19 regions vs 12800 threshold; hand-wave trip in <30 frames.
+* ☐ V4L2Capture::ensure_streaming() failure-path fd leak — release() on failure so a retry can recover (see Issue #17)
+* ☐ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption (Issue #18) — works today only because cvtColor(GRAY→BGR) makes B=G=R; fix is `hskip * frame.channels()`
+* ☐ Verify `undistort_camera_image` end-to-end during the calibration run (currently no-op since use_undistortion_matrix_=false)
 * ☐ IR LED hardware + libgpiod / SPI strobe driver (gates `WaitForCam2Trigger`, spin measurement, full shot pipeline)
 * ☐ Mount cameras in enclosure at correct angles for stereo ball tracking
 * ☐ Run PiTrac calibration procedure with both cameras
-* ☐ First end-to-end ball detection + speed/angles output to console
+* ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → shot data → SP4 GSPro JSON)
+* ☐ Decide next session focus: SP4 wiring (placed-ball + manual-trigger TCP round-trip to GSPro) vs IR strobe hardware procurement
 
 \---
 
@@ -595,6 +611,71 @@ PiTrac's key techniques:
 >     path the fd remains open and `streaming_=false`, so subsequent
 >     read() calls re-attempt ensure_streaming against the same
 >     already-failed fd and never recover.  Fix: release() on failure.
+
+**2026-05-02**
+> SP1 motion-detect blocker resolved end-to-end.  ball_watcher_event_loop
+> now runs the full MotionDetectStage path on Jetson — trips reliably on
+> real motion (hand wave: <30 frames, ~250 ms) and stays silent on a
+> static scene (1060 frames, regions 0-19 vs threshold 12800, ~675x
+> headroom).  This was the last software gap between "engine works" and
+> "ball detection produces real output."
+>
+> Three layered fixes, in order of importance:
+>   1. ConfigurePostProcessing wired into Jetson WatchForHitAndTrigger
+>      with a full-frame ROI (1280×800).  RPi side called this from
+>      ConfigCameraForCropping which is RPi-only — without the wireup,
+>      MotionDetectStage::Read fell through to cpp defaults (1×1 ROI,
+>      threshold=0) and any non-zero `regions` count tripped on the
+>      first comparison frame.  Verified by `MotionDetectStage::Read -
+>      using internal data.` trace.
+>   2. golf_sim_config.json motion_detect_stage thresholds tuned for
+>      bench (no-strobe) testing: kDifferenceM 0.9→0.3, kDifferenceC
+>      3.0→5.0, kFramePeriod 0→5.  The original 0.9 per-pixel
+>      multiplier required near-saturation contrast to count any pixel;
+>      diagnostic showed regions=0 across 1200+ frames even with the
+>      lens fully covered.  Production path with IR strobe will likely
+>      want the original strict thresholds back — saved as a known
+>      pre-strobe-vs-post-strobe tuning question.
+>   3. ball_watcher_event_loop discards 2 warm-up frames after V4L2
+>      stream-on so the first decoded frame's pre-AGC content can't
+>      bias previous_frame_.
+>
+> Side-quest landed in the same session: undistort_camera_image ported
+> verbatim from libcamera_interface.cpp:950 (pure OpenCV — needs
+> opencv2/calib3d.hpp include) and called from TakeRawPicture.  No-op
+> until camera calibration loads a matrix, then OpenCV
+> initUndistortRectifyMap+remap kicks in — matches RPi semantics so
+> downstream ball-detect/stereo geometry consistently sees rectified
+> frames.  Will be verified on the calibration run.
+>
+> 5 commits on main: ConfigurePostProcessing wireup + warm-up
+> (e73d4cc), undistort port (56df327), opencv2/calib3d.hpp include
+> (e41f5f8), motion-detect diagnostic (dacec39, removed at end of
+> session), motion-detect threshold tune (21c28ef).
+>
+> Process notes (workflow lessons):
+>   * `cd && git pull && ninja && (...) & sleep 30; pkill` is wrong —
+>     the `&` backgrounds the whole chain and pkill fires while ninja
+>     is still building.  Separate build from test+timing chain.
+>   * trace flooding the terminal makes Ctrl+C feel unresponsive (the
+>     keystrokes scroll past).  Always redirect to /tmp/pitrac.log,
+>     grep after.  Open a second SSH session for emergency pkill.
+>   * SSH from dev machine to Jetson is significantly faster than
+>     copy-pasting through Google Docs.
+>
+> Two issues moved from "session-notes follow-up" to formal Known
+> Issues Register (Issues #17 and #18) — neither is a current blocker:
+>   * #17: V4L2Capture ensure_streaming() failure-path fd leak.  ~1h fix.
+>   * #18: motion_detect_stage hskip is in bytes not pixels (CV_8UC3
+>     assumption).  One-line fix, JETSON-guarded.
+>
+> Known follow-ups for the next session:
+>   * Pick: SP4 placed-ball + manual-trigger TCP round-trip to GSPro
+>     (proves the data pipeline) OR IR LED hardware procurement
+>     (unblocks the strobe SPI work and Cam2 trigger).
+>   * Camera calibration run will verify the undistort wire-in.
+>   * Issues #17 and #18 are good "small cleanup" tasks if the next
+>     session has a slow window.
 
 \---
 
