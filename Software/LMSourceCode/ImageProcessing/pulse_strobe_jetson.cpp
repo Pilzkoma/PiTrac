@@ -310,8 +310,12 @@ namespace golf_sim {
 
         // Jetson-specific config (added 2026-05-02 for the Teensy strobe path).
         std::string teensy_device   = "/dev/ttyACM0";
-        std::string gpio_chip_name  = "gpiochip0";
-        int         fire_gpio_offset = 148;  // Best-guess Pin 7 on Seeed Xavier NX carrier — verify with `sudo gpioinfo gpiochip0`
+        std::string gpio_chip_name  = "gpiochip2";
+        // PCC.02 on Xavier NX AON GPIO bank — confirmed unused output via
+        // `sudo gpioinfo gpiochip2`. Identify which physical 40-pin header
+        // pin maps to PCC.02 with `sudo gpioset --mode=signal gpiochip2 14=1`
+        // and a multimeter; override here if a different pin is wired.
+        int         fire_gpio_offset = 14;
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonTeensySerialDevice", teensy_device);
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonGpioChipName",       gpio_chip_name);
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonFireGpioOffset",     fire_gpio_offset);

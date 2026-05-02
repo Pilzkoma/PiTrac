@@ -472,8 +472,8 @@
       "number_bits_for_fast_on_pulse_": "2",
       "number_bits_for_slow_on_pulse_": "8",
       "kJetsonTeensySerialDevice": "/dev/ttyACM0",
-      "kJetsonGpioChipName": "gpiochip0",
-      "kJetsonFireGpioOffset": "148"
+      "kJetsonGpioChipName": "gpiochip2",
+      "kJetsonFireGpioOffset": "14"
     },
     "testing": {
       "kAutomatedTestExpectedResultsCSV": "Uneekor Comparison 2025-02-07_Small_Test.csv",
