@@ -105,7 +105,10 @@ namespace golf_sim {
     std::string read_line(int timeout_ms);
     bool        send_line_and_expect_ok(const std::string& cmd, int timeout_ms = 500);
     std::string format_intervals(const std::vector<float>& intervals);
-    bool        send_setup_to_teensy(long baud_rate);
+    bool        send_setup_to_teensy(const std::vector<float>& fast_intervals,
+                                     const std::vector<float>& slow_intervals,
+                                     int on_bits,
+                                     long baud_rate);
 
     bool open_teensy_serial(const std::string& path) {
         teensy_fd = ::open(path.c_str(), O_RDWR | O_NOCTTY);
@@ -197,27 +200,33 @@ namespace golf_sim {
         return oss.str();
     }
 
-    bool send_setup_to_teensy(long baud_rate) {
-        if (PulseStrobe::pulse_intervals_fast_ms_.empty()) {
-            GS_LOG_MSG(error, "send_setup_to_teensy - pulse_intervals_fast_ms_ empty");
+    bool send_setup_to_teensy(const std::vector<float>& fast_intervals,
+                              const std::vector<float>& slow_intervals,
+                              int on_bits,
+                              long baud_rate) {
+        // Caller (PulseStrobe::InitGPIOSystem) owns access to the class's
+        // protected static members and passes them in.  Keeps this helper
+        // out of the friend / member dance.
+        if (fast_intervals.empty()) {
+            GS_LOG_MSG(error, "send_setup_to_teensy - fast_intervals empty");
             return false;
         }
-        if (PulseStrobe::pulse_intervals_slow_ms_.empty()) {
-            GS_LOG_MSG(error, "send_setup_to_teensy - pulse_intervals_slow_ms_ empty");
+        if (slow_intervals.empty()) {
+            GS_LOG_MSG(error, "send_setup_to_teensy - slow_intervals empty");
             return false;
         }
-        if (PulseStrobe::number_bits_for_fast_on_pulse_ < 1) {
-            GS_LOG_MSG(error, "send_setup_to_teensy - number_bits_for_fast_on_pulse_ < 1");
+        if (on_bits < 1) {
+            GS_LOG_MSG(error, "send_setup_to_teensy - on_bits < 1");
             return false;
         }
 
-        if (!send_line_and_expect_ok("PULSES_FAST," + format_intervals(PulseStrobe::pulse_intervals_fast_ms_))) {
+        if (!send_line_and_expect_ok("PULSES_FAST," + format_intervals(fast_intervals))) {
             return false;
         }
-        if (!send_line_and_expect_ok("PULSES_SLOW," + format_intervals(PulseStrobe::pulse_intervals_slow_ms_))) {
+        if (!send_line_and_expect_ok("PULSES_SLOW," + format_intervals(slow_intervals))) {
             return false;
         }
-        if (!send_line_and_expect_ok("ON_BITS," + std::to_string(PulseStrobe::number_bits_for_fast_on_pulse_))) {
+        if (!send_line_and_expect_ok("ON_BITS," + std::to_string(on_bits))) {
             return false;
         }
         if (!send_line_and_expect_ok("BAUD," + std::to_string(baud_rate))) {
@@ -348,7 +357,10 @@ namespace golf_sim {
             return true;
         }
 
-        if (!send_setup_to_teensy(kBaudRateForFastPulses)) {
+        if (!send_setup_to_teensy(pulse_intervals_fast_ms_,
+                                  pulse_intervals_slow_ms_,
+                                  number_bits_for_fast_on_pulse_,
+                                  kBaudRateForFastPulses)) {
             GS_LOG_MSG(warning, "PulseStrobe::InitGPIOSystem - Teensy handshake failed"
                                 " - SendExternalTrigger will no-op");
             // Keep GPIO claimed in case Teensy comes back; tear down on Deinit.
