@@ -434,7 +434,11 @@ namespace golf_sim {
                               + std::strerror(errno));
             return false;
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        // 100us hold matches the Python bypass-test script that proved reliable.
+        // Under Linux + userspace libgpiod, 10us was on the edge: scheduler jitter
+        // could collapse the actual HIGH time below the Teensy ISR's reliable
+        // detection threshold.  100us is still imperceptible vs FSM/IPC latency.
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
         if (gpiod_line_set_value(fire_line, 0) < 0) {
             GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(0) failed: ")
                               + std::strerror(errno));
