@@ -35,9 +35,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
-#include <gpiod.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -96,8 +96,7 @@ namespace golf_sim {
     namespace {
 
     int           teensy_fd     = -1;
-    gpiod_chip*   gpio_chip     = nullptr;
-    gpiod_line*   fire_line     = nullptr;
+    std::string   fire_trigger_script;     // absolute path to fire_trigger.py
     bool          teensy_ready  = false;  // true only after handshake completes
 
     // Helpers (declarations)
@@ -309,23 +308,17 @@ namespace golf_sim {
         GolfSimConfiguration::SetConstant("gs_config.strobing.kBaudRateForSlowPulses", kBaudRateForSlowPulses);
 
         // Jetson-specific config (added 2026-05-02 for the Teensy strobe path).
+        // Trigger goes via fire_trigger.py (Jetson.GPIO under the hood) — the
+        // libgpiod chardev path was confirmed not to drive Pin 29 reliably
+        // on this Seeed J202 carrier (2026-05-05 debugging arc, Issue #22).
         std::string teensy_device   = "/dev/ttyACM0";
-        std::string gpio_chip_name  = "gpiochip1";
-        // PQ.05 on the main tegra194-gpio chip.  Maps to physical Pin 29
-        // (GPIO01 / SOC_GPIO41) on the Jetson Xavier NX 40-pin header per
-        // the Jetson.GPIO pin-data table.  No PWM/SPI/I2S/UART alternate
-        // function — pure GPIO, verified clean toggle 0V <-> 3.3V at 1Hz
-        // via Jetson.GPIO Python (2026-05-02).  The "GPIO12" alternate
-        // pins (15/32/33) all have PWM controllers attached and were
-        // unreliable.  Override here if your wiring uses a different pin.
-        int         fire_gpio_offset = 105;
+        std::string fire_script     = "/home/brain/JetsonLM/Hardware/teensy_strobe/fire_trigger.py";
         GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonTeensySerialDevice", teensy_device);
-        GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonGpioChipName",       gpio_chip_name);
-        GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonFireGpioOffset",     fire_gpio_offset);
+        GolfSimConfiguration::SetConstant("gs_config.strobing.kJetsonFireTriggerScript",  fire_script);
+        fire_trigger_script = fire_script;
 
         GS_LOG_TRACE_MSG(trace, "PulseStrobe::InitGPIOSystem - Teensy path config: device="
-                                + teensy_device + " chip=" + gpio_chip_name
-                                + " offset=" + std::to_string(fire_gpio_offset));
+                                + teensy_device + " trigger_script=" + fire_trigger_script);
 
         // ---- HW open (soft fallback on every failure) -------------------
 
@@ -335,54 +328,18 @@ namespace golf_sim {
             return true;
         }
 
-        gpio_chip = gpiod_chip_open_by_name(gpio_chip_name.c_str());
-        if (!gpio_chip) {
-            GS_LOG_MSG(warning, std::string("PulseStrobe::InitGPIOSystem - gpiod_chip_open_by_name(")
-                                + gpio_chip_name + ") failed: " + std::strerror(errno)
-                                + " - SendExternalTrigger will no-op");
-            return true;
-        }
-
-        fire_line = gpiod_chip_get_line(gpio_chip, fire_gpio_offset);
-        if (!fire_line) {
-            GS_LOG_MSG(warning, "PulseStrobe::InitGPIOSystem - gpiod_chip_get_line(offset="
-                                + std::to_string(fire_gpio_offset) + ") returned NULL on "
-                                + gpio_chip_name + " - run `sudo gpioinfo " + gpio_chip_name
-                                + "` and update kJetsonFireGpioOffset");
-            gpiod_chip_close(gpio_chip);
-            gpio_chip = nullptr;
-            return true;
-        }
-
-        if (gpiod_line_request_output(fire_line, "pitrac-strobe-fire", 0) < 0) {
-            GS_LOG_MSG(warning, std::string("PulseStrobe::InitGPIOSystem - gpiod_line_request_output failed: ")
-                                + std::strerror(errno) + " (line in use by another process?)"
-                                + " - SendExternalTrigger will no-op");
-            gpiod_chip_close(gpio_chip);
-            gpio_chip = nullptr;
-            fire_line = nullptr;
-            return true;
-        }
-
-        // Defensive: libgpiod 1.4.1 has been observed to leave the line in an
-        // unspecified state after request_output despite the default_val arg.
-        // Explicit set to 0 guarantees we start LOW so the first
-        // SendExternalTrigger produces a clean RISING edge for the Teensy ISR.
-        gpiod_line_set_value(fire_line, 0);
-
         if (!send_setup_to_teensy(pulse_intervals_fast_ms_,
                                   pulse_intervals_slow_ms_,
                                   number_bits_for_fast_on_pulse_,
                                   kBaudRateForFastPulses)) {
             GS_LOG_MSG(warning, "PulseStrobe::InitGPIOSystem - Teensy handshake failed"
                                 " - SendExternalTrigger will no-op");
-            // Keep GPIO claimed in case Teensy comes back; tear down on Deinit.
             return true;
         }
 
         teensy_ready = true;
-        GS_LOG_TRACE_MSG(trace, "PulseStrobe::InitGPIOSystem - Teensy READY, GPIO line claimed."
-                                " Strobe pipeline live.");
+        GS_LOG_TRACE_MSG(trace, "PulseStrobe::InitGPIOSystem - Teensy READY."
+                                " Strobe pipeline live (trigger via " + fire_trigger_script + ").");
         return true;
     }
 
@@ -393,14 +350,6 @@ namespace golf_sim {
     bool PulseStrobe::DeinitGPIOSystem() {
         GS_LOG_TRACE_MSG(trace, "PulseStrobe::DeinitGPIOSystem (Jetson)");
 
-        if (fire_line) {
-            gpiod_line_release(fire_line);
-            fire_line = nullptr;
-        }
-        if (gpio_chip) {
-            gpiod_chip_close(gpio_chip);
-            gpio_chip = nullptr;
-        }
         if (teensy_fd >= 0) {
             ::close(teensy_fd);
             teensy_fd = -1;
@@ -425,45 +374,27 @@ namespace golf_sim {
 
     // -----------------------------------------------------------------------
     // PulseStrobe::SendExternalTrigger (Jetson)
-    // 10us GPIO HIGH pulse on the fire line.  Teensy ISR catches the rising
-    // edge and runs the configured pulse train.  Soft no-op if Teensy not
-    // ready (logged at warning level so dev runs aren't silently broken).
+    // Spawns fire_trigger.py via std::system to drive Pin 29 HIGH for ~5ms
+    // through Jetson.GPIO.  Direct libgpiod chardev (gpiod_line_set_value)
+    // does not produce a rising edge that the Teensy ISR sees on this
+    // Seeed J202 carrier (Issue #22).  Latency: ~100-200ms for fork/exec/
+    // python startup, dominated by Python interpreter cold-start.  Soft
+    // no-op if Teensy not ready.
     // -----------------------------------------------------------------------
     bool PulseStrobe::SendExternalTrigger() {
-        if (!teensy_ready || !fire_line) {
+        if (!teensy_ready) {
             GS_LOG_MSG(warning, "PulseStrobe::SendExternalTrigger - Teensy not ready, skipping fire");
-            return true;  // intentional — false would abort the FSM
+            return true;
         }
 
-        // Force LOW first to guarantee a clean RISING edge regardless of any
-        // residual line state from a previous trigger (or libgpiod 1.4.1's
-        // post-request_output state).  Teensy ISR is RISING-edge only; if the
-        // line happens to already be HIGH, our HIGH-sleep-LOW pulse becomes
-        // HIGH-HIGH-LOW = falling edge, which the Teensy ignores.
-        if (gpiod_line_set_value(fire_line, 0) < 0) {
-            GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(0 pre-rising) failed: ")
-                              + std::strerror(errno));
+        const std::string cmd = "python3 " + fire_trigger_script + " 2>&1";
+        const int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            GS_LOG_MSG(error, "PulseStrobe::SendExternalTrigger - " + cmd
+                              + " returned " + std::to_string(rc));
             return false;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-
-        if (gpiod_line_set_value(fire_line, 1) < 0) {
-            GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(1) failed: ")
-                              + std::strerror(errno));
-            return false;
-        }
-        // Generous 5ms HIGH hold — the Python bypass works at 100us only because
-        // Python's time.sleep() has ms-scale overhead; C++ sleep_for is precise,
-        // and at 100us the Tegra/libgpiod/USB-CDC stack appears to coalesce the
-        // immediate set(0) that follows.  5ms is still imperceptible vs FSM/IPC
-        // latency on the trigger path.
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        if (gpiod_line_set_value(fire_line, 0) < 0) {
-            GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(0) failed: ")
-                              + std::strerror(errno));
-            return false;
-        }
-        GS_LOG_TRACE_MSG(trace, "PulseStrobe::SendExternalTrigger - fire pulse sent to Teensy");
+        GS_LOG_TRACE_MSG(trace, "PulseStrobe::SendExternalTrigger - fire pulse sent (via Jetson.GPIO helper)");
         return true;
     }
 
