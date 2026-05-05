@@ -259,6 +259,12 @@ bool V4L2Capture::ensure_streaming() {
     if (streaming_) return true;
     if (!isOpened()) return false;
 
+    // Every failure path below calls release() before returning false so
+    // /dev/videoX is not left open with partially-allocated state — that
+    // used to require an external `rmmod uvcvideo && modprobe uvcvideo`
+    // to recover (Issue #17).  release() is idempotent and tolerates any
+    // partial state.
+
     // 1. VIDIOC_S_FMT
     v4l2_format fmt{};
     fmt.type                = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -269,12 +275,13 @@ bool V4L2Capture::ensure_streaming() {
     if (::ioctl(fd_, VIDIOC_S_FMT, &fmt) < 0) {
         GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_S_FMT failed: ")
                           + std::strerror(errno));
+        release();
         return false;
     }
     width_  = static_cast<int>(fmt.fmt.pix.width);
     height_ = static_cast<int>(fmt.fmt.pix.height);
 
-    // 2. VIDIOC_S_PARM (frame rate)
+    // 2. VIDIOC_S_PARM (frame rate) — non-fatal, warn only
     v4l2_streamparm parm{};
     parm.type                                   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     parm.parm.capture.timeperframe.numerator    = 1;
@@ -284,7 +291,7 @@ bool V4L2Capture::ensure_streaming() {
                             + std::strerror(errno) + " (continuing with driver default FPS)");
     }
 
-    // 3. Apply queued controls (exposure, gain, …)
+    // 3. Apply queued controls (exposure, gain, …) — non-fatal, warn only
     for (const auto& [id, val] : pending_ctrls_) {
         v4l2_control c{};
         c.id    = id;
@@ -306,11 +313,13 @@ bool V4L2Capture::ensure_streaming() {
     if (::ioctl(fd_, VIDIOC_REQBUFS, &req) < 0) {
         GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_REQBUFS failed: ")
                           + std::strerror(errno));
+        release();
         return false;
     }
     if (req.count < 2) {
         GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - driver granted "
                           + std::to_string(req.count) + " buffers, need >= 2");
+        release();
         return false;
     }
 
@@ -324,6 +333,7 @@ bool V4L2Capture::ensure_streaming() {
         if (::ioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
             GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - VIDIOC_QUERYBUF["
                               + std::to_string(i) + "] failed: " + std::strerror(errno));
+            release();
             return false;
         }
         void* p = ::mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
@@ -331,13 +341,26 @@ bool V4L2Capture::ensure_streaming() {
         if (p == MAP_FAILED) {
             GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - mmap[" + std::to_string(i)
                               + "] failed: " + std::strerror(errno));
+            release();
             return false;
         }
         bufs_[i].start  = p;
         bufs_[i].length = buf.length;
     }
 
-    // 6. VIDIOC_QBUF for every buffer
+    // 6. Allocate decode scratch + decoder handle BEFORE STREAMON, so any
+    // failure here doesn't leave the kernel in streaming state.
+    gray_scratch_.create(height_, width_, CV_8UC1);
+    if (!tj_handle_) {
+        tj_handle_ = tjInitDecompress();
+        if (!tj_handle_) {
+            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - tjInitDecompress failed");
+            release();
+            return false;
+        }
+    }
+
+    // 7. VIDIOC_QBUF for every buffer
     for (__u32 i = 0; i < req.count; ++i) {
         v4l2_buffer buf{};
         buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -346,28 +369,21 @@ bool V4L2Capture::ensure_streaming() {
         if (::ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
             GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - VIDIOC_QBUF["
                               + std::to_string(i) + "] failed: " + std::strerror(errno));
+            release();
             return false;
         }
     }
 
-    // 7. VIDIOC_STREAMON
+    // 8. VIDIOC_STREAMON — point of no return.  Only set streaming_=true
+    // AFTER the ioctl succeeds, so release() on a STREAMON-failure path
+    // doesn't issue an unnecessary STREAMOFF.
     v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (::ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
         GS_LOG_MSG(error, std::string("V4L2Capture::ensure_streaming - VIDIOC_STREAMON failed: ")
                           + std::strerror(errno));
+        release();
         return false;
     }
-
-    // 8. Allocate decode scratch + decoder handle
-    gray_scratch_.create(height_, width_, CV_8UC1);
-    if (!tj_handle_) {
-        tj_handle_ = tjInitDecompress();
-        if (!tj_handle_) {
-            GS_LOG_MSG(error, "V4L2Capture::ensure_streaming - tjInitDecompress failed");
-            return false;
-        }
-    }
-
     streaming_ = true;
 
     // Reset per-stream FPS counters so each ensure_streaming session
