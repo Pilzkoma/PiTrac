@@ -445,18 +445,19 @@ namespace golf_sim {
                               + std::strerror(errno));
             return false;
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
         if (gpiod_line_set_value(fire_line, 1) < 0) {
             GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(1) failed: ")
                               + std::strerror(errno));
             return false;
         }
-        // 100us hold matches the Python bypass-test script that proved reliable.
-        // Under Linux + userspace libgpiod, 10us was on the edge: scheduler jitter
-        // could collapse the actual HIGH time below the Teensy ISR's reliable
-        // detection threshold.  100us is still imperceptible vs FSM/IPC latency.
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        // Generous 5ms HIGH hold — the Python bypass works at 100us only because
+        // Python's time.sleep() has ms-scale overhead; C++ sleep_for is precise,
+        // and at 100us the Tegra/libgpiod/USB-CDC stack appears to coalesce the
+        // immediate set(0) that follows.  5ms is still imperceptible vs FSM/IPC
+        // latency on the trigger path.
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         if (gpiod_line_set_value(fire_line, 0) < 0) {
             GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(0) failed: ")
                               + std::strerror(errno));
