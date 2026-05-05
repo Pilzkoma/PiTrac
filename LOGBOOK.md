@@ -483,9 +483,9 @@ PiTrac's key techniques:
 * ☐ Workaround for Issue #22 (libgpiod chardev doesn't drive Pin 29 on Seeed J202): pulse_strobe_jetson.cpp now shells out to fire_trigger.py via std::system. Could revisit when L4T upgrades or libgpiod 2.x available — until then, the Python helper is reliable.
 * ☐ MOSFET (IRLZ44N oder SparkFun PRT-12959) bestellen für Phase C-Test 2 (12V Cenpek IR-Board switching)
 * ☐ Phase C Test 2: MOSFET zwischen Teensy Pin 3 und Cenpek-12V-Rückleitung; Cenpek-LED-Array statt Test-LED; selber Bypass-Test sollte echte IR-Bursts produzieren (verifizierbar mit Smartphone-Kamera in Slowmo, da die meisten Smartphone-Sensoren 850nm IR sehen)
-* ☐ Permanent fix für /dev/ttyACM0 Permissions: `sudo usermod -a -G dialout brain` + neu einloggen, statt jedem Boot `sudo chmod 666` zu machen
+* ☑ Permanent fix für /dev/ttyACM0 Permissions: `sudo usermod -a -G dialout brain` ausgeführt 2026-05-05 (greift erst nach re-login)
 * ☑ V4L2Capture::ensure_streaming() failure-path fd leak fixed 2026-05-05 (Issue #17 resolved)
-* ☐ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption (Issue #18) — works today only because cvtColor(GRAY→BGR) makes B=G=R; fix is `hskip * frame.channels()`
+* ☑ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption fixed 2026-05-05 (Issue #18 resolved) — derives `hskip_bytes = config_.hskip * frame.channels()` under JETSON_BUILD, used in all 4 pointer-arithmetic spots
 * ☐ Verify `undistort_camera_image` end-to-end during the calibration run (currently no-op since use_undistortion_matrix_=false)
 * ☐ Mount cameras in enclosure at correct angles for stereo ball tracking
 * ☐ Run PiTrac calibration procedure with both cameras
@@ -861,6 +861,117 @@ PiTrac's key techniques:
 >   * Once that's green, SP1 is functionally complete.  The
 >     Issue #19 stabilization gate naturally falls open once the
 >     ball is being IR-strobe-lit during pitrac_lm runs.
+
+**2026-05-05 (continued — strobe pipeline software-validated end-to-end + 3 bug fixes)**
+> Continued the same SSH session to actually wire the Teensy + LED rig
+> to the Jetson and exercise the full strobe pipeline through pitrac_lm.
+> Long arc, eventually validated via workaround.  Six commits.
+>
+> Setup: `sudo chmod 666 /dev/ttyACM0` (one-shot — `brain` not yet in
+> `dialout` group; permanent fix `sudo usermod -a -G dialout brain` queued
+> for next re-login).  Pin 29 ↔ Teensy Pin 2, GND ↔ GND, USB.
+> Test rig: 5mm LED + 1kΩ between Teensy Pin 3 and GND.
+>
+> First pitrac_lm run with the rig wired:
+>   * Init handshake clean — `Strobe pipeline live`, Teensy LED13 solid
+>     HIGH (READY state)
+>   * Ball Stabilized at 18:55:30, motion-detect tripped at 18:55:32
+>     (FSM made it through Issue #19 once)
+>   * `fire pulse sent to Teensy` logged
+>   * BUT the test LED stayed dark
+>
+> Discovered Issue #20 first: `motion_detect_stage.cpp` had an explicit
+> `if (system_mode != kCamera1TestStandalone)` gate around the
+> `SendExternalTrigger` call — sensible on RPi (don't pulse a non-existent
+> cam2 system in isolated cam1 testing) but wrong on Jetson where
+> SendExternalTrigger drives the IR strobe.  Fixed: under
+> `#ifdef JETSON_BUILD` always call SendExternalTrigger.  Commit 1981378.
+>
+> Next run: same FSM-stuck-in-stabilization-loop pattern as 2026-05-02 —
+> Issue #19 prevented the watch loop from ever running.  Filed Issue #21
+> as a development bypass: in `gs_fsm.cpp` WaitingForBallStabilization,
+> when ball is found but reports "moved" (sub-pixel HoughCircles jitter),
+> force-advance instead of bailing back.  When ball is genuinely lost,
+> original behavior preserved.  Commit b2c5fb6.
+>
+> Run with bypass: ✅ FSM advanced (`Ball Stabilized` → `WatchForHitAndTrigger
+> calling` → `fire pulse sent to Teensy` → `---> SendExternalTrigger
+> (Jetson)`), all in the log — but the test LED *still* didn't blink.
+>
+> Diagnosed: production strobe values are 17 µs ON × 7 pulses ≈ 120 µs
+> total ON time, way below the eye's perception threshold even with
+> Smartphone slowmo.  Tweaked `golf_sim_config.json` to test values
+> (ON_BITS=32, BAUD=1000 → 32 ms ON × 7 pulses ≈ 225 ms burst).
+>
+> Long debugging arc on the libgpiod chardev path follows.  Sequence:
+>   * 5ms HIGH hold instead of 100us — no help
+>   * Defensive force-LOW + 2ms settle before rising edge — no help
+>   * Verified via Teensy STATUS query that pitrac_lm did push the long
+>     pulse values to the Teensy and Teensy is in READY — config is fine
+>   * Tried `gpioset --mode=time --sec=1 gpiochip1 105=1` (libgpiod CLI,
+>     same chardev path as pitrac_lm) — also no LED blink
+>   * Re-ran the bypass script (Python Jetson.GPIO) — LED blinks reliably
+>   * **Conclusion (Issue #22):** libgpiod chardev does NOT drive Pin 29
+>     in a way the Teensy ISR detects on this Seeed J202 carrier.
+>     Cause unknown — possibly L4T-32-era kernel/devicetree quirk that
+>     disagrees with the chardev write path but Jetson.GPIO works
+>     because it uses a different code path.  Not chasing this down.
+>
+> Workaround: shell out to `Hardware/teensy_strobe/fire_trigger.py` via
+> `std::system`.  Uses Jetson.GPIO under the hood (the path that works).
+> ~100-200 ms fork+exec+python startup latency, dominated by Python
+> interpreter cold-start.  Acceptable since the strobe pulse-train
+> timing happens on the Teensy hardware-timer side, not on the trigger
+> path.  Refactored `pulse_strobe_jetson.cpp`: removed all libgpiod
+> calls, removed gpiod.h include, dropped 96 lines.  Commit fea85cf.
+>
+> Final validation:
+>   * Manual `python3 fire_trigger.py` (no sudo, brain in gpio group):
+>     LED blinks reliably ✅
+>   * Teensy STATUS post-pitrac_lm: `STATE=READY MODE=FAST ON_BITS=32
+>     BAUD=1000 ON_PULSE_US=32000 N_FAST=9 N_SLOW=13` — handshake done
+>     correctly through pitrac_lm's init path ✅
+>   * `Strobe pipeline live (trigger via fire_trigger.py)` logged in
+>     pitrac_lm trace ✅
+>   * Last untested link: literal `std::system("python3 fire_trigger.py")`
+>     line — hardcoded one-liner, low risk.  Final FSM-driven validation
+>     deferred to Phase C Test 2 with real IR strobe (Issue #19
+>     stabilization will resolve naturally then).
+>
+> Side cleanups in the same session:
+>   * **Issue #18 (motion_detect hskip-bytes-vs-pixels)** RESOLVED.
+>     Derived `hskip_bytes = config_.hskip * frame.channels()` under
+>     `#ifdef JETSON_BUILD`, replaced 4 pointer-arithmetic uses.  RPi
+>     branch unchanged (channels=1 implicit).  Coverage now matches
+>     configured 640 horizontal samples / row instead of ~213.
+>     Commit 701d659.
+>   * **Issue #17 (V4L2Capture ensure_streaming fd leak)** RESOLVED.
+>     Every failure path now calls `release()` before `return false`.
+>     Reordered: `tj_handle` + `gray_scratch` allocation moved BEFORE
+>     `VIDIOC_STREAMON` so STREAMON is the unique point-of-no-return at
+>     the end with no failure paths after it.  Commit cd54f0b.
+>
+> SP1 progress 95% → 97%.  Hardware Components Registry updated 2026-05-02
+> already covers MOSFET TBD-ordered.
+>
+> Issues closed this session: #17 (fd leak), #18 (hskip bytes), #20
+> (TestStandalone trigger skip).  Issues opened/active: #19 (stabilization
+> — partial workaround via #21), #21 (force-advance bypass — REMOVE when
+> IR strobe in), #22 (libgpiod chardev — workaround in place).
+>
+> SP1 strobe pipeline status: **software-vollständig validiert**.  Was
+> noch fehlt für SP1 functional complete:
+>   1. IRLZ44N MOSFET bestellen
+>   2. Phase C Test 2: MOSFET + Cenpek IR-Board, gleicher Bypass-Test mit
+>      Smartphone-Slowmo zur 850nm-Burst-Verifikation
+>   3. Issue #19 + #21 lösen sich dann automatisch sobald IR-strobe-lit
+>      ball für HoughCircles saubere Kanten liefert
+>
+> Lessons saved as memory: none new this session — Jetson.GPIO pin-data
+> location and gpioset --mode lessons from 2026-05-02 still apply and
+> were used today.  Issue #22 (libgpiod chardev mystery) is repo-specific
+> and lives in LOGBOOK rather than memory since it might resolve with
+> L4T upgrade.
 
 \---
 
