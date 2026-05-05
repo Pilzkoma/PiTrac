@@ -346,6 +346,13 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 
 		// TBD - ** Immediately ** pulse the output - we want to do this with as little latency
 		// as possible, because otherwise the ball will fly past the camera 2 FoV
+#ifdef JETSON_BUILD  // JETSON_STUB: SendExternalTrigger drives the IR strobe
+		// On Jetson, SendExternalTrigger fires the Teensy-driven IR LED
+		// strobe; there is no separate cam2 system to "skip" in
+		// TestStandalone mode (OV9281 USB has no XTR pin).  Always fire.
+		gs::PulseStrobe::SendExternalTrigger();
+		GS_LOG_MSG(trace, "---> SendExternalTrigger (Jetson)");
+#else
 		if (gs::GolfSimOptions::GetCommandLineOptions().system_mode_ != gs::kCamera1TestStandalone) {
 			gs::PulseStrobe::SendExternalTrigger();
 			GS_LOG_MSG(trace, "---> SendExternalTrigger");
@@ -354,6 +361,7 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 			// simulate the other system sending an image back
 			// TBD gs::GolfSimIpcSystem::SimulateCamera2ImageMessage();
 		}
+#endif
 
 		if (config_.verbose) {
 #ifndef JETSON_BUILD
