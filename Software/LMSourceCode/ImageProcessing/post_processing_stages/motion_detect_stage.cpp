@@ -249,11 +249,9 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 
     StreamInfo info = app_->GetStreamInfo(stream_);
 #else  // JETSON_BUILD
-	// OV9281 is monochrome; V4L2 delivers V4L2_PIX_FMT_GREY, OpenCV wraps as CV_8UC1
-	// (one byte per pixel). The loop below steps horizontally by config_.hskip bytes,
-	// which is correct for CV_8UC1.
-	// JETSON_STUB: if OpenCV delivers CV_8UC3 (verify with real hardware), the horizontal
-	// step must be config_.hskip * frame.channels(), not config_.hskip bytes.
+	// V4L2Capture engine delivers CV_8UC3 BGR (cvtColor(GRAY→BGR) inside
+	// decode_into).  Horizontal byte step must include channels, otherwise we
+	// sample every 2nd byte (B,R,G,B,R,G…) instead of every 2nd pixel.
 	uint8_t *image = completed_request->frame.data;
 	struct { int width, height, stride; } info;
 	info.width  = completed_request->frame.cols;
@@ -266,6 +264,12 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 
 	unsigned int sampledFrameStride = info.stride * config_.vskip;
 
+#ifdef JETSON_BUILD  // JETSON_STUB: BGR pointer step accounts for channels
+	const unsigned int hskip_bytes = config_.hskip * completed_request->frame.channels();
+#else
+	const unsigned int hskip_bytes = config_.hskip;
+#endif
+
 	if (first_time_)
 	{
 		first_time_ = false;
@@ -274,11 +278,11 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 
 		for (unsigned int y = 0; y < roi_height_; y++)
 		{
-			uint8_t *new_value_ptr = image + ((roi_y_ + y) * sampledFrameStride) + (roi_x_ * config_.hskip);
+			uint8_t *new_value_ptr = image + ((roi_y_ + y) * sampledFrameStride) + (roi_x_ * hskip_bytes);
 			uint8_t *old_value_ptr = &previous_frame_[0] + y * roi_width_;
 
 			// Now traverse across the incoming frame in the x direction for this row
-			for (unsigned int x = 0; x < roi_width_; x++, new_value_ptr += config_.hskip) {
+			for (unsigned int x = 0; x < roi_width_; x++, new_value_ptr += hskip_bytes) {
 				*(old_value_ptr++) = *new_value_ptr;
 			}
 		}
@@ -307,9 +311,9 @@ bool MotionDetectStage::Process(JetsonCompletedRequestPtr& completed_request)
 	// exceeds the threshold. At the same time, update the previous image buffer.
 	for (unsigned int y = 0; !local_motion_detected && y < roi_height_; y++)
 	{
-		uint8_t* new_value_ptr = image + ((roi_y_ + y) * sampledFrameStride) + (roi_x_ * config_.hskip);
+		uint8_t* new_value_ptr = image + ((roi_y_ + y) * sampledFrameStride) + (roi_x_ * hskip_bytes);
 		uint8_t* old_value_ptr = &previous_frame_[0] + y * roi_width_;
-		for (unsigned int x = 0; x < roi_width_; x++, new_value_ptr += config_.hskip)
+		for (unsigned int x = 0; x < roi_width_; x++, new_value_ptr += hskip_bytes)
 		{
 			int new_value = *new_value_ptr;
 			int old_value = *old_value_ptr;
