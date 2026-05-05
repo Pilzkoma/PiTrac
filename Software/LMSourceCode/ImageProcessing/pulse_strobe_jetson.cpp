@@ -364,6 +364,12 @@ namespace golf_sim {
             return true;
         }
 
+        // Defensive: libgpiod 1.4.1 has been observed to leave the line in an
+        // unspecified state after request_output despite the default_val arg.
+        // Explicit set to 0 guarantees we start LOW so the first
+        // SendExternalTrigger produces a clean RISING edge for the Teensy ISR.
+        gpiod_line_set_value(fire_line, 0);
+
         if (!send_setup_to_teensy(pulse_intervals_fast_ms_,
                                   pulse_intervals_slow_ms_,
                                   number_bits_for_fast_on_pulse_,
@@ -428,6 +434,18 @@ namespace golf_sim {
             GS_LOG_MSG(warning, "PulseStrobe::SendExternalTrigger - Teensy not ready, skipping fire");
             return true;  // intentional — false would abort the FSM
         }
+
+        // Force LOW first to guarantee a clean RISING edge regardless of any
+        // residual line state from a previous trigger (or libgpiod 1.4.1's
+        // post-request_output state).  Teensy ISR is RISING-edge only; if the
+        // line happens to already be HIGH, our HIGH-sleep-LOW pulse becomes
+        // HIGH-HIGH-LOW = falling edge, which the Teensy ignores.
+        if (gpiod_line_set_value(fire_line, 0) < 0) {
+            GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(0 pre-rising) failed: ")
+                              + std::strerror(errno));
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
 
         if (gpiod_line_set_value(fire_line, 1) < 0) {
             GS_LOG_MSG(error, std::string("PulseStrobe::SendExternalTrigger - gpiod_line_set_value(1) failed: ")
