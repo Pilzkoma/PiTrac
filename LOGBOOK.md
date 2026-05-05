@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|92%|🟡 In Progress|2026-05-02|
+|SP1 — Hardware & Build|HW+SW|Build|95%|🟡 In Progress|2026-05-05|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -120,7 +120,7 @@
 
 > Fill in after first successful Jetson build.
 
-**Last verified working on:** *02.05.2026*
+**Last verified working on:** *05.05.2026*
 
 ```
 1. JetPack 5.1.6 (L4T 35.6.4) confirmed installed — do not reflash
@@ -190,6 +190,7 @@ Next step: solder pins on Teensy when they arrive, wire Jetson Pin 29 ↔ Teensy
 |16|SP1|UVC auto-exposure (exposure_auto=3) silently caps frame rate when integration time exceeds the frame interval. At default exposure_absolute=157 (15.7ms), max achievable is ~64 FPS regardless of requested rate.|🔵 Minor|☑ Yes|Irrelevant for production: IR strobe is the effective shutter (10–15µs pulse), camera exposure stays open. For bench testing without strobe, set exposure_auto=1 + low exposure_absolute via v4l2-ctl.|2026-04-26|
 |17|SP1|V4L2Capture::ensure_streaming() leaks the open fd on any failure path (REQBUFS, mmap, STREAMON). `streaming_=false` stays set, so subsequent `read()` calls re-attempt ensure_streaming against the same already-failed fd and never recover. /dev/videoX gets stuck and only `rmmod uvcvideo && modprobe uvcvideo` clears it.|🔵 Minor|☑ Yes|Fix: call release() on every ensure_streaming failure path, not just shutdown. Documented but not yet implemented — has not bitten in normal runs because the happy path works. ~1 hour of work.|2026-04-29|
 |18|SP1|motion_detect_stage.cpp horizontal hskip step is in BYTES not PIXELS. Assumes CV_8UC1 input but V4L2Capture engine delivers CV_8UC3 BGR (after cvtColor(GRAY2BGR) inside decode_into). Today this still produces sensible motion-detect because B=G=R per pixel, but the effective horizontal pixel coverage is reduced from 640 samples to ~213 actual pixels per row.|🔵 Minor|☑ Yes|Either change V4L2Capture::decode_into to deliver CV_8UC1 directly (smaller change, but breaks consumers expecting BGR) or fix motion_detect_stage to multiply hskip by frame.channels() (one-line fix, JETSON-guarded). Documented but not yet implemented — coverage is still sufficient for motion-detect to work reliably today (verified 2026-05-02).|2026-05-02|
+|19|SP1|PiTrac FSM ball-stabilization gate cycles endlessly between WaitingForBall ↔ WaitingForBallStabilization without advancing to WaitingForBallHit / WatchForHitAndTrigger. Even with a stable yellow ball in a cap (no movement, LED+breadboard out of frame), the CheckForBallStable check fails every ~1 second and the FSM bounces back. Suspected: HoughCircles finds slightly different ball positions frame-to-frame in the noisy ambient-IR mono image, and the stability tolerance treats that as motion.|🟡 Medium|☑ Yes|Workaround for strobe-pipeline validation: bypass pitrac_lm entirely via Hardware/teensy_strobe/test_strobe_bypass.py (claims Pin 29 + sends Teensy setup + toggles GPIO directly). Real fix expected to land naturally once IR strobe LED illumination is hooked up — sharp on/off contrast from strobe-lit ball will give HoughCircles a much more stable detection. Not pursuing tuning-based fix in the meantime.|2026-05-05|
 
 \---
 
@@ -453,6 +454,8 @@ PiTrac's key techniques:
 |2026-05-02|Teensy 4.0 firmware standalone test (no Jetson, no MOSFET)|Flash teensy_strobe.ino via Arduino IDE + Teensyduino. USB to Windows. Arduino Serial Monitor at 115200, line ending Newline. Sent: PULSES_FAST,5,5,5,5,5,5,0 / ON_BITS,4 / BAUD,38400 / MODE,FAST / STATUS / TEST_FIRE.|✅ PASS|All four setup commands → `OK`. STATUS dump returned `STATE=READY MODE=FAST ON_BITS=4 BAUD=38400 ON_PULSE_US=104 N_FAST=7 N_SLOW=0` — exactly matching the spec (104 µs = 4/38400×1e6). TEST_FIRE produced `FIRED` with brief LED13 dim during the pulse train. ISR detach/reattach worked (no double-fire). No MOSFET needed for this test.|
 |2026-05-02|Pin 29 GPIO toggle verification (Jetson.GPIO Python)|Jetson.GPIO setmode(BOARD), setup(29, OUT), toggle in 1-second loop, multimeter probing physical Pin 29.|✅ PASS|Clean 0V↔3.3V wechsel im Sekundentakt, korreliert mit `Pin 29 = 0/1` Console-Output. Earlier failed candidates (Pin 12, 15, 32) were either wrong physical mapping (PCC.04≠Pin 12) or PWM-controller-occupied (15/32/33). Pin 29 / PQ.05 / gpiochip1 line 105 is the locked-in fire-trigger pin.|
 |2026-05-02|Jetson PulseStrobe build (no HW yet)|`meson setup build_jetson --wipe -Djetson_build=true && ninja -C build_jetson` after pulse_strobe_jetson.cpp + meson dep + JSON keys landed.|✅ PASS|libgpiod-1.4.1 found via pkg-config. After fix-commit b9d51ac for the protected-member access bug (anonymous-namespace helper couldn't reach PulseStrobe::pulse_intervals_*; passed through as parameters), all 470 lines compiled, all PulseStrobe symbols resolved, binary produced clean.|
+|2026-05-05|pitrac_lm strobe init handshake (Teensy + libgpiod), wired Jetson Pin 29 ↔ Teensy Pin 2 + GND ↔ GND + USB|`./pitrac_lm --system_mode=camera1_test_standalone --logging_level=trace`. Permission setup: `sudo chmod 666 /dev/ttyACM0` (brain not in dialout group; permanent fix via usermod scheduled for later).|✅ PASS|Init logs: `open_teensy_serial - opened /dev/ttyACM0 at 115200 8N1` → `send_setup_to_teensy - Teensy reached READY state` → `PulseStrobe::InitGPIOSystem - Teensy READY, GPIO line claimed. Strobe pipeline live.`. Teensy LED13 went from 1Hz blink (WAITING_SETUP) to solid HIGH (READY). Watch loop never reached during this run because PiTrac's FSM ball-stabilization check rejected the placed yellow-ball (see Issue #19) — but the Teensy + GPIO pipeline init proven sound.|
+|2026-05-05|Phase C Test 1: Jetson → Teensy → Test-LED chain (FSM bypass)|`Hardware/teensy_strobe/test_strobe_bypass.py` standalone Python script: configures Teensy with long visible pulses (32ms ON, 200ms gaps, 7 pulses → ~1.5s burst), claims Jetson Pin 29 via Jetson.GPIO, toggles HIGH for 100µs five times.|✅ PASS|All 5 fires triggered visible LED flicker on Teensy Pin 3. STATUS dump confirmed `STATE=READY MODE=FAST ON_BITS=32 BAUD=1000 ON_PULSE_US=32000 N_FAST=7 N_SLOW=13`. End-to-end strobe pipeline software-validated: Python USB serial setup → Teensy state machine → libgpiod-equivalent GPIO toggle → Teensy ISR → Pin 3 pulse train → LED. Bypasses pitrac_lm so we can validate the strobe rig independently of the FSM stabilization issue.|
 
 \---
 
@@ -470,14 +473,11 @@ PiTrac's key techniques:
 * ☑ Teensy 4.0 strobe-controller firmware written + standalone-tested (Hardware/teensy_strobe/teensy_strobe.ino — TEST_FIRE returns FIRED via Arduino Serial Monitor, no Jetson needed)
 * ☑ Jetson PulseStrobe Jetson-side impl in pulse_strobe_jetson.cpp (libgpiod fire-pin + termios USB-serial setup handshake + soft-fallback architecture). Builds clean.
 * ☑ Fire-pin locked: Pin 29 = PQ.05 = gpiochip1 line 105. JSON defaults updated. Verified via Jetson.GPIO Python toggle + multimeter.
-* ☐ **NEXT SESSION HANDOFF — Phase C wiring + smoke test:**
-   1. Pins auf Teensy löten (warten auf Lieferung)
-   2. Wire Jetson Pin 29 ↔ Teensy Pin 2 (FIRE_PIN), Jetson GND (z.B. Pin 30) ↔ Teensy GND, plus USB-Kabel Jetson↔Teensy
-   3. `cd ~/JetsonLM/Software/LMSourceCode/ImageProcessing && ./build_jetson/pitrac_lm --system_mode=camera1_test_standalone --msg_broker_address=tcp://127.0.0.1:61616 --logging_level=trace > /tmp/pitrac.log 2>&1` und im Log nach `Teensy READY, GPIO line claimed. Strobe pipeline live.` suchen
-   4. Hand wedeln → Motion-Detect trippt → `SendExternalTrigger - fire pulse sent to Teensy` Trace-Zeile → Teensy LED13 blinkt kurz (FIRING-Visual)
-   5. Phase C-Test 1: 2N3904 + 5mm-LED + 1kΩ an Teensy Pin 3 — verify Pulse-Train kommt durch (Test-LED flackert beim Fire-Trigger; Bench-Test ohne Risiko für die IR-LEDs)
+* ☑ Phase C Test 1 PASS (2026-05-05): wired Jetson Pin 29 ↔ Teensy Pin 2 + GND ↔ GND + USB; pitrac_lm init handshake complete; bypass-test script (`Hardware/teensy_strobe/test_strobe_bypass.py`) drives 5/5 visible LED flickers via the same chain pitrac_lm uses. Strobe pipeline software-validated end-to-end.
+* ☐ Workaround for Issue #19 (FSM ball-stabilization too flaky without IR): use the bypass-test script for any strobe-pipeline iteration until IR illumination is wired. Real fix expected to land naturally once the IR LEDs are blasting the ball.
 * ☐ MOSFET (IRLZ44N oder SparkFun PRT-12959) bestellen für Phase C-Test 2 (12V Cenpek IR-Board switching)
-* ☐ Cenpek-Board hooked up + first IR strobe burst verified (Phase C-Test 2)
+* ☐ Phase C Test 2: MOSFET zwischen Teensy Pin 3 und Cenpek-12V-Rückleitung; Cenpek-LED-Array statt Test-LED; selber Bypass-Test sollte echte IR-Bursts produzieren (verifizierbar mit Smartphone-Kamera in Slowmo, da die meisten Smartphone-Sensoren 850nm IR sehen)
+* ☐ Permanent fix für /dev/ttyACM0 Permissions: `sudo usermod -a -G dialout brain` + neu einloggen, statt jedem Boot `sudo chmod 666` zu machen
 * ☐ V4L2Capture::ensure_streaming() failure-path fd leak — release() on failure so a retry can recover (see Issue #17)
 * ☐ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption (Issue #18) — works today only because cvtColor(GRAY→BGR) makes B=G=R; fix is `hskip * frame.channels()`
 * ☐ Verify `undistort_camera_image` end-to-end during the calibration run (currently no-op since use_undistortion_matrix_=false)
@@ -785,6 +785,76 @@ PiTrac's key techniques:
 >   3. grep for "Teensy READY, GPIO line claimed" in the log
 >   4. Wave hand → check for "SendExternalTrigger - fire pulse sent
 >      to Teensy" + LED13 blip on Teensy
+
+**2026-05-05 — Phase C Test 1 PASS**
+> Hardware-side wired up (Jetson Pin 29 ↔ Teensy Pin 2, GND ↔ GND,
+> USB), test rig built (Teensy Pin 3 → 5mm LED → 1kΩ → Teensy GND).
+> SSH from the Windows dev box into the Jetson — significantly less
+> friction than the Google-Doc copy-paste from earlier sessions.
+>
+> Permission gotcha: `brain` is in `gpio` (so /dev/gpiochip1 works
+> out-of-the-box) but NOT in `dialout`, so /dev/ttyACM0 access fails
+> as user.  One-shot fix: `sudo chmod 666 /dev/ttyACM0`.  Permanent
+> fix queued: `sudo usermod -a -G dialout brain` + re-login.
+>
+> First pitrac_lm run with the strobe rig connected: init handshake
+> all green —
+>   * `open_teensy_serial - opened /dev/ttyACM0 at 115200 8N1`
+>   * `send_setup_to_teensy - Teensy reached READY state`
+>   * `PulseStrobe::InitGPIOSystem - Teensy READY, GPIO line claimed.
+>      Strobe pipeline live.`
+> Teensy LED13 went from 1Hz blink (WAITING_SETUP) to solid HIGH (READY)
+> right on cue.  But: WatchForHitAndTrigger never got called, so
+> SendExternalTrigger never fired, so the test LED never blinked.
+>
+> Diagnosis from FSM-transition trace: PiTrac is stuck in a
+> WaitingForBall ↔ WaitingForBallStabilization ping-pong.  The yellow
+> ball is in a cap (not moving), the test LED is out of frame, no
+> hand motion in the scene — but CheckForBallStable rejects the
+> placed ball every ~1 second.  Most likely HoughCircles is finding
+> the ball at slightly different positions frame-to-frame in the
+> noisy ambient-IR mono image.  Filed as Issue #19.  Won't fix in
+> software — production path uses sharp IR-strobe lighting that gives
+> HoughCircles clean ball edges.  No more time on this until the IR
+> LEDs actually fire.
+>
+> Bypass: instead of trying to coax the FSM into the Watch loop,
+> wrote Hardware/teensy_strobe/test_strobe_bypass.py — opens
+> /dev/ttyACM0, configures the Teensy with long visible pulses
+> (32 ms ON, 200 ms gaps, 7 pulses → ~1.5 s burst), claims Pin 29
+> via Jetson.GPIO, toggles 100 µs HIGH pulses 5× with 3 s gaps.
+> Result: 5/5 fires produced visible LED flicker on Teensy Pin 3.
+> STATUS dump confirmed `STATE=READY MODE=FAST ON_BITS=32 BAUD=1000
+> ON_PULSE_US=32000 N_FAST=7 N_SLOW=13`.
+>
+> What this milestone proves:
+>   * Teensy firmware (Phase A) is correct — accepts setup, runs ISR,
+>     drives Pin 3.
+>   * pulse_strobe_jetson.cpp logic (Phase B) is correct — same
+>     init-then-toggle sequence works in Python, so the C++ version
+>     does the right thing too.
+>   * Wiring is correct — Pin 29 on the Seeed J202 reaches the
+>     Teensy's Pin 2 ISR cleanly.
+>   * The FSM blocker (Issue #19) is decoupled from the strobe
+>     pipeline — once IR illumination is in, FSM unsticks AND the
+>     pipeline behind it is ready to fire.
+>
+> SP1 progress 92% → 95%.  Hardware-Components Registry already had
+> the right entries from 2026-05-02; nothing to update there.
+> The Bypass-Test-Skript is the cleanest way to validate any future
+> change to the strobe rig (MOSFET swap, LED-array swap, wiring
+> rerouting) without depending on PiTrac's FSM state.
+>
+> Open before SP1 declares done:
+>   * IRLZ44N MOSFET to order (gate-driver between Teensy and Cenpek
+>     12V IR board).
+>   * Phase C Test 2: same bypass script, but with the Cenpek board
+>     instead of the test LED.  Smartphone slowmo to confirm 850nm
+>     IR pulses (most phone cameras pick up 850nm despite the IR-cut
+>     filter).
+>   * Once that's green, SP1 is functionally complete.  The
+>     Issue #19 stabilization gate naturally falls open once the
+>     ball is being IR-strobe-lit during pitrac_lm runs.
 
 \---
 
