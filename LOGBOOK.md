@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|97%|🟡 In Progress|2026-05-05|
+|SP1 — Hardware & Build|HW+SW|Build|98%|🟡 In Progress|2026-05-12|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -54,7 +54,7 @@
 |IR LED array|850nm \~10W array board (e.g. Chanzon)|IR illumination for strobe capture|Strobe driver circuit|TBD|☐ Ordered ☐ In hand ☐ In use|
 |IR strobe driver|Teensy 4.0 (DEV-15583) — pulled forward from v2 plan|Drives IR LED pulses at \~10µs via Hardware-Timer-backed delayMicroseconds; Jetson sends single GPIO trigger + setup over USB serial|Jetson Pin 29 (fire trigger) + USB + MOSFET → IR LED array|SparkFun|☑ In hand|
 |IR LED array|Cenpek 4× 850nm 12V CCTV-style board (FY-S54-F)|IR illumination for strobe capture|MOSFET (low-side switch on 12V power line)|—|☑ In hand|
-|MOSFET (LED gate)|IRLZ44N (or SparkFun PRT-12959 breakout) — TBD|Switches 12V LED-array supply on Teensy gate signal|Teensy Pin 3 → MOSFET gate; LED-array J1− → MOSFET drain|TBD|☐ Ordered|
+|MOSFET (LED gate)|IRLZ44N (TO-220, logic-level N-channel)|Switches 12V LED-array supply on Teensy gate signal|Teensy Pin 3 → MOSFET gate (with 1kΩ gate-source pulldown); LED-array V− → MOSFET drain; MOSFET source → common GND rail|—|☑ In hand|
 |Bench-test transistor + LED|2N3904 NPN + 5mm LED + 1kΩ|Smoke-test for the Teensy gate output before MOSFET arrives|Teensy Pin 3 → 1kΩ → LED → GND (no transistor needed for visible blink)|—|☑ In hand|
 |12V supply|Industrial 12V/15A PSU|Powers Jetson + LED array + Teensy in final lab build|Barrel jack to Jetson; +/− to MOSFET high-side|—|☑ In hand|
 |Video recording camera (not used in v1 - v2 only)|TBD — USB, lower cost|Records swing from behind or in front for AI coaching upload|Jetson USB port|TBD|☐ Ordered ☐ In hand ☐ In use|
@@ -481,8 +481,8 @@ PiTrac's key techniques:
 * ☑ pitrac_lm strobe init+trigger path software-validated 2026-05-05 — `Strobe pipeline live (trigger via fire_trigger.py)` log from real init, manual invocation of the same helper makes the LED blink. The only un-tested link is the literal `std::system("python3 fire_trigger.py")` line — hardcoded, low risk.
 * ☐ Workaround for Issue #19 (FSM ball-stabilization too flaky without IR): use the bypass-test script for any strobe-pipeline iteration until IR illumination is wired. Real fix expected to land naturally once the IR LEDs are blasting the ball.
 * ☐ Workaround for Issue #22 (libgpiod chardev doesn't drive Pin 29 on Seeed J202): pulse_strobe_jetson.cpp now shells out to fire_trigger.py via std::system. Could revisit when L4T upgrades or libgpiod 2.x available — until then, the Python helper is reliable.
-* ☐ MOSFET (IRLZ44N oder SparkFun PRT-12959) bestellen für Phase C-Test 2 (12V Cenpek IR-Board switching)
-* ☐ Phase C Test 2: MOSFET zwischen Teensy Pin 3 und Cenpek-12V-Rückleitung; Cenpek-LED-Array statt Test-LED; selber Bypass-Test sollte echte IR-Bursts produzieren (verifizierbar mit Smartphone-Kamera in Slowmo, da die meisten Smartphone-Sensoren 850nm IR sehen)
+* ☑ MOSFET (IRLZ44N TO-220) angekommen + verdrahtet 2026-05-12: low-side switch zwischen Cenpek V− und GND-Schiene, 1kΩ Gate-Source-Pulldown, gemeinsame GND-Schiene mit 12V PSU(−) und Teensy GND
+* ☑ Phase C Test 2 PASS (2026-05-12): `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` — IR-Bursts via Smartphone-Kamera sichtbar (850nm geht durch IR-Cut-Filter durch), zusätzlich verifiziert über Strom-Spike am 12V PSU Ampere-Anzeige bei jedem Fire-Event. Cenpek-Array wird vom MOSFET sauber durchgeschaltet.
 * ☑ Permanent fix für /dev/ttyACM0 Permissions: `sudo usermod -a -G dialout brain` ausgeführt 2026-05-05 (greift erst nach re-login)
 * ☑ V4L2Capture::ensure_streaming() failure-path fd leak fixed 2026-05-05 (Issue #17 resolved)
 * ☑ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption fixed 2026-05-05 (Issue #18 resolved) — derives `hskip_bytes = config_.hskip * frame.channels()` under JETSON_BUILD, used in all 4 pointer-arithmetic spots
@@ -972,6 +972,48 @@ PiTrac's key techniques:
 > were used today.  Issue #22 (libgpiod chardev mystery) is repo-specific
 > and lives in LOGBOOK rather than memory since it might resolve with
 > L4T upgrade.
+
+**2026-05-12 — Phase C Test 2 PASS (strobe pipeline hardware-validated end-to-end)**
+
+> IRLZ44N TO-220 angekommen.  Verdrahtet als low-side switch:
+> Cenpek V+ → 12V PSU(+); Cenpek V− → MOSFET Drain (Pin 2/Tab);
+> MOSFET Source (Pin 3) → gemeinsame GND-Schiene mit 12V PSU(−) und
+> Teensy GND; Teensy Pin 3 → MOSFET Gate (Pin 1); 1kΩ Gate-Source-
+> Pulldown direkt am MOSFET.  10k war im Plan, aber 1k tut's auch —
+> 3.3 mA Idle-Strom durch den Pulldown wenn Pin 3 HIGH, weit unter
+> Teensy 4.0 source-spec.  Schaltgeschwindigkeit unbeeinträchtigt
+> da Teensy den Gate direkt treibt.
+>
+> Test: `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py`.
+> Gleicher Bypass wie 2026-05-05 — 5 Fires, jeweils 7×32ms IR-Bursts.
+> Doppelte Verifikation:
+>   * Smartphone-Kamera sieht die 850nm-Bursts als schwaches rotes
+>     Glimmen bei jedem Fire (Phone-IR-Cut-Filter blockt nicht
+>     vollständig bei 850nm).
+>   * 12V PSU Ampere-Anzeige zeigt synchron zu jedem Fire einen
+>     Strom-Spike — beweist dass tatsächlich Last durchgeschaltet
+>     wird, nicht nur ein optisches Artefakt.
+>
+> Was das bedeutet: die komplette Strobe-Kette ist jetzt
+> hardware-validiert end-to-end:
+>   Jetson Pin 29 → Teensy Pin 2 ISR → Teensy Pin 3 → IRLZ44N Gate
+>   → Cenpek 12V-Pfad → 4× 850nm LEDs feuern.
+> Die Software-seitige Validierung von 2026-05-05 (pitrac_lm
+> Init-Handshake + std::system fire_trigger.py path) gilt unverändert
+> weiter — heute kam nur die letzte Lastseite dran.
+>
+> SP1 Progress 97% → 98%.  Was noch offen für functional complete:
+>   * Live FSM-Run mit Ball + IR-Strobe-Beleuchtung — Erwartung:
+>     Issue #19 (HoughCircles-Jitter in ambient IR) und damit auch
+>     der #21-Force-Advance-Workaround lösen sich automatisch sobald
+>     die Bälle in scharfem 850nm-Burst beleuchtet werden.  Erst
+>     dann ist die FSM-Validation echt geschlossen.
+>   * Camera mounting + Stereo-Kalibrierung
+>   * Erster echter Shot mit ball speed / launch angles → SP4 GSPro
+>
+> Hardware Components Registry: MOSFET-Zeile auf ☑ In hand
+> aktualisiert, "IRLZ44N (TO-220, logic-level N-channel)" + 1kΩ
+> Pulldown im Notes-Feld vermerkt.
 
 \---
 
