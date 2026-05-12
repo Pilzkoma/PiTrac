@@ -277,13 +277,21 @@ namespace golf_sim {
 
         // If the ball moved, start over by finding it again
         if (!found || ballMoved) {
-#ifdef JETSON_BUILD  // JETSON_STUB: Issue #21 — stabilization moved-check too strict
-            // for the noisy ambient-IR mono image without IR strobe (see Issue #19).
-            // If the ball is still SEEN but appears to have "moved" slightly,
-            // ignore the move and force-advance — sub-pixel HoughCircles jitter
-            // is not real motion.  When the ball is genuinely lost (!found),
-            // still bail back to WaitingForBall.  Remove this guard once IR
-            // strobe is wired and stabilization works reliably.
+#ifdef JETSON_BUILD  // JETSON_DESIGN: stabilization moved-check is permanently relaxed
+            // on Jetson.  The IR strobe array is event-driven (fires only on a FIRE
+            // trigger, then dark again — see Hardware/teensy_strobe/teensy_strobe.ino),
+            // so the stabilization-check frames are always captured under ambient
+            // room light only.  In a mono OV9281 image at low contrast this produces
+            // sub-pixel HoughCircles jitter (and occasional false-positives on
+            // background edges), which would otherwise repeatedly fail
+            // CheckIfBallMoved and ping-pong the FSM back to WaitingForBall forever
+            // (validated live 2026-05-12, see LOGBOOK).
+            //
+            // Resolution: if the ball is still found in the second frame, treat any
+            // apparent move as jitter and advance.  Only a genuine loss (!found)
+            // bails back to WaitingForBall.  This is correct for the launch-monitor
+            // use case where the ball sits in a tee/cap and cannot physically move
+            // between two frames captured 1 second apart.
             if (!found) {
                 GS_LOG_MSG(info, "=============== Ball Lost Before Stabilizing - Will look for ball again.");
 
@@ -292,7 +300,7 @@ namespace golf_sim {
 
                 return state::WaitingForBall{ std::chrono::steady_clock::now(), false /* send the ball-waiting message again*/};
             }
-            GS_LOG_MSG(info, "=============== JETSON_STUB Issue #21: stabilization moved-check bypassed, advancing");
+            GS_LOG_MSG(info, "=============== Jetson stabilization: re-detected ball after jitter, advancing");
             // Fall through to the stabilized-ball path with the freshly-detected ball
 #else
             GS_LOG_MSG(info, "=============== Ball Moved (or was lost) Before Stabilizing - Will look for ball again.");

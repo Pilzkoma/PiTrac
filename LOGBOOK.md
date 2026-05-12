@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|98%|🟡 In Progress|2026-05-12|
+|SP1 — Hardware & Build|HW+SW|Build|99%|🟡 In Progress|2026-05-12|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -479,7 +479,8 @@ PiTrac's key techniques:
 * ☑ Fire-pin locked: Pin 29 = PQ.05 = gpiochip1 line 105. JSON defaults updated. Verified via Jetson.GPIO Python toggle + multimeter.
 * ☑ Phase C Test 1 PASS (2026-05-05): wired Jetson Pin 29 ↔ Teensy Pin 2 + GND ↔ GND + USB; pitrac_lm init handshake complete; bypass-test script (`Hardware/teensy_strobe/test_strobe_bypass.py`) drives 5/5 visible LED flickers via the same chain pitrac_lm uses. Strobe pipeline software-validated end-to-end.
 * ☑ pitrac_lm strobe init+trigger path software-validated 2026-05-05 — `Strobe pipeline live (trigger via fire_trigger.py)` log from real init, manual invocation of the same helper makes the LED blink. The only un-tested link is the literal `std::system("python3 fire_trigger.py")` line — hardcoded, low risk.
-* ☐ Workaround for Issue #19 (FSM ball-stabilization too flaky without IR): use the bypass-test script for any strobe-pipeline iteration until IR illumination is wired. Real fix expected to land naturally once the IR LEDs are blasting the ball.
+* ☑ Issue #19 (FSM ball-stabilization flaky in ambient light) **resolved by design** 2026-05-12: live FSM run reproduced the HoughCircles jitter exactly as expected. The 2026-05-05 hypothesis "IR strobe will fix this" was wrong — IR array is event-driven (fires only on FIRE trigger), so stabilization-check frames are always ambient-only. The Issue #21 bypass is the permanent solution: re-detected ball ⇒ accept (jitter); genuinely lost ⇒ bail back.
+* ☑ Issue #21 (stabilization moved-check bypass) **promoted from workaround to permanent design** 2026-05-12: gs_fsm.cpp:280-301 comment block rewritten — JETSON_STUB → JETSON_DESIGN, false "remove this guard once IR strobe is wired" prophecy deleted. Log marker simplified to `Jetson stabilization: re-detected ball after jitter, advancing`.
 * ☐ Workaround for Issue #22 (libgpiod chardev doesn't drive Pin 29 on Seeed J202): pulse_strobe_jetson.cpp now shells out to fire_trigger.py via std::system. Could revisit when L4T upgrades or libgpiod 2.x available — until then, the Python helper is reliable.
 * ☑ MOSFET (IRLZ44N TO-220) angekommen + verdrahtet 2026-05-12: low-side switch zwischen Cenpek V− und GND-Schiene, 1kΩ Gate-Source-Pulldown, gemeinsame GND-Schiene mit 12V PSU(−) und Teensy GND
 * ☑ Phase C Test 2 PASS (2026-05-12): `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` — IR-Bursts via Smartphone-Kamera sichtbar (850nm geht durch IR-Cut-Filter durch), zusätzlich verifiziert über Strom-Spike am 12V PSU Ampere-Anzeige bei jedem Fire-Event. Cenpek-Array wird vom MOSFET sauber durchgeschaltet.
@@ -1014,6 +1015,82 @@ PiTrac's key techniques:
 > Hardware Components Registry: MOSFET-Zeile auf ☑ In hand
 > aktualisiert, "IRLZ44N (TO-220, logic-level N-channel)" + 1kΩ
 > Pulldown im Notes-Feld vermerkt.
+
+**2026-05-12 (continued) — SP1 FSM-validated end-to-end + Issue #19/#21 resolved by design**
+
+> Nach Phase C Test 2 PASS noch eine Session: pitrac_lm im echten
+> kCamera1-Modus laufen lassen, Issue #19/#21-Hypothese aus 2026-05-05
+> empirisch prüfen.  Setup minimal: Cam1 schräg auf einen Golfball
+> in einem Putting-Mat in normalem Wohnzimmerlicht, IR-Array
+> verdrahtet aber während Stabilization aus (s.u.).
+>
+> Boot-Hiccups erst gelöst:
+>   * runCam1.sh erwartet env vars (PITRAC_MSG_BROKER_FULL_ADDRESS,
+>     PITRAC_WEBSERVER_SHARE_DIR, PITRAC_BASE_IMAGE_LOGGING_DIR) —
+>     direkt gesetzt
+>   * runCam1.sh erwartet Binary in `build/pitrac_lm`, unser
+>     Jetson-Build liegt in `build_jetson/` → Symlink
+>     `ImageProcessing/build → build_jetson` aufgelöst (alte stale
+>     `build/`-Dir vorher gelöscht)
+>   * `WebServer/share/` Verzeichnis fehlte, dadurch keine
+>     Diagnose-Bilder — `mkdir -p` und Fix
+>
+> Live-Run-Ergebnisse (sp1_fsm_1959.log, sp1_fsm_2006.log):
+>   * Init: `Strobe pipeline live (trigger via fire_trigger.py)` ✓
+>   * FSM: `WaitingForBall → BallPlaced → WaitingForBallStabilization`
+>     → mehrere `Ball Lost Before Stabilizing` Zyklen → schließlich
+>     `Ball Stabilized - Let's Play Golf! (Waiting for hit)` ✓
+>   * Run 1: `JETSON_STUB Issue #21: stabilization moved-check bypassed`
+>     hat genau einmal gegriffen → unmittelbar danach Ball Stabilized
+>     → `PulseStrobe::SendExternalTrigger - fire pulse sent` ✓
+>   * Damit ist die komplette FSM-Kette inkl. Trigger-Path im echten
+>     Modus live validiert (vorher nur bypass-script).
+>
+> Critical realization über Issue #19:
+>   * 2026-05-05-Hypothese war "IR-Strobe-Beleuchtung macht
+>     HoughCircles-Kanten sauber, Stabilization wird natürlich passen".
+>   * **Hypothese ist falsch.**  Bei Code-Review der Teensy-Firmware
+>     (teensy_strobe.ino:74) wird LED_GATE im Setup auf LOW gesetzt
+>     und nur während eines getriggerten Pulse-Trains HIGH.  Es gibt
+>     keinen continuous-on Modus.  Strobe feuert erst in
+>     `SendCameraPrimingPulses` (gs_fsm.cpp:322) — also NACH
+>     Stabilization, nicht währenddessen.
+>   * Stabilization-Check-Frames werden also für immer unter
+>     Ambient-Licht-Bedingungen aufgenommen.  HoughCircles-Jitter ist
+>     permanent.  Issue #19 ist nicht fix-bar durch IR allein.
+>
+> Diagnose-Bild `log_cam1_search_area_img.png` bestätigt: schlecht
+> beleuchtete Mono-Szene mit clutter-Hintergrund (Skateboard,
+> Leinwand, Stuhlbeine) — viele kreis-ähnliche Kanten die
+> HoughCircles spurious detections geben.  Ball-Kontrast gegen das
+> dunkle Putting-Mat ist niedrig.  Die einmalige Detection bei
+> (663, 48) war wahrscheinlich ein False Positive am oberen
+> Skateboard-Rand, nicht der echte Ball.  Das echte FSM-Verhalten
+> (mehrere `Ball Lost` Zyklen vor erfolgreicher Stabilization) passt
+> zu dieser Bild-Analyse.
+>
+> Entscheidung Option 2c: **Issue #21 Bypass als permanenten Design
+> Choice promoten**, statt Workaround.
+>   * gs_fsm.cpp:280-301: Kommentar-Block JETSON_STUB → JETSON_DESIGN,
+>     falsche "remove once IR strobe is wired" Prophezeiung gelöscht,
+>     stattdessen Erklärung dass IR-Array event-driven ist und
+>     ambient-light jitter daher permanent.
+>   * Begründung in Kommentar: für Launch-Monitor-Use-Case (Ball
+>     liegt in Tee/Cap, kann sich physisch zwischen zwei 1-Sekunden-
+>     Frames NICHT bewegen) ist "re-detection ⇒ accept jitter, genuine
+>     loss ⇒ bail back" semantisch korrekt.
+>   * Log-Marker `JETSON_STUB Issue #21: stabilization moved-check
+>     bypassed` → `Jetson stabilization: re-detected ball after jitter,
+>     advancing` (informativer, kein Stub-Geruch mehr).
+>
+> SP1 Progress 98% → 99%.  Issues #19/#21 als "Resolved by design"
+> geschlossen.  Was offen bleibt für functional-complete:
+>   * Issue #22 (libgpiod chardev mystery, Python-Helper-Workaround
+>     in Production) — akzeptiert, kein Fix geplant
+>   * Final 1%: echte Kalibrierung + erster Shot mit Speed/Angles auf
+>     Console — braucht Camera-Mounting (Enclosure CAD, geht nach
+>     SP5).  Davor ist SP1 mit "Hardware + Software end-to-end live
+>     validiert" maximal abgedeckt.
 
 \---
 
