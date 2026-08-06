@@ -58,6 +58,21 @@ class DeviceForCameraTest(unittest.TestCase):
         self.assertEqual(sorted(camera_paths.CAMERA_PORT_PATHS), [1, 2])
         self.assertEqual(len(set(camera_paths.CAMERA_PORT_PATHS.values())), 2)
 
+    def test_all_devices_returns_both_cameras(self):
+        target1 = self._link(1, "video0")
+        target2 = self._link(2, "video4")
+        self.assertEqual(
+            camera_paths.all_devices(by_path_dir=self.by_path),
+            {1: target1, 2: target2},
+        )
+
+    def test_all_devices_propagates_missing_port(self):
+        # A half-present rig (one camera unplugged or on the wrong port)
+        # must fail loudly rather than quietly returning one camera.
+        self._link(1, "video0")
+        with self.assertRaises(camera_paths.CameraBindingError):
+            camera_paths.all_devices(by_path_dir=self.by_path)
+
 
 if __name__ == "__main__":
     unittest.main()
