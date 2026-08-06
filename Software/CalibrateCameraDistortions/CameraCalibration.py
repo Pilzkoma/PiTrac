@@ -1,123 +1,179 @@
+#!/usr/bin/env python3
+"""Camera calibration for the Jetson LM.
 
-import numpy as np
-import cv2 as cv
+Derived from PiTrac's original:
+  - resolution is read from the images, not 1456x1088 baked in for the IMX296
+  - image paths are arguments, not hardcoded globs
+  - reprojection error is reported per image, so outliers can be dropped
+  - the sub-pixel refined corners are actually used; the original computed
+    cornerSubPix and then appended the coarse corners, discarding it
+  - the board geometry comes from sp1_vision.frame_analysis rather than being
+    declared again here. Two copies with nothing enforcing equality is how
+    this project already lost a day to a stale USB port constant.
+
+Output is a JSON block in golf_sim_config.json's shape, rather than .txt
+files whose 3x3 matrix and 5-vector have to be transcribed by hand.
+
+It also reports fx x 3.0 um, which is the measured focal length this whole
+exercise exists to obtain: the configured 6.0 mm is the IMX296's, and the
+2.74 mm we expect instead is derived from a manufacturer FOV figure rather
+than observed.
+
+    python3 CameraCalibration.py --images ../../sp1_vision/calibration_images/cam1 \
+                                 --label Camera1
+"""
+
+import argparse
 import glob
-import pickle
+import json
+import os
+import sys
+
+import cv2 as cv
+import numpy as np
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from sp1_vision.frame_analysis import CHESSBOARD_SIZE, SUBPIX_CRITERIA  # noqa: E402
+
+# Square size only scales the translation vectors; the camera matrix and the
+# distortion coefficients are unaffected. It is set for completeness, not
+# because the print has to be exact.
+SQUARE_SIZE_MM = 20.0
+
+# OV9281: 1/4", 1280x800, 3.0 um square pixels.
+PIXEL_PITCH_MM = 0.003
 
 
-
-################ FIND CHESSBOARD CORNERS - OBJECT POINTS AND IMAGE POINTS #############################
-
-chessboardSize = (9,6)
-# frameSize = (2592,1944)
-#frameSize = (4056,3040)
-frameSize = (1456,1088)
+def object_points():
+    objp = np.zeros((CHESSBOARD_SIZE[0] * CHESSBOARD_SIZE[1], 3), np.float32)
+    objp[:, :2] = np.mgrid[0:CHESSBOARD_SIZE[0], 0:CHESSBOARD_SIZE[1]].T.reshape(-1, 2)
+    return objp * SQUARE_SIZE_MM
 
 
+def collect(image_dir):
+    """Return (objpoints, imgpoints, size, used_files, skipped_files)."""
+    files = sorted(glob.glob(os.path.join(image_dir, "*.png")))
+    if not files:
+        raise SystemExit("no PNGs found in " + image_dir)
 
-# termination criteria
-criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    objp = object_points()
+    objpoints, imgpoints, used, skipped = [], [], [], []
+    size = None
 
+    for path in files:
+        img = cv.imread(path, cv.IMREAD_GRAYSCALE)
+        if img is None:
+            skipped.append((path, "unreadable"))
+            continue
+        if size is None:
+            size = (img.shape[1], img.shape[0])
+        elif (img.shape[1], img.shape[0]) != size:
+            skipped.append((path, "size {}x{} differs from {}x{}".format(
+                img.shape[1], img.shape[0], size[0], size[1])))
+            continue
 
-# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-objp = np.zeros((chessboardSize[0] * chessboardSize[1], 3), np.float32)
-objp[:,:2] = np.mgrid[0:chessboardSize[0],0:chessboardSize[1]].T.reshape(-1,2)
-
-size_of_chessboard_squares_mm = 20
-objp = objp * size_of_chessboard_squares_mm
-
-
-# Arrays to store object points and image points from all the images.
-objpoints = [] # 3d point in real world space
-imgpoints = [] # 2d points in image plane.
-
-
-# Change this as needed to point to the ~20 or so calibration pictures
-images = glob.glob('./images/cam1/*.png')
-
-for image in images:
-
-    print("Processing Image: " + image)
-    img = cv.imread(image)
-    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-
-    # Find the chess board corners
-    ret, corners = cv.findChessboardCorners(gray, chessboardSize, None)
-
-    # If found, add object points, image points (after refining them)
-    if ret == True:
-
+        found, corners = cv.findChessboardCorners(img, CHESSBOARD_SIZE, None)
+        if not found:
+            skipped.append((path, "no board"))
+            continue
+        # Use the refined corners. The original discarded them.
+        corners = cv.cornerSubPix(img, corners, (11, 11), (-1, -1), SUBPIX_CRITERIA)
         objpoints.append(objp)
-        corners2 = cv.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
         imgpoints.append(corners)
+        used.append(path)
 
-        # Draw and display the corners
-        # cv.drawChessboardCorners(img, chessboardSize, corners2, ret)
-        # cv.imshow('img', img)
-        # cv.waitKey(1000)
+    return objpoints, imgpoints, size, used, skipped
 
 
-#  cv.destroyAllWindows()
+def per_image_errors(objpoints, imgpoints, rvecs, tvecs, mtx, dist):
+    errors = []
+    for i in range(len(objpoints)):
+        projected, _ = cv.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
+        errors.append(cv.norm(imgpoints[i], projected, cv.NORM_L2) / len(projected))
+    return errors
 
 
+def config_block(label, mtx, dist):
+    """Emit the two golf_sim_config.json keys, ready to paste."""
+    return json.dumps({
+        "kCamera{}CalibrationMatrix".format(label): [
+            ["{:.12f}".format(v) for v in row] for row in mtx
+        ],
+        "kCamera{}DistortionVector".format(label): [
+            "{:.12f}".format(v) for v in dist.ravel()
+        ],
+    }, indent=2)
 
 
-############## CALIBRATION #######################################################
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--images", required=True,
+                        help="directory of checkerboard PNGs")
+    parser.add_argument("--label", default="1",
+                        help="camera label for the config keys, 1 or 2")
+    parser.add_argument("--save-npz",
+                        help="write intrinsics here for the stereo step")
+    parser.add_argument("--undistort-check", metavar="PNG",
+                        help="write an original|undistorted side-by-side here, "
+                             "so the result can be judged by eye")
+    args = parser.parse_args(argv)
 
-ret, cameraMatrix, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, frameSize, None, None)
+    objpoints, imgpoints, size, used, skipped = collect(args.images)
+    print("using {} images at {}x{}".format(len(used), size[0], size[1]))
+    for path, why in skipped:
+        print("  skipped {}: {}".format(os.path.basename(path), why))
+    if len(used) < 8:
+        raise SystemExit("need at least 8 usable images, got {}".format(len(used)))
 
-# Save the camera calibration result for later use (we won't worry about rvecs / tvecs)
-# Most people won't use the .pkl files, just the .txt files
-pickle.dump((cameraMatrix, dist), open( "calibration.pkl", "wb" ))
-pickle.dump(cameraMatrix, open( "cameraMatrix.pkl", "wb" ))
-pickle.dump(dist, open( "dist.pkl", "wb" ))
+    rms, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
+        objpoints, imgpoints, size, None, None)
 
-np.savetxt('cameraMatrix.txt', cameraMatrix, "%10f");
-np.savetxt('distortion.txt', dist, "%10f");
+    errors = per_image_errors(objpoints, imgpoints, rvecs, tvecs, mtx, dist)
+    print("\nreprojection error per image:")
+    for path, err in sorted(zip(used, errors), key=lambda p: -p[1]):
+        flag = "  <- outlier, consider removing" if err > 0.5 else ""
+        print("  {:<28} {:.4f}{}".format(os.path.basename(path), err, flag))
+    print("\n  mean {:.4f} px      RMS {:.4f} px".format(float(np.mean(errors)), rms))
 
-############## UNDISTORTION #####################################################
+    fx, fy = mtx[0, 0], mtx[1, 1]
+    print("\nfx {:.2f} px   fy {:.2f} px   fy/fx {:.4f}".format(fx, fy, fy / fx))
+    print("focal length  fx x {:.4f} mm/px = {:.3f} mm".format(
+        PIXEL_PITCH_MM, fx * PIXEL_PITCH_MM))
+    print("              fy x {:.4f} mm/px = {:.3f} mm".format(
+        PIXEL_PITCH_MM, fy * PIXEL_PITCH_MM))
+    print("sensor        {:.3f} x {:.3f} mm".format(
+        size[0] * PIXEL_PITCH_MM, size[1] * PIXEL_PITCH_MM))
+    if abs(fy / fx - 1.0) > 0.01:
+        print("\nWARNING: fx and fy differ by more than 1%. The 3.0 um square-pixel")
+        print("         assumption may be wrong - do not write these to config yet.")
 
-# NOTE - Before running, pick on of the checkerboard images as a test image on which
-# to try the undistortion.  Put a copy of that file in the filename below
-img = cv.imread('./test_image_for_undistortion.png')
-h,  w = img.shape[:2]
-newCameraMatrix, roi = cv.getOptimalNewCameraMatrix(cameraMatrix, dist, (w,h), 1, (w,h))
+    if args.undistort_check:
+        # Numbers can look fine while the result is wrong. Straight edges
+        # being straight is the check a person can actually make.
+        sample = cv.imread(used[0])
+        h, w = sample.shape[:2]
+        newmtx, _ = cv.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+        mapx, mapy = cv.initUndistortRectifyMap(
+            mtx, dist, None, newmtx, (w, h), cv.CV_16SC2)
+        rectified = cv.remap(sample, mapx, mapy, cv.INTER_LINEAR)
+        cv.imwrite(args.undistort_check, np.hstack([sample, rectified]))
+        print("\nundistortion check written to {}".format(args.undistort_check))
+        print("  left is the original, right is undistorted. The board's rows")
+        print("  and columns must be straight on the right, and the squares")
+        print("  the same size across the frame.")
+
+    print("\ngolf_sim_config.json block:\n")
+    print(config_block(args.label, mtx, dist))
+
+    if args.save_npz:
+        np.savez(args.save_npz, mtx=mtx, dist=dist, size=size,
+                 objpoints=np.array(objpoints), imgpoints=np.array(imgpoints))
+        print("\nintrinsics saved to " + args.save_npz)
+    return 0
 
 
-
-# Undistort first with no remapping to see how that looks.
-dst = cv.undistort(img, cameraMatrix, dist, None, newCameraMatrix)
-
-# crop the image
-# x, y, w, h = roi
-# dst = dst[y:y+h, x:x+w]
-cv.imwrite('caliResult1.png', dst)
-
-
-
-# Undistort with Remapping
-mapx, mapy = cv.initUndistortRectifyMap(cameraMatrix, dist, None, newCameraMatrix, (w,h), 5)
-dst = cv.remap(img, mapx, mapy, cv.INTER_LINEAR)
-
-# crop the image
-x, y, w, h = roi
-dst = dst[y:y+h, x:x+w]
-cv.imwrite('caliResult2.png', dst)
-
-# TBD - try this again now with commas to minimize the re-editing the user has to do.
-file1 = "cameraMatrix.txt"
-np.savetxt(file1,cameraMatrix,delimiter=',')
-file2 = "cameraDistortion.txt"
-np.savetxt(file2,dist,delimiter=',')
-
-
-
-# Determine reprojection Error
-mean_error = 0
-
-for i in range(len(objpoints)):
-    imgpoints2, _ = cv.projectPoints(objpoints[i], rvecs[i], tvecs[i], cameraMatrix, dist)
-    error = cv.norm(imgpoints[i], imgpoints2, cv.NORM_L2)/len(imgpoints2)
-    mean_error += error
-
-print( "total error: {}".format(mean_error/len(objpoints)) )
+if __name__ == "__main__":
+    sys.exit(main())
