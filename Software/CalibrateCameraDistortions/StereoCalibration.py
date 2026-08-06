@@ -44,8 +44,11 @@ STEREO_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 1e-5)
 ACCEPTABLE_MISALIGNMENT_DEG = 3.0
 
 
-def paired_corners(dir1, dir2):
-    """Find boards in both images of each pair, keeping only complete pairs."""
+def paired_corners(dir1, dir2, square_mm=None):
+    """Find boards in both images of each pair, keeping only complete pairs.
+
+    square_mm sets the world scale, and therefore the baseline, outright.
+    """
     names1 = {os.path.basename(p) for p in glob.glob(os.path.join(dir1, "*.png"))}
     names2 = {os.path.basename(p) for p in glob.glob(os.path.join(dir2, "*.png"))}
     shared = sorted(names1 & names2)
@@ -55,7 +58,7 @@ def paired_corners(dir1, dir2):
             "Pairs must be captured simultaneously and written under matching "
             "names - sequential per-camera series cannot yield extrinsics.")
 
-    objp = object_points()
+    objp = object_points(square_mm)
     objpoints, pts1, pts2, used, dropped = [], [], [], [], []
     size = None
 
@@ -111,6 +114,26 @@ def rotation_to_axis_degrees(R):
     return tuple(math.degrees(float(v)) for v in rvec.ravel())
 
 
+def epipolar_errors(F, pts1, pts2):
+    """Mean point-to-epipolar-line distance per pair, in pixels.
+
+    A correct stereo pose puts every point of one view on the epipolar line
+    its partner defines. How far off they land is the natural per-pair quality
+    measure, and unlike the overall RMS it says *which* pair is dragging.
+    """
+    out = []
+    for a, b in zip(pts1, pts2):
+        a2 = a.reshape(-1, 2).astype(np.float64)
+        b2 = b.reshape(-1, 2).astype(np.float64)
+        ah = np.hstack([a2, np.ones((len(a2), 1))])
+        bh = np.hstack([b2, np.ones((len(b2), 1))])
+        lines = ah.dot(F.T)                      # epipolar line in image 2
+        denom = np.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
+        d = np.abs(np.sum(lines * bh, axis=1)) / np.maximum(denom, 1e-12)
+        out.append(float(np.sqrt(np.mean(d ** 2))))
+    return out
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cam1-npz", required=True,
@@ -119,13 +142,22 @@ def main(argv=None):
     parser.add_argument("--cam1-images", required=True,
                         help="directory of camera 1 checkerboard PNGs")
     parser.add_argument("--cam2-images", required=True)
+    parser.add_argument("--square-mm", type=float, default=None, metavar="MM",
+                        help="printed square size in mm; must match the value "
+                             "used for the intrinsics. Defaults to "
+                             "CameraCalibration.SQUARE_SIZE_MM. This scales "
+                             "the baseline linearly - a wrong value here makes "
+                             "a correct mount look misbuilt.")
+    parser.add_argument("--drop-above", type=float, default=1.0, metavar="PX",
+                        help="re-solve without pairs whose epipolar error "
+                             "exceeds this (default %(default)s px); 0 disables")
     args = parser.parse_args(argv)
 
     k1 = np.load(args.cam1_npz)
     k2 = np.load(args.cam2_npz)
 
     objpoints, pts1, pts2, size, used, dropped = paired_corners(
-        args.cam1_images, args.cam2_images)
+        args.cam1_images, args.cam2_images, args.square_mm)
     print("using {} complete pairs at {}x{}".format(len(used), size[0], size[1]))
     for name, why in dropped:
         print("  dropped {}: {}".format(name, why))
@@ -134,12 +166,31 @@ def main(argv=None):
             "need at least 8 complete pairs, got {}".format(len(used)))
 
     # Intrinsics are already measured and trusted, so solve only for the pose.
-    rms, _, _, _, _, R, T, _, _ = cv.stereoCalibrate(
-        objpoints, pts1, pts2,
-        k1["mtx"], k1["dist"], k2["mtx"], k2["dist"], size,
-        criteria=STEREO_CRITERIA,
-        flags=cv.CALIB_FIX_INTRINSIC,
-    )
+    def solve(op, p1, p2):
+        return cv.stereoCalibrate(
+            op, p1, p2, k1["mtx"], k1["dist"], k2["mtx"], k2["dist"], size,
+            criteria=STEREO_CRITERIA, flags=cv.CALIB_FIX_INTRINSIC)
+
+    rms, _, _, _, _, R, T, _, F = solve(objpoints, pts1, pts2)
+
+    if args.drop_above > 0:
+        errs = epipolar_errors(F, pts1, pts2)
+        print("\nepipolar error per pair (RMS px):")
+        for name, e in sorted(zip(used, errs), key=lambda p: -p[1]):
+            print("  %-22s %6.3f%s" % (name, e, "  <- outlier" if e > args.drop_above else ""))
+        keep = [i for i, e in enumerate(errs) if e <= args.drop_above]
+        if len(keep) < len(used) and len(keep) >= 8:
+            print("\ndropping %d pair(s) above %.2f px: %s" % (
+                len(used) - len(keep), args.drop_above,
+                ", ".join(used[i] for i in range(len(used)) if i not in keep)))
+            rms, _, _, _, _, R, T, _, F = solve(
+                [objpoints[i] for i in keep], [pts1[i] for i in keep],
+                [pts2[i] for i in keep])
+            used = [used[i] for i in keep]
+            print("  re-solved on %d pairs" % len(used))
+        elif len(keep) < 8:
+            print("\nwould drop down to %d pairs, too few - keeping all."
+                  % len(keep))
 
     baseline = float(np.linalg.norm(T))
     pitch, yaw, roll = rotation_to_axis_degrees(R)

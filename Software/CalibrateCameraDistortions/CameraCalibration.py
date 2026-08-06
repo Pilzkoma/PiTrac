@@ -38,28 +38,35 @@ if _REPO_ROOT not in sys.path:
 
 from sp1_vision.frame_analysis import CHESSBOARD_SIZE, SUBPIX_CRITERIA  # noqa: E402
 
-# Square size only scales the translation vectors; the camera matrix and the
-# distortion coefficients are unaffected. It is set for completeness, not
-# because the print has to be exact.
-SQUARE_SIZE_MM = 20.0
+# MEASURE YOUR PRINTED BOARD. Lay a ruler across eight squares and divide.
+#
+# This does not affect the camera matrix or the distortion coefficients - those
+# are in pixels and care nothing for world scale. It scales the *translation*
+# linearly, so it sets the stereo baseline outright. Left at a guessed 20 mm
+# against a board that was actually 24 mm, the measured baseline came out as
+# 66.40 mm against a true 80.00 mm, and looked for all the world like a
+# misbuilt mount.
+#
+# 24.0 mm measured 2026-08-06 on the printed checkerboard.png.
+SQUARE_SIZE_MM = 24.0
 
 # OV9281: 1/4", 1280x800, 3.0 um square pixels.
 PIXEL_PITCH_MM = 0.003
 
 
-def object_points():
+def object_points(square_mm=None):
     objp = np.zeros((CHESSBOARD_SIZE[0] * CHESSBOARD_SIZE[1], 3), np.float32)
     objp[:, :2] = np.mgrid[0:CHESSBOARD_SIZE[0], 0:CHESSBOARD_SIZE[1]].T.reshape(-1, 2)
-    return objp * SQUARE_SIZE_MM
+    return objp * (SQUARE_SIZE_MM if square_mm is None else square_mm)
 
 
-def collect(image_dir):
+def collect(image_dir, square_mm=None):
     """Return (objpoints, imgpoints, size, used_files, skipped_files)."""
     files = sorted(glob.glob(os.path.join(image_dir, "*.png")))
     if not files:
         raise SystemExit("no PNGs found in " + image_dir)
 
-    objp = object_points()
+    objp = object_points(square_mm)
     objpoints, imgpoints, used, skipped = [], [], [], []
     size = None
 
@@ -89,10 +96,19 @@ def collect(image_dir):
 
 
 def per_image_errors(objpoints, imgpoints, rvecs, tvecs, mtx, dist):
+    """Per-image RMS reprojection error, in pixels.
+
+    Note the sqrt. PiTrac's original - and the OpenCV tutorial it came from -
+    divides the L2 norm by the point *count* rather than its square root,
+    which is not an RMS and not in pixels. With 54 corners per image that
+    understates the error by a factor of 7.35, so images that reproject at
+    3 px look like 0.4 and no outlier check ever fires.
+    """
     errors = []
     for i in range(len(objpoints)):
         projected, _ = cv.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
-        errors.append(cv.norm(imgpoints[i], projected, cv.NORM_L2) / len(projected))
+        n = len(projected)
+        errors.append(cv.norm(imgpoints[i], projected, cv.NORM_L2) / np.sqrt(n))
     return errors
 
 
@@ -119,10 +135,19 @@ def main(argv=None):
     parser.add_argument("--undistort-check", metavar="PNG",
                         help="write an original|undistorted side-by-side here, "
                              "so the result can be judged by eye")
+    parser.add_argument("--square-mm", type=float, default=SQUARE_SIZE_MM,
+                        help="printed checkerboard square size in mm "
+                             "(default %(default)s). Measure your print - this "
+                             "sets the stereo baseline outright.")
+    parser.add_argument("--drop-above", type=float, default=1.0, metavar="PX",
+                        help="recalibrate without images whose reprojection "
+                             "error exceeds this (default %(default)s px); "
+                             "0 disables")
     args = parser.parse_args(argv)
 
-    objpoints, imgpoints, size, used, skipped = collect(args.images)
-    print("using {} images at {}x{}".format(len(used), size[0], size[1]))
+    objpoints, imgpoints, size, used, skipped = collect(args.images, args.square_mm)
+    print("using {} images at {}x{}, square {} mm".format(
+        len(used), size[0], size[1], args.square_mm))
     for path, why in skipped:
         print("  skipped {}: {}".format(os.path.basename(path), why))
     if len(used) < 8:
@@ -130,13 +155,36 @@ def main(argv=None):
 
     rms, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
         objpoints, imgpoints, size, None, None)
-
     errors = per_image_errors(objpoints, imgpoints, rvecs, tvecs, mtx, dist)
-    print("\nreprojection error per image:")
+
+    print("\nreprojection error per image (RMS px):")
     for path, err in sorted(zip(used, errors), key=lambda p: -p[1]):
-        flag = "  <- outlier, consider removing" if err > 0.5 else ""
-        print("  {:<28} {:.4f}{}".format(os.path.basename(path), err, flag))
-    print("\n  mean {:.4f} px      RMS {:.4f} px".format(float(np.mean(errors)), rms))
+        flag = "  <- outlier" if err > args.drop_above > 0 else ""
+        print("  {:<28} {:.3f}{}".format(os.path.basename(path), err, flag))
+    print("\n  worst {:.3f} px      overall RMS {:.3f} px".format(max(errors), rms))
+
+    # Dropping images is a judgement call, so it is reported rather than done
+    # quietly: both numbers are printed and the excluded files are named.
+    if args.drop_above > 0:
+        keep = [i for i, e in enumerate(errors) if e <= args.drop_above]
+        if len(keep) < len(used):
+            dropped = [os.path.basename(used[i]) for i in range(len(used))
+                       if i not in keep]
+            print("\ndropping {} image(s) above {:.2f} px: {}".format(
+                len(dropped), args.drop_above, ", ".join(dropped)))
+            if len(keep) < 8:
+                print("  ...that would leave {} images, too few. Keeping all."
+                      .format(len(keep)))
+            else:
+                rms, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
+                    [objpoints[i] for i in keep], [imgpoints[i] for i in keep],
+                    size, None, None)
+                errors = per_image_errors(
+                    [objpoints[i] for i in keep], [imgpoints[i] for i in keep],
+                    rvecs, tvecs, mtx, dist)
+                used = [used[i] for i in keep]
+                print("  recalibrated on {} images: worst {:.3f} px, "
+                      "overall RMS {:.3f} px".format(len(used), max(errors), rms))
 
     fx, fy = mtx[0, 0], mtx[1, 1]
     print("\nfx {:.2f} px   fy {:.2f} px   fy/fx {:.4f}".format(fx, fy, fy / fx))
