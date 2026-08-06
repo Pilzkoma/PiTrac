@@ -49,7 +49,8 @@
 |-|-|-|-|-|-|
 |Microcontroller / SBC|NVIDIA Jetson Xavier NX (Seed Studio carrier)|Main compute — vision processing, shot detection, GSPro Output (V1)|Cameras, IR trigger circuit|Already owned|☑ In hand|
 |Microcontroller / SBC|NVIDIA Jetson Xavier NX (NVIDIA carrier board)|Main compute — vision processing, shot detection, GSPro Output (V2)|Cameras, LiDAR, IR trigger circuit, Video recording camera|Already owned|☑ In hand|
-|Primary Camera x2|Arducam OV9281 Monochrome USB3|Ball imaging — strobe capture|Jetson USB3 port|TBD|☐ Ordered ☐ In hand ☐ In use|
+|Primary Camera x2|Arducam **B0332**, OV9281 mono global shutter, **USB 2.0 UVC**, 70°(H) low-distortion M12 (**measured 2.77 mm**, focus adjustable by screwing the lens)|Ball imaging — strobe capture|Jetson USB-A. Both behind the carrier's soldered-on VIA Labs USB 2.0 hub, sharing one 480 Mbit/s upstream — direct-plugged physically, hubbed electrically, not separable by moving cables|—|☑ In use|
+|↳ Camera identity trap|Both modules report VID:PID `0c45:6366` and iSerial **`UC762`** — Arducam's SKU code, not a per-unit serial|`/dev/v4l/by-id/` collides, so `/dev/videoN` is the only discriminator and it is assigned in enumeration order|Bind by USB port path instead: cam1 = `...usb-0:2.3...` = left module facing the unit, cam2 = `...2.4...` = right. Mirrored in `sp1_vision/camera_paths.py` and `v4l2_interface.cpp`|—|☑ Handled|
 |LiDAR sensor (not used in v1 - v2 only)|TBD|Motion/trigger detection — detects ball or club movement to wake cameras|Jetson GPIO / serial|TBD|☐ Ordered ☐ In hand ☐ In use|
 |IR LED array|850nm \~10W array board (e.g. Chanzon)|IR illumination for strobe capture|Strobe driver circuit|TBD|☐ Ordered ☐ In hand ☐ In use|
 |IR strobe driver|Teensy 4.0 (DEV-15583) — pulled forward from v2 plan|Drives IR LED pulses at \~10µs via Hardware-Timer-backed delayMicroseconds; Jetson sends single GPIO trigger + setup over USB serial|Jetson Pin 29 (fire trigger) + USB + MOSFET → IR LED array|SparkFun|☑ In hand|
@@ -194,6 +195,9 @@ Next step: solder pins on Teensy when they arrive, wire Jetson Pin 29 ↔ Teensy
 |20|SP1|motion_detect_stage.cpp explicitly skipped SendExternalTrigger when system_mode == kCamera1TestStandalone (RPi-only intent: "don't pulse a non-existent cam2 system during isolated cam1 testing"). On Jetson SendExternalTrigger drives the IR strobe (no separate cam2 system to skip), so this prevented the strobe from ever firing during pitrac_lm motion-detect trips.|✅ Resolved|☑ Yes|Resolved 2026-05-05 — motion_detect_stage.cpp now unconditionally calls SendExternalTrigger under #ifdef JETSON_BUILD regardless of system_mode.|2026-05-05|
 |21|SP1|JETSON_STUB bypass in gs_fsm.cpp WaitingForBallStabilization handler — when CheckForBall finds the ball but reports "moved" (sub-pixel HoughCircles jitter), force-advance to WaitingForBallHit instead of bailing back to WaitingForBall. Allows pitrac_lm to exercise the full strobe-trigger pipeline despite Issue #19. When ball is genuinely lost (!found) the original bail-back behavior is preserved.|🟡 Medium|☑ Yes|Temporary development bypass — REMOVE this `#ifdef JETSON_BUILD` block in gs_fsm.cpp once IR strobe is wired and HoughCircles produces stable ball detections. Until then it's the only way to exercise the SP1 strobe pipeline end-to-end through pitrac_lm.|2026-05-05|
 |22|SP1|libgpiod chardev (gpiod_line_set_value via /dev/gpiochip1) does NOT drive Pin 29 in a way that the Teensy ISR sees a rising edge on the Seeed reComputer J202 carrier. Confirmed via extensive 2026-05-05 debugging — gpioset CLI (uses libgpiod chardev) does not trigger the Teensy either; only Python's Jetson.GPIO library works. Adding force-LOW + 5ms hold + 2ms settle to the C++ libgpiod path did not help. The cause is unknown — possibly a kernel/device-tree quirk specific to this carrier+L4T combination.|🟡 Medium|☑ Yes|Workaround in place: pulse_strobe_jetson.cpp's SendExternalTrigger calls Hardware/teensy_strobe/fire_trigger.py via std::system instead of libgpiod chardev (Jetson.GPIO under the hood works reliably). ~100-200ms fork+exec+python startup latency is acceptable. Could revisit if/when L4T is upgraded or libgpiod 2.x is available — until then, the Python helper is reliable.|2026-05-05|
+|23|SP1|**Every optical constant described PiTrac's IMX296, and the undistortion was live with it.** Focal length 6.222/5.903 mm against a real 2.767/2.772; sensor 5.077x3.789 mm against 3.840x2.400; distortion k1 −0.509/−0.818 against +0.015/+0.053 — an order of magnitude too strong and of the opposite sign, through a principal point 113 px outside the frame. `camera_hardware.cpp` enables `use_undistortion_matrix_` whenever the config carries a non-zero matrix, and the config carried PiTrac's, so every still from `TakeRawPicture` — the path `CheckForBall` and therefore ball detection use — was remapped through the wrong lens model. The 2026-04-29 note "no-op until calibration loads a matrix" was wrong. Separately, only the *resolution* was overridden to 1280x800 while the sensor stayed IMX296, leaving its aspect at 1.340 against an image of 1.600 and skewing the vertical world axis ~19%.|✅ Resolved|☑ Yes|Resolved 2026-08-06 — measured intrinsics written to `golf_sim_config.json`, sensor dimensions given the same override mechanism the port already used for resolution (applied after every model branch so none can miss it), expected ball radius corrected to 49 under the keys the code actually reads. Verified in a live trace run.|2026-08-06|
+|24|SP1|**Both camera modules are indistinguishable by USB identity** — same VID:PID `0c45:6366`, same `bcdDevice`, and iSerial `UC762` on both, which is Arducam's SKU code rather than a per-unit serial. `/dev/v4l/by-id/` therefore holds one colliding entry and `/dev/videoN` is assigned in enumeration order. If the two swap across a reboot the stereo baseline changes sign and depth comes out mirrored, with nothing visibly wrong in either image. Not hypothetical: the port comment recorded ports `xhci-2.2.4`/`2.3` while the hardware had already moved to `2.3`/`2.4`.|✅ Resolved|☑ Yes|Resolved 2026-08-06 — bound by USB port path in both `sp1_vision/camera_paths.py` and `v4l2_interface.cpp`, failing loudly rather than falling back to `/dev/video0`. Which module is which established twice over: covering a lens, and parallax. cam1 = port 2.3 = left module facing the unit. **The USB cables must not be swapped between sockets** — the socket is the identity.|2026-08-06|
+|25|SP1|Both lenses were out of focus and nobody had noticed — cam1 by a factor of 5.4 in Laplacian variance, cam2 by 1.6. Compounding this, `expected_ball_radius_pixels_at_40cm_` sat at the IMX296's 87 against a real 49, so the Hough search radius was nearly double what the ball actually subtends. Plausibly a third contributing factor to Issue #19 alongside ambient light and background clutter.|✅ Resolved|☑ Yes|Resolved 2026-08-06 — both lenses refocused (they *are* adjustable, contrary to first assumption), now within 3% of each other at ~3000 Laplace points. Ball radius corrected. Worth re-testing Issue #19's stabilisation behaviour now that the ball is both in focus and correctly sized; the Issue #21 bypass may no longer be carrying as much weight as it was.|2026-08-06|
 
 \---
 
@@ -328,11 +332,11 @@ IMPORTANT RULES FOR THIS CHAT:
 |-|-|
 |Type|☑ Hardware ☑ Software|
 |Phase|Build|
-|% Complete|75%|
+|% Complete|99%|
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
-|Last Updated|2026-04-26|
+|Last Updated|2026-08-07|
 
 \---
 
@@ -460,6 +464,13 @@ PiTrac's key techniques:
 |2026-05-05|pitrac_lm strobe init handshake (Teensy + libgpiod), wired Jetson Pin 29 ↔ Teensy Pin 2 + GND ↔ GND + USB|`./pitrac_lm --system_mode=camera1_test_standalone --logging_level=trace`. Permission setup: `sudo chmod 666 /dev/ttyACM0` (brain not in dialout group; permanent fix via usermod scheduled for later).|✅ PASS|Init logs: `open_teensy_serial - opened /dev/ttyACM0 at 115200 8N1` → `send_setup_to_teensy - Teensy reached READY state` → `PulseStrobe::InitGPIOSystem - Teensy READY, GPIO line claimed. Strobe pipeline live.`. Teensy LED13 went from 1Hz blink (WAITING_SETUP) to solid HIGH (READY). Watch loop never reached during this run because PiTrac's FSM ball-stabilization check rejected the placed yellow-ball (see Issue #19) — but the Teensy + GPIO pipeline init proven sound.|
 |2026-05-05|Phase C Test 1: Jetson → Teensy → Test-LED chain (FSM bypass)|`Hardware/teensy_strobe/test_strobe_bypass.py` standalone Python script: configures Teensy with long visible pulses (32ms ON, 200ms gaps, 7 pulses → ~1.5s burst), claims Jetson Pin 29 via Jetson.GPIO, toggles HIGH for 100µs five times.|✅ PASS|All 5 fires triggered visible LED flicker on Teensy Pin 3. STATUS dump confirmed `STATE=READY MODE=FAST ON_BITS=32 BAUD=1000 ON_PULSE_US=32000 N_FAST=7 N_SLOW=13`. End-to-end strobe pipeline software-validated: Python USB serial setup → Teensy state machine → libgpiod-equivalent GPIO toggle → Teensy ISR → Pin 3 pulse train → LED. Bypasses pitrac_lm so we can validate the strobe rig independently of the FSM stabilization issue.|
 |2026-05-05|Phase C Test 1 follow-up — pitrac_lm strobe pipeline software-validated end-to-end|Manually invoked `python3 ~/JetsonLM/Hardware/teensy_strobe/fire_trigger.py` (the EXACT same Jetson.GPIO helper that pitrac_lm now calls via std::system) as user `brain` (no sudo needed — gpio group membership). LED rig wired as Phase C Test 1.|✅ PASS|LED blinked on every invocation (long-pulse Teensy config from prior pitrac_lm init still active). Together with the InitGPIOSystem trace `Strobe pipeline live (trigger via .../fire_trigger.py)` from a successful pitrac_lm run, this proves every link in the chain except the literal `pitrac_lm → SendExternalTrigger → std::system` invocation, which is hardcoded one-liner. Final FSM-driven test deferred to Phase C Test 2 with real IR strobe (Issue #19 ball-stabilization will resolve naturally once IR illumination provides clean ball edges to HoughCircles).|
+|2026-08-06|Camera 1/2 mapped to the physical modules|Covered each lens in turn and watched the streams; independently, template-matched a patch from cam2 into cam1|✅ PASS|Both agree: cam1 = USB port 2.3 = **left** module facing the unit. The patch sat 76 px further left in cam1, correlation 0.95. The two readings look contradictory until the frame of reference is fixed — standing in front you look back down the optical axes, so your left/right is mirrored from the cameras' own.|
+|2026-08-06|Lens focus, both cameras|Board sharpness (Laplacian variance over the detected board) before and after turning each lens|✅ PASS|cam1 566 → 3028 (**5.4x**), cam2 1887 → 2945 (1.6x). Both lenses were misadjusted and nobody had noticed, because the readout measured the central 40% of the frame — a blank wall while the board lay flat on the desk. Afterwards the two agree within 3%.|
+|2026-08-06|Intrinsics from 20 simultaneous pairs|`CameraCalibration.py`, 24 mm board, images above 1.0 px reprojection dropped|✅ PASS|cam1 RMS 1.149 → **0.557 px** (4 dropped), cam2 1.116 → **0.550 px** (5 dropped). fx 922.30 / 923.98 px. fy/fx = 0.995 confirms square 3.0 µm pixels and with them the 3.840 x 2.400 mm sensor. Focal length **2.767 / 2.772 mm** against 2.74 derived from the 70° FOV spec — 1.2% agreement, and the two cameras agree with each other to 0.2%.|
+|2026-08-06|Stereo extrinsics|`StereoCalibration.py` with CALIB_FIX_INTRINSIC over the same 20 pairs|✅ PASS|Baseline **79.83 mm** against 80.00 mm read out of `Hardware/JetsonLM.step` — 0.2% between an optical measurement and a CAD drawing, by entirely independent routes. Translation [79.79, 0.13, 2.60] mm; the 2.60 in Z is the two lenses sitting at different screw depths after focusing. Rotation: pitch 1.070°, roll 0.925°, yaw 0.756°, all well under the 3° at which rectification starts costing real frame height.|
+|2026-08-06|Thermal drift of the printed mount|Split the 20 pairs into cooler (1-10) and warmer (11-20) halves and solved each separately|✅ PASS|Pitch 1.086 vs 1.088°, roll 0.926 vs 0.917° — **identical to 0.01°**, and those two are precisely the ones that produce vertical disparity. Baseline differs by 0.93 mm, but with the wrong sign for thermal expansion and seven times the magnitude plastic gives, so it is estimation noise from 10 pairs over only 35-55 cm of depth. No compensation warranted.|
+|2026-08-06|Measured optics take effect at runtime|`pitrac_lm --logging_level=trace` after writing the config and rebuilding|✅ PASS|`Overriding sensor size with 3.840000 x 2.400000 mm (was 5.077365 x 3.789079)`; matrix `[922.30, 0, 637.17; 0, 917.97, 389.05; 0, 0, 1]`; `Setting focal length (from JSON file) = 2.767000`; `kExpectedBallRadiusPixelsAt40cmCamera1 = 49` — that last override taking effect for the first time ever, the old key lacked the CameraN suffix and fell back silently to the IMX296's 87.|
+|2026-08-07|Calibration reproduces from the committed images|Re-ran both scripts against the 40 PNGs restored out of git|✅ PASS|Bit-identical: 2.767 / 2.772 mm, RMS 0.557 / 0.550, baseline 79.83 mm, same angles. The archive is reproducible, not merely stored.|
 
 \---
 
@@ -487,9 +498,14 @@ PiTrac's key techniques:
 * ☑ Permanent fix für /dev/ttyACM0 Permissions: `sudo usermod -a -G dialout brain` ausgeführt 2026-05-05 (greift erst nach re-login)
 * ☑ V4L2Capture::ensure_streaming() failure-path fd leak fixed 2026-05-05 (Issue #17 resolved)
 * ☑ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption fixed 2026-05-05 (Issue #18 resolved) — derives `hskip_bytes = config_.hskip * frame.channels()` under JETSON_BUILD, used in all 4 pointer-arithmetic spots
-* ☐ Verify `undistort_camera_image` end-to-end during the calibration run (currently no-op since use_undistortion_matrix_=false)
-* ☐ Mount cameras in enclosure at correct angles for stereo ball tracking
-* ☐ Run PiTrac calibration procedure with both cameras
+* ☑ Cameras mounted in the enclosure, 80.00 mm baseline, axes parallel (2026-08-06)
+* ☑ **Calibration done 2026-08-06/07.** Own tooling built (dashboard page + CLI), not PiTrac's scripts — theirs depend on `rpicam-still` and `libcamera-hello`, neither of which exists here. 20 simultaneous pairs, focal length 2.767/2.772 mm, sensor 3.840x2.400 mm, baseline 79.83 mm against 80.00 from the CAD, reprojection RMS 0.56 px. Written into `golf_sim_config.json` and the sensor override, verified in a live trace run.
+* ☑ `undistort_camera_image` question resolved — and the 2026-04-29 note was wrong. It was **not** a no-op: `use_undistortion_matrix_` was true because the config carried PiTrac's IMX296 matrix, so every still from `TakeRawPicture` (the path `CheckForBall` uses) was remapped through the wrong lens model. Now carries the measured one.
+* ☑ Cameras bound by USB port path in Python and C++ — both modules report the same iSerial, so `/dev/videoN` is not an identity. cam1 = port 2.3 = left module facing the unit, established by covering a lens and independently by parallax.
+* ☑ Thermal drift measured by splitting the capture set into cooler/warmer halves: pitch and roll identical to 0.01°, baseline spread is estimation noise (wrong sign for expansion, 7x too large). No compensation needed.
+* ☐ **Working distance: 50 cm decided, not yet built into the geometry config.** `kCameraNPositionsFromOriginMeters` and `kCameraNAngles` still hold PiTrac's numbers. Ball radius at 50 cm is 39 px, depth precision ~1.7 mm.
+* ☐ `WaitForCam2Trigger` still a JETSON_STUB returning false. UVC exposes no trigger pin (confirmed: no such control in `v4l2-ctl --list-ctrls`), so this needs a different mechanism, not a translation. `exposure_absolute` reaches 500 ms, which makes "open a long exposure and fire the strobe into it" the obvious candidate.
+* ☐ Triangulation not implemented. Extrinsics are measured and saved in `sp1_vision/calibration_results/stereo_extrinsics.json`, but nothing consumes them — the ball-position path is still PiTrac's monocular radius method, which is roughly an order of magnitude worse at these distances.
 * ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → strobe-lit shot capture → shot data → SP4 GSPro JSON)
 
 \---
@@ -1092,6 +1108,121 @@ PiTrac's key techniques:
 >     SP5).  Davor ist SP1 mit "Hardware + Software end-to-end live
 >     validiert" maximal abgedeckt.
 
+**2026-08-06/07 — Kameras vermessen. Optik-Konstanten waren alle falsch.**
+
+> Kameras sind im Gehäuse montiert, Geometrie fix. Ziel war, die echten
+> Intrinsics zu messen, bevor irgendetwas an Geometrie oder Brennweite
+> angefasst wird — die bisherigen 2.7 mm waren aus der 70°-Herstellerangabe
+> gerechnet, nicht gemessen.
+>
+> **Die Ausgangslage war schlechter als gedacht.** Jede optische Konstante
+> im Code beschrieb PiTracs IMX296 mit 6-mm-Objektiv:
+>
+> | | war | ist |
+> |-|-|-|
+> | Brennweite | 6.222 / 5.903 mm | **2.767 / 2.772 mm** |
+> | Sensor | 5.077 x 3.789 mm | **3.840 x 2.400 mm** |
+> | fx | 1833 / 2340 px | **922 / 924 px** |
+> | k1 | -0.509 / -0.818 | **+0.015 / +0.053** |
+> | Ballradius @ 40cm | 87 | **49** |
+>
+> Der unangenehmste Fund: die IMX296-Matrix lag nicht bloß ungenutzt herum,
+> sie war **aktiv**. camera_hardware.cpp schaltet use_undistortion_matrix_
+> ein, sobald die Config eine Matrix ungleich null trägt — und PiTracs stand
+> drin. Jedes Standbild aus TakeRawPicture, also der Pfad den CheckForBall
+> und damit die Ballerkennung benutzt, wurde durch ein fremdes Objektivmodell
+> gerechnet: starke Tonnenkorrektur auf ein Bild das kaum verzeichnet, durch
+> einen Hauptpunkt 113 px außerhalb der Bildmitte. Die Notiz vom 2026-04-29
+> ("no-op until calibration loads a matrix") war falsch.
+>
+> Zweiter struktureller Fund: nur die *Auflösung* wurde auf 1280x800
+> überschrieben, die Sensormaße blieben IMX296. Damit stand das Seitenverhältnis
+> des Sensors auf 1.340 gegen ein Bild von 1.600 — und gs_camera.cpp:929/936
+> rechnet Pixel über sensor_width_/focal_length_ und sensor_height_/focal_length_
+> **getrennt** in Meter um. Die vertikale Achse war rund 19% daneben. Eine
+> Fokallängen-Kalibrierung schluckt einen Fehler in der absoluten Breite; ein
+> falsches Seitenverhältnis schluckt sie nicht.
+>
+> **Werkzeug gebaut statt Einmal-Skript.** Kalibrierung ist keine einmalige
+> Sache — jede Mount-Verstellung macht sie ungültig. Also eine Seite im
+> laufenden Dashboard unter /calibration: Livebild pro Kamera, Schärfeanzeige,
+> Aufnahme-Knopf mit sofortiger Bretterkennungs-Rückmeldung, Auswerte-Knopf.
+> CLI als Rückfallebene. 12 Tasks, TDD, 19 Tests auf echter Hardware.
+>
+> **Kamera-Identität ist ein Problem.** Beide Module melden iSerial "UC762" —
+> Arducams Artikelnummer, keine Seriennummer. /dev/v4l/by-id/ kollidiert also,
+> und /dev/videoN wird in Enumerierungsreihenfolge vergeben. Vertauschen die
+> beiden, kippt das Vorzeichen der Basislinie und die Tiefe kommt gespiegelt
+> heraus, ohne dass man es dem Bild ansieht. Nicht hypothetisch: der Kommentar
+> im Code nannte Ports 2.2.4/2.3, tatsächlich sind es 2.3/2.4 — sie waren
+> längst gewandert. Bindung läuft jetzt in Python **und** C++ über den
+> USB-Portpfad.
+>
+> Welches Modul welche Nummer hat, zweifach gemessen statt geraten: Objektiv
+> abdecken (rechter Stream wird dunkel = cam2) und Parallaxe (Ausschnitt aus
+> cam2 liegt 76 px weiter links in cam1, Korrelation 0.95). Beide Befunde
+> lesen sich zunächst widersprüchlich, weil man vor dem Gerät stehend gegen
+> die optischen Achsen schaut und links/rechts gespiegelt sind. **cam1 = links
+> vom Betrachter = rechts aus Kamerasicht.**
+>
+> **Der Abend in Fehlern: neun, acht davon meine (Claude).**
+>   * Vier Nebenläufigkeitsfehler in der Session-Verwaltung. Nach dem vierten
+>     den Entwurf verworfen statt weiter zu flicken — Hintergrund-Grabber mit
+>     Frame-Cache raus, ein Lock über jede Operation rein. Jeder einzelne Fix
+>     hatte ein neues Loch geöffnet; das war das Signal.
+>   * Achsenbezeichnungen in der Stereo-Auswertung um eine Stelle verdreht:
+>     Rotation um X hieß "roll" statt "pitch". Hätte den teuersten
+>     Justagefehler als den harmlosesten etikettiert. Ersetzt durch den
+>     Rodrigues-Vektor, gegen 5° um jede Achse verifiziert.
+>   * Reprojektionsfehler um Faktor sqrt(54) = 7.35 falsch — L2-Norm durch die
+>     Punktzahl statt durch deren Wurzel geteilt. Aus PiTrac übernommen, das es
+>     aus dem OpenCV-Tutorial hat. Bilder mit 3.3 px Fehler zeigten 0.45, die
+>     Ausreißer-Markierung hat nie ausgelöst.
+>   * Feldgröße mit 20 mm geraten statt gemessen (24 mm). Skaliert den
+>     Translationsvektor linear und damit die Basislinie: 66.40 mm statt 79.83,
+>     was überzeugend nach einem verbauten Mount aussah.
+>   * Eine Route (/calibration/run) im Plan, die es nicht gab — der Knopf lief
+>     ins Leere.
+>   * Fehlschluss "cam1 verliert 60% Licht" aus Reglerwerten, die im
+>     Automatikmodus `flags=inactive` sind und nur alte manuelle Reste
+>     anzeigen. Zurückgenommen bevor ein intaktes Objektiv gereinigt wurde.
+>   * Fehlschluss "30 fps viertelt die Abwärme" — das Modul bietet bei
+>     1280x800 nur 120 und 100 an, 30 landet still auf 100. 17% statt 75%, und
+>     es kostet Gleichzeitigkeit (Skew 3.8 → 6.9 ms median). Zurückgenommen.
+>
+> Keiner davon wäre beim Lesen des Codes aufgefallen. Alle kamen aus
+> wiederholtem Ausführen auf echter Hardware und aus unabhängiger Durchsicht.
+> Konsequenz für künftige Arbeit an nebenläufigem Code: **fünf Durchläufe, nicht
+> einer.** Drei hätten hier zwei der vier Races durchgelassen.
+>
+> **Wärmedrift: gemessen, keine gefunden.** Frage war, ob der gedruckte Halter
+> sich beim Warmlaufen verzieht. Erster Versuch (Hintergrund-Merkmale kalt vs.
+> warm vergleichen) scheiterte an der eigenen Annahme — die Szene stand nicht
+> still. Besserer Weg: die 20 Paare in Hälften teilen und getrennt rechnen, die
+> frühen kühler als die späten. Nicken 1.086 vs 1.088°, Rollen 0.926 vs 0.917°
+> — **auf ein Hundertstel Grad identisch**, und das sind die beiden, die
+> vertikale Disparität erzeugen. Basislinie streut um 0.93 mm, aber mit
+> falschem Vorzeichen (Erwärmung müsste dehnen) und siebenfach über dem, was
+> Kunststoffdehnung hergibt: Schätzrauschen aus je 10 Paaren über nur 35-55 cm
+> Tiefe. **Keine Kompensation bauen.**
+>
+> **Objektive waren verstellt.** Fiel erst spät auf, weil die Schärfeanzeige
+> die Bildmitte maß statt des Bretts — bei flach liegendem Brett also die
+> Zimmerwand. cam1 war um Faktor 5.4 unscharf, cam2 um 1.6. Nach dem
+> Nachfokussieren liegen beide bei ~3000 Laplace-Punkten und innerhalb von 3%
+> zueinander. Die Anzeige misst jetzt das erkannte Brett und sagt dazu, welches
+> von beidem sie gerade zeigt.
+>
+> **Basislinie: gemessener Wert genommen (79.83 mm), nicht die 80.00 aus dem
+> CAD.** Begründung des Users: gedrucktes Teil, wird nicht exakt 80 sein. Die
+> Messung kann das allerdings nicht beweisen — ihre eigene Streuung (±0.5 mm)
+> ist größer als der Unterschied. Das bessere Argument ist Konsistenz: der
+> gemessene Wert stammt aus derselben Anpassung wie Intrinsics und Rotationen.
+>
+> Rohbilder (40 Stück, 42 MB) sind committet, mit README zu Aufnahme-
+> bedingungen und Schwächen der Serie. Reproduktion aus git verifiziert:
+> identische Zahlen. Extrinsics in sp1_vision/calibration_results/.
+
 \---
 
 \---
@@ -1528,5 +1659,5 @@ At the end of our session, tell me exactly what to update in my logbook.
 
 \---
 
-*Last updated: 2026-03-19 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
+*Last updated: 2026-08-07 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
 
