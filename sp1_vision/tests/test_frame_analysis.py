@@ -83,6 +83,18 @@ class FindBoardTest(unittest.TestCase):
         self.assertFalse(found)
         self.assertIsNone(corners)
 
+    def test_finds_board_in_colour_input(self):
+        # The capture path yields CV_8UC3 BGR - OpenCV decodes MJPEG to
+        # three channels regardless of the sensor being mono.
+        gray = cv2.imread(self.FIXTURE, cv2.IMREAD_GRAYSCALE)
+        colour = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        found_gray, corners_gray = frame_analysis.find_board(gray)
+        found_colour, corners_colour = frame_analysis.find_board(colour)
+        self.assertTrue(found_colour)
+        expected = frame_analysis.CHESSBOARD_SIZE[0] * frame_analysis.CHESSBOARD_SIZE[1]
+        self.assertEqual(corners_colour.shape[0], expected)
+        np.testing.assert_allclose(corners_colour, corners_gray, atol=1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()
