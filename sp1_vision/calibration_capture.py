@@ -22,9 +22,20 @@ from sp1_vision import camera_paths
 
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 800
-FRAME_RATE = 120
 FOURCC = cv2.VideoWriter_fourcc("M", "J", "P", "G")
 WARMUP_FRAMES = 5
+
+# The module offers exactly two rates at 1280x800: 120 and 100 fps. Nothing
+# else. Asking for 30 or 60 silently lands on 100 - measured 2026-08-06,
+# driver reporting 100.0 and delivering 101.9 for both requests - so trying to
+# run the sensor slower to cut the heat from its MJPEG encoder buys 17% and
+# costs pair simultaneity, since the skew between two free-running cameras is
+# bounded by the frame period.
+#
+# The heat is dealt with where it actually comes from: the cameras being open
+# at all. The page stops polling and streaming when its tab is hidden, which
+# lets the session's idle timeout fire and hand them back.
+FRAME_RATE = 120
 
 # v4l2-ctl talks to the UVC driver, and a wedged driver would otherwise block
 # forever. This runs while CalibrationSession's lock is held, so a hang here

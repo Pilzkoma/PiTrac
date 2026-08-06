@@ -81,7 +81,7 @@ CALIBRATION_HTML = r"""
   #log { margin-top:20px; background:var(--surface); border:1px solid var(--line);
          border-radius:10px; padding:14px; font-family:'JetBrains Mono', monospace;
          font-size:13px; max-height:420px; overflow-y:auto; white-space:pre-wrap; }
-  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); }
 </style>
 </head>
 <body>
@@ -90,7 +90,9 @@ CALIBRATION_HTML = r"""
 <p class="sub">Focus each lens until its score peaks, then capture around 20 board pairs.
 Hold the board at working distance, reaching the image corners as well as the centre,
 in ordinary room light. Retake any pair that does not report a board in both cameras —
-a pair is only useful if both halves found it.</p>
+a pair is only useful if both halves found it.
+Switch away from this tab and the previews stop, so the cameras are handed back
+after two idle minutes rather than running hot for as long as the page is open.</p>
 
 <div class="cams">
   <div class="cam">
@@ -104,6 +106,8 @@ a pair is only useful if both halves found it.</p>
     <div class="bar"><div id="b2"></div></div>
   </div>
 </div>
+
+<p id="mode" style="margin:14px 0 0; font-size:14px">&nbsp;</p>
 
 <div class="controls">
   <button id="cap">Capture pair</button>
@@ -125,11 +129,54 @@ const log = (msg, cls) => {
 // The score's absolute value is meaningless - it depends on what the camera is
 // looking at - so it is shown against the highest value seen so far. Turning
 // the lens until the bar peaks is the whole technique.
+//
+// What it is measuring matters just as much, and is shown: with a board in
+// view it measures the board, otherwise the middle of the frame. Those are
+// wildly different scales, so the running peak resets whenever it switches -
+// otherwise the bar stays pinned at nothing after a mode change.
+// Everything below stops while the tab is hidden. The cameras run hot after an
+// hour, and the session already hands them back after two idle minutes - but
+// a poll every 500 ms keeps it awake for as long as the page is open, so the
+// release never fired. Going quiet when nobody is looking is what makes the
+// idle timeout mean anything, and it also gives pitrac_lm a way to get the
+// devices without anyone pressing a button.
+const streams = [];
+document.querySelectorAll('.cam img').forEach(img => {
+  streams.push([img, img.src]);
+});
+
+function setStreams(on) {
+  streams.forEach(([img, src]) => {
+    if (on && !img.src.includes('/calibration/stream/')) {
+      img.src = src + '?t=' + Date.now();   // fresh connection, not the cache
+    } else if (!on) {
+      img.removeAttribute('src');
+    }
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  setStreams(!document.hidden);
+  if (!document.hidden) poll();
+  document.getElementById('mode').innerHTML = document.hidden
+    ? '<span class="muted">paused — tab hidden</span>' : '&nbsp;';
+});
+
 let peak = {1: 1, 2: 1};
+let lastMode = null;
 async function poll() {
+  if (document.hidden) return;   // resumed by the visibilitychange handler
   try {
     const r = await fetch('/calibration/sharpness');
     const d = await r.json();
+    if (d.on_board !== lastMode) {
+      peak = {1: 1, 2: 1};
+      lastMode = d.on_board;
+    }
+    document.getElementById('mode').innerHTML = d.on_board
+      ? '<span class="ok">measuring the board</span>'
+      : '<span class="bad">no board in view — measuring the frame centre, '
+        + 'which is the room, not your lens</span>';
     for (const n of [1, 2]) {
       const v = d['cam' + n];
       if (v === null) continue;
@@ -262,14 +309,21 @@ def calibration_stream(camera_number):
 
 @calibration_bp.route("/calibration/sharpness")
 def calibration_sharpness():
+    """Sharpness of the board when one is visible, of the frame centre when not.
+
+    Which of the two it is gets reported, because the difference matters: a
+    board held below the middle of the frame leaves the centred ROI measuring
+    a blank wall, and the number then describes the room rather than the thing
+    being focused.
+    """
     calibration_capture.SESSION.ensure_open()
     pair, _ = calibration_capture.SESSION.grab()
     if pair is None:
-        return jsonify({"cam1": None, "cam2": None})
-    return jsonify({
-        "cam1": frame_analysis.sharpness_score(pair[1]),
-        "cam2": frame_analysis.sharpness_score(pair[2]),
-    })
+        return jsonify({"cam1": None, "cam2": None, "on_board": False})
+
+    s1, found1 = frame_analysis.board_sharpness(pair[1])
+    s2, found2 = frame_analysis.board_sharpness(pair[2])
+    return jsonify({"cam1": s1, "cam2": s2, "on_board": bool(found1 and found2)})
 
 
 @calibration_bp.route("/calibration/status")
