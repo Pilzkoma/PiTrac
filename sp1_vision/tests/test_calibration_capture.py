@@ -115,11 +115,23 @@ class CalibrationSessionTest(unittest.TestCase):
         self.assertIsNotNone(frames, "no pair served after reopening")
 
     def test_concurrent_release_and_ensure_open_do_not_orphan_a_pair(self):
-        # The fourth defect: a release racing an open could tear down the
-        # freshly opened pair and leave a grabber spinning on dead handles.
-        # With one lock there is no such window, and this pins it.
+        # The fourth defect was a release racing an open: it could tear down
+        # the freshly opened pair and leave a grabber thread spinning on dead
+        # handles while is_open() reported free.
+        #
+        # The single-lock design has no such window, and there is no longer a
+        # persistent grabber to orphan - so this cannot fail the way the
+        # original bug failed. What it does check is that the churn neither
+        # deadlocks nor raises, and that no threads accumulate, which is the
+        # symptom that would return if a background thread were ever
+        # reintroduced with the same shape.
         session = calibration_capture.SESSION
         errors = []
+
+        # Open once first, so the watchdog thread is already running and does
+        # not count as a leak against the baseline.
+        session.ensure_open()
+        baseline_threads = threading.active_count()
 
         def opener():
             for _ in range(5):
@@ -146,6 +158,19 @@ class CalibrationSessionTest(unittest.TestCase):
         for t in threads:
             self.assertFalse(t.is_alive(), "a worker never finished - deadlock?")
         self.assertEqual(errors, [])
+
+        # Grab threads are short-lived, but "short" is not a number we get to
+        # assume - waiting a fixed second and asserting turns a timing guess
+        # into a flaky test. Poll instead: the requirement is that the count
+        # comes back, not that it comes back within any particular moment.
+        deadline = time.time() + 15.0
+        while threading.active_count() > baseline_threads and time.time() < deadline:
+            time.sleep(0.1)
+        leaked = threading.active_count() - baseline_threads
+        self.assertLessEqual(
+            leaked, 0,
+            "{} threads outlived the churn - something is not being "
+            "joined".format(leaked))
 
 
 if __name__ == "__main__":

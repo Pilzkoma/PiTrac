@@ -26,6 +26,18 @@ FRAME_RATE = 120
 FOURCC = cv2.VideoWriter_fourcc("M", "J", "P", "G")
 WARMUP_FRAMES = 5
 
+# v4l2-ctl talks to the UVC driver, and a wedged driver would otherwise block
+# forever. This runs while CalibrationSession's lock is held, so a hang here
+# would take down every stream, the capture button, the release button and the
+# idle watchdog at once - and pitrac_lm could then never reclaim the devices,
+# which is the exact failure the idle release exists to prevent.
+EXPOSURE_CTL_TIMEOUT_S = 5.0
+
+# How long a camera may keep the other waiting at the paired-grab barrier. A
+# party that never arrives - a read wedged in the driver, or a thread that
+# failed to start - would otherwise hang the grab, and with it the lock.
+BARRIER_TIMEOUT_S = 5.0
+
 
 def set_manual_exposure(device, exposure_units):
     """Force manual exposure so a capture series is consistently lit.
@@ -35,15 +47,22 @@ def set_manual_exposure(device, exposure_units):
 
     Done through v4l2-ctl rather than cv2.CAP_PROP_AUTO_EXPOSURE because the
     OpenCV property semantics vary across versions on the V4L2 backend.
+
+    Best-effort: a failure here means the exposure is not what was asked for,
+    which is a worse capture series, not a broken one. Hanging the caller
+    would be far worse than that, so it is bounded.
     """
     if exposure_units is None:
         ctrl = "exposure_auto=3"
     else:
         ctrl = "exposure_auto=1,exposure_absolute={}".format(int(exposure_units))
-    subprocess.run(
-        ["v4l2-ctl", "--device={}".format(device), "--set-ctrl={}".format(ctrl)],
-        check=False, capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["v4l2-ctl", "--device={}".format(device), "--set-ctrl={}".format(ctrl)],
+            check=False, capture_output=True, timeout=EXPOSURE_CTL_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
 
 
 class CameraPair:
@@ -86,13 +105,25 @@ class CameraPair:
 
         Skew is the spread between the two read completions - a health
         measure for how simultaneous the pair really was.
+
+        The calling thread is one of the barrier parties, so only one thread
+        is spawned per grab rather than two. The dashboard grabs this around
+        35 times a second while holding the session lock, and thread creation
+        in that critical section is latency every other caller waits behind -
+        besides which Thread.start() can fail outright under churn on a small
+        board.
+
+        The barrier is bounded. A party that never arrives - a read wedged in
+        the driver, or a thread that failed to start at all - would otherwise
+        block the grab forever, and the session lock with it.
         """
         frames = {}
         stamps = {}
         errors = {}
-        barrier = threading.Barrier(len(self._caps))
+        items = list(self._caps.items())
+        barrier = threading.Barrier(len(items), timeout=BARRIER_TIMEOUT_S)
 
-        def worker(n, cap):
+        def read_one(n, cap):
             try:
                 barrier.wait()
                 ok, frame = cap.read()
@@ -103,15 +134,17 @@ class CameraPair:
                     frames[n] = frame
             except Exception as exc:            # noqa: BLE001 - reported below
                 errors[n] = repr(exc)
+                # Release anyone still waiting rather than leaving them to
+                # time out one by one.
+                barrier.abort()
 
-        threads = [
-            threading.Thread(target=worker, args=(n, cap))
-            for n, cap in self._caps.items()
-        ]
+        threads = [threading.Thread(target=read_one, args=(n, cap))
+                   for n, cap in items[1:]]
         for t in threads:
             t.start()
+        read_one(*items[0])
         for t in threads:
-            t.join()
+            t.join(timeout=BARRIER_TIMEOUT_S + 5.0)
 
         if errors:
             raise RuntimeError("paired grab failed: {}".format(errors))
@@ -175,6 +208,11 @@ class CalibrationSession:
         Slow on a cold open - around two seconds - and callers are serialised
         behind it. That is the price of never handing out a pair that someone
         else might close.
+
+        exposure_units applies only when this call is the one that opens.
+        Against an already-open session it is ignored, silently, because the
+        cameras are shared and one caller must not resettle exposure under
+        another's feet. To change it, release() first.
         """
         with self._lock:
             self._last_use = time.monotonic()
