@@ -795,6 +795,15 @@ namespace golf_sim {
         // there before changing either, because nothing enforces that the two
         // agree.
         //
+        // Which module is which, confirmed 2026-08-06 by covering a lens and
+        // independently by parallax:
+        //   slot 0 / camera 1  = port 2.3 = LEFT  module facing the unit
+        //   slot 1 / camera 2  = port 2.4 = RIGHT module facing the unit
+        // Facing the unit you look back down the optical axes, so your left
+        // and right are mirrored from the cameras' own.  Camera 1 is on your
+        // left and on the cameras' right; both describe the same module.  Get
+        // this backwards and the stereo baseline changes sign.
+        //
         // /dev/video1 and /dev/video3 are UVC metadata devices and are skipped;
         // the -video-index0 suffix selects the capture node.
         static const char* kSlot0Path =

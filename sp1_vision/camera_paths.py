@@ -18,8 +18,27 @@ import os
 BY_PATH_DIR = "/dev/v4l/by-path"
 
 # Logical camera number -> USB port path, as enumerated on the Xavier NX
-# carrier board. Which physical module sits on which port is established
-# empirically in Task 2 - do not assume from the numbering.
+# carrier board.
+#
+# Which physical module sits on which port, confirmed 2026-08-06 two ways
+# that agree:
+#
+#   camera 1  port 2.3   LEFT  module, standing in front of the unit
+#   camera 2  port 2.4   RIGHT module, standing in front of the unit
+#
+#   * covering the right-hand lens darkened the right-hand stream, which the
+#     page serves from camera 2;
+#   * a patch from the centre of camera 2 was found 76 px further left in
+#     camera 1 (correlation 0.95), which puts camera 1 to the right along the
+#     cameras' own axis.
+#
+# Those two read as contradictory until you fix the frame of reference, and
+# that confusion is exactly how a stereo baseline ends up sign-flipped. Facing
+# the unit you are looking back down the optical axes, so your left and right
+# are mirrored from the cameras'. Camera 1 is on your left and on the cameras'
+# right. Both statements describe the same module.
+#
+# The comments here and in v4l2_interface.cpp must agree; nothing enforces it.
 CAMERA_PORT_PATHS = {
     1: "platform-3610000.xhci-usb-0:2.3:1.0-video-index0",
     2: "platform-3610000.xhci-usb-0:2.4:1.0-video-index0",
