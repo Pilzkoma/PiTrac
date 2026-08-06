@@ -1,5 +1,6 @@
 """Pure frame maths - no cameras involved."""
 
+import os
 import unittest
 
 import cv2
@@ -50,6 +51,37 @@ class SharpnessScoreTest(unittest.TestCase):
         whole = frame_analysis.sharpness_score(img, roi_fraction=1.0)
         centre = frame_analysis.sharpness_score(img, roi_fraction=0.25)
         self.assertGreater(centre, whole)
+
+
+class FindBoardTest(unittest.TestCase):
+    # A real IMX296 capture of the calibration board, shipped with PiTrac.
+    FIXTURE = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "Software", "CalibrateCameraDistortions",
+        "checkerboard_test_image_for_undistortion.png",
+    )
+
+    def test_finds_board_in_a_real_capture(self):
+        img = cv2.imread(self.FIXTURE, cv2.IMREAD_GRAYSCALE)
+        self.assertIsNotNone(img, "fixture not readable: " + self.FIXTURE)
+        found, corners = frame_analysis.find_board(img)
+        self.assertTrue(found)
+        expected = frame_analysis.CHESSBOARD_SIZE[0] * frame_analysis.CHESSBOARD_SIZE[1]
+        self.assertEqual(corners.shape[0], expected)
+
+    def test_refinement_moves_corners_but_only_slightly(self):
+        img = cv2.imread(self.FIXTURE, cv2.IMREAD_GRAYSCALE)
+        _, coarse = frame_analysis.find_board(img, refine=False)
+        _, fine = frame_analysis.find_board(img, refine=True)
+        shift = np.linalg.norm(fine - coarse, axis=2).max()
+        self.assertGreater(shift, 0.0, "cornerSubPix result was discarded")
+        self.assertLess(shift, 5.0, "refinement moved a corner implausibly far")
+
+    def test_no_board_in_a_flat_image(self):
+        flat = np.full((800, 1280), 128, dtype=np.uint8)
+        found, corners = frame_analysis.find_board(flat)
+        self.assertFalse(found)
+        self.assertIsNone(corners)
 
 
 if __name__ == "__main__":
