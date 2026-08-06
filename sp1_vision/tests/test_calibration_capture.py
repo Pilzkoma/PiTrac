@@ -90,6 +90,31 @@ class CalibrationSessionTest(unittest.TestCase):
             # the note in the task: restore rather than restructure.
             session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
 
+    def test_reopen_immediately_after_idle_release(self):
+        # Pins the lifecycle race: is_open() must not report free until the
+        # V4L2 descriptors are truly closed, or reopening on that signal
+        # races the close - exactly the pitrac_lm handoff the idle release
+        # exists to make safe.
+        session = calibration_capture.SESSION
+        session.idle_timeout_s = 1.0
+        try:
+            session.ensure_open()
+            deadline = time.time() + 6.0
+            while session.is_open() and time.time() < deadline:
+                time.sleep(0.1)
+            self.assertFalse(session.is_open(), "session did not release when idle")
+
+            session.ensure_open()
+            deadline = time.time() + 5.0
+            pair = None
+            while pair is None and time.time() < deadline:
+                pair = session.latest_pair()
+                time.sleep(0.05)
+            self.assertIsNotNone(pair, "grabber produced no pair within 5 s of reopening")
+            self.assertEqual(sorted(pair), [1, 2])
+        finally:
+            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+
 
 if __name__ == "__main__":
     unittest.main()
