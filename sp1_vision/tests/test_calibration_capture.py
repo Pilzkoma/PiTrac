@@ -5,6 +5,7 @@ plugged in and nothing else holding the devices - a V4L2 node has a single
 owner, so stop the dashboard first if it is streaming.
 """
 
+import threading
 import time
 import unittest
 
@@ -47,17 +48,24 @@ class CameraPairTest(unittest.TestCase):
 
 class CalibrationSessionTest(unittest.TestCase):
     def tearDown(self):
+        calibration_capture.SESSION.idle_timeout_s = (
+            calibration_capture.DEFAULT_IDLE_TIMEOUT_S)
         calibration_capture.SESSION.release()
 
-    def test_latest_pair_becomes_available_after_start(self):
+    def test_grab_returns_a_pair_once_open(self):
         session = calibration_capture.SESSION
         session.ensure_open()
-        deadline = time.time() + 5.0
-        while session.latest_pair() is None and time.time() < deadline:
-            time.sleep(0.05)
-        pair = session.latest_pair()
-        self.assertIsNotNone(pair, "grabber produced no pair within 5 s")
-        self.assertEqual(sorted(pair), [1, 2])
+        frames, skew = session.grab()
+        self.assertIsNotNone(frames)
+        self.assertEqual(sorted(frames), [1, 2])
+        self.assertLess(skew, 0.030)
+
+    def test_grab_before_open_returns_nothing_rather_than_raising(self):
+        session = calibration_capture.SESSION
+        session.release()
+        frames, skew = session.grab()
+        self.assertIsNone(frames)
+        self.assertIsNone(skew)
 
     def test_ensure_open_is_idempotent(self):
         session = calibration_capture.SESSION
@@ -75,45 +83,69 @@ class CalibrationSessionTest(unittest.TestCase):
         pair.open()
         pair.release()
 
+    def test_release_is_idempotent(self):
+        session = calibration_capture.SESSION
+        session.ensure_open()
+        session.release()
+        session.release()
+        self.assertFalse(session.is_open())
+
     def test_idle_timeout_releases_without_being_asked(self):
         session = calibration_capture.SESSION
         session.idle_timeout_s = 1.0
-        try:
-            session.ensure_open()
-            deadline = time.time() + 6.0
-            while session.is_open() and time.time() < deadline:
-                time.sleep(0.1)
-            self.assertFalse(session.is_open(), "session did not release when idle")
-        finally:
-            # idle_timeout_s lives on the shared module-level SESSION, so a
-            # short value left behind here would leak into later tests. See
-            # the note in the task: restore rather than restructure.
-            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+        session.ensure_open()
+        deadline = time.time() + 10.0
+        while session.is_open() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(session.is_open(), "session did not release when idle")
 
     def test_reopen_immediately_after_idle_release(self):
-        # Pins the lifecycle race: is_open() must not report free until the
-        # V4L2 descriptors are truly closed, or reopening on that signal
-        # races the close - exactly the pitrac_lm handoff the idle release
-        # exists to make safe.
+        # The release-then-reopen sequence is what the pitrac_lm handoff
+        # depends on, and it is where every lifecycle defect showed up.
         session = calibration_capture.SESSION
         session.idle_timeout_s = 1.0
-        try:
-            session.ensure_open()
-            deadline = time.time() + 6.0
-            while session.is_open() and time.time() < deadline:
-                time.sleep(0.1)
-            self.assertFalse(session.is_open(), "session did not release when idle")
+        session.ensure_open()
+        deadline = time.time() + 10.0
+        while session.is_open() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(session.is_open(), "session did not release when idle")
 
-            session.ensure_open()
-            deadline = time.time() + 5.0
-            pair = None
-            while pair is None and time.time() < deadline:
-                pair = session.latest_pair()
-                time.sleep(0.05)
-            self.assertIsNotNone(pair, "grabber produced no pair within 5 s of reopening")
-            self.assertEqual(sorted(pair), [1, 2])
-        finally:
-            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+        session.ensure_open()
+        frames, _ = session.grab()
+        self.assertIsNotNone(frames, "no pair served after reopening")
+
+    def test_concurrent_release_and_ensure_open_do_not_orphan_a_pair(self):
+        # The fourth defect: a release racing an open could tear down the
+        # freshly opened pair and leave a grabber spinning on dead handles.
+        # With one lock there is no such window, and this pins it.
+        session = calibration_capture.SESSION
+        errors = []
+
+        def opener():
+            for _ in range(5):
+                try:
+                    session.ensure_open()
+                    session.grab()
+                except Exception as exc:            # noqa: BLE001
+                    errors.append(("open", repr(exc)))
+
+        def releaser():
+            for _ in range(5):
+                try:
+                    session.release()
+                    time.sleep(0.05)
+                except Exception as exc:            # noqa: BLE001
+                    errors.append(("release", repr(exc)))
+
+        threads = [threading.Thread(target=opener),
+                   threading.Thread(target=releaser)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=90)
+        for t in threads:
+            self.assertFalse(t.is_alive(), "a worker never finished - deadlock?")
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

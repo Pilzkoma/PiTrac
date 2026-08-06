@@ -132,126 +132,99 @@ class CameraPair:
         self.release()
 
 
-# Seconds without a request before the grabber gives the cameras back. A
-# V4L2 node has a single owner, so a dashboard that never lets go would block
-# pitrac_lm from ever starting. Keep this well above the cold-open cost,
-# measured at 1.8-2.0 s on these OV9281 modules - a timeout near that figure
-# makes a session release itself before it has served anything.
+# Seconds without a request before the cameras are handed back. A V4L2 node
+# has a single owner, so a dashboard that never lets go would block pitrac_lm
+# from ever starting. Keep this well above the cold-open cost, measured at
+# 1.8-2.0 s on these OV9281 modules.
 DEFAULT_IDLE_TIMEOUT_S = 120.0
+
+# How often the watchdog checks for idleness. One lock acquisition a second.
+IDLE_CHECK_INTERVAL_S = 1.0
 
 
 class CalibrationSession:
-    """One shared CameraPair behind a background grabber.
+    """The cameras, opened on demand and handed back when idle.
 
-    Streams and captures both read the most recent pair rather than touching
-    the devices, so any number of viewers cost nothing extra and every
-    captured pair is genuinely simultaneous by construction.
+    Every operation takes one lock and holds it for the whole operation,
+    including the slow open and the close. No reference to the CameraPair
+    ever escapes that lock, so there is no window in which one caller can act
+    on a pair another caller is tearing down.
 
-    Two locks, deliberately. _lifecycle_lock guards opening and closing, which
-    is slow - a cold camera open takes seconds. _state_lock guards the latest
-    frames and the idle clock, which every request touches. Sharing one lock
-    would make a poll block behind an open, and would let _last_use go stale
-    during it.
+    An earlier version kept a background grabber thread and cached the most
+    recent pair so that streams and captures never touched the devices
+    directly. It produced four separate concurrency defects, and each fix
+    opened a new hole. The cache bought very little - at two MJPEG viewers
+    and a twice-a-second sharpness poll this serialises at well under half
+    duty - so the optimisation was not worth what it cost to make correct.
     """
 
     def __init__(self, idle_timeout_s=DEFAULT_IDLE_TIMEOUT_S):
         self.idle_timeout_s = idle_timeout_s
+        self._lock = threading.Lock()
         self._pair = None
-        self._thread = None
-        self._latest = None
-        self._latest_skew = None
-        self._lifecycle_lock = threading.RLock()
-        self._state_lock = threading.Lock()
-        self._stop = threading.Event()
         self._last_use = 0.0
+        self._watchdog = None
 
     def is_open(self):
-        # Held across teardown, so this cannot report free until the V4L2
-        # descriptors are genuinely closed.
-        with self._lifecycle_lock:
+        with self._lock:
             return self._pair is not None
 
     def ensure_open(self, exposure_units=None):
-        self.touch()
-        with self._lifecycle_lock:
-            if self._pair is not None:
-                return
-            pair = CameraPair(exposure_units=exposure_units).open()
-            with self._state_lock:
-                self._latest = None
-                self._latest_skew = None
-            self._pair = pair
-            # Restart the idle clock from readiness, not from when the request
-            # arrived. A cold OV9281 open takes ~2 s, and counting that as idle
-            # time makes a session with a short timeout release itself before it
-            # has served a single frame.
-            self.touch()
-            self._stop.clear()
-            self._thread = threading.Thread(
-                target=self._loop, args=(pair,), daemon=True)
-            self._thread.start()
+        """Open the cameras if they are not already open.
 
-    def _loop(self, pair):
-        # The pair is passed in rather than read from self, so this thread
-        # never needs _lifecycle_lock. If it did, an external release() that
-        # joins this thread while holding that lock would deadlock.
-        while not self._stop.is_set():
-            with self._state_lock:
-                idle = time.monotonic() - self._last_use
-            if idle > self.idle_timeout_s:
-                self.release()
-                return
-            try:
-                frames, skew = pair.grab_with_skew()
-            except Exception:                   # noqa: BLE001 - keep serving
-                if self._stop.is_set():
-                    return
-                time.sleep(0.05)
-                continue
-            with self._state_lock:
-                self._latest = frames
-                self._latest_skew = skew
-
-    def touch(self):
-        """Mark the session as in use, deferring the idle release."""
-        with self._state_lock:
-            self._last_use = time.monotonic()
-
-    def latest_pair_with_skew(self):
-        """Return ({camera: frame}, skew_seconds), or (None, None).
-
-        The skew belongs to the pair it is returned with. Reporting a
-        placeholder here would put a number on screen that never means
-        anything, which is worse than showing none.
+        Slow on a cold open - around two seconds - and callers are serialised
+        behind it. That is the price of never handing out a pair that someone
+        else might close.
         """
-        self.touch()
-        with self._state_lock:
-            return self._latest, self._latest_skew
+        with self._lock:
+            self._last_use = time.monotonic()
+            if self._pair is None:
+                self._pair = CameraPair(exposure_units=exposure_units).open()
+            if self._watchdog is None:
+                self._watchdog = threading.Thread(target=self._watch, daemon=True)
+                self._watchdog.start()
 
-    def latest_pair(self):
-        return self.latest_pair_with_skew()[0]
+    def grab(self):
+        """Return ({camera_number: frame}, skew_seconds), or (None, None).
 
-    def latest(self, camera_number):
-        pair = self.latest_pair()
-        return None if pair is None else pair.get(camera_number)
+        (None, None) means the session is closed. Callers decide whether that
+        is an error or simply means calibration is not in progress.
+        """
+        with self._lock:
+            if self._pair is None:
+                return None, None
+            self._last_use = time.monotonic()
+            return self._pair.grab_with_skew()
 
     def release(self):
-        self._stop.set()
-        # Join before taking the lifecycle lock: the grabber's own idle-release
-        # path takes that lock, so joining while holding it would deadlock.
-        # Skipped when we are the grabber thread, which cannot join itself.
-        thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
-        with self._lifecycle_lock:
-            pair, self._pair, self._thread = self._pair, None, None
-            with self._state_lock:
-                self._latest = None
-                self._latest_skew = None
+        """Hand the cameras back. Idempotent.
+
+        The descriptors are closed before the lock drops, so is_open() cannot
+        report free while a teardown is still in flight - which is the whole
+        point, since pitrac_lm may be waiting to open the same nodes.
+        """
+        with self._lock:
+            pair, self._pair = self._pair, None
             if pair is not None:
                 pair.release()
 
+    def _watch(self):
+        """Release the cameras once nobody has asked for a frame in a while.
 
-# One session per process. The dashboard is single-process, and two grabbers
+        Lives for the process. Everything it does happens under the same one
+        lock, including the close, so it cannot race a caller.
+        """
+        while True:
+            time.sleep(IDLE_CHECK_INTERVAL_S)
+            with self._lock:
+                if self._pair is None:
+                    continue
+                if time.monotonic() - self._last_use <= self.idle_timeout_s:
+                    continue
+                pair, self._pair = self._pair, None
+                pair.release()
+
+
+# One session per process. The dashboard is single-process, and two of these
 # on the same devices would only fight.
 SESSION = CalibrationSession()
