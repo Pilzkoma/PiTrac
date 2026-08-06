@@ -32,12 +32,19 @@ except ImportError:
 
 from shot_db import ShotDB
 from ball_physics import compute_flight
+from calibration_page import calibration_bp
 
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
+
+# Camera calibration lives on its own page, in its own module. It has to be
+# easy to re-run - every adjustment to a camera mount invalidates the previous
+# result - and a button here beats a remembered command line.
+app.register_blueprint(calibration_bp)
+
 db = None  # initialized in main()
 
 # ---------------------------------------------------------------------------
@@ -333,6 +340,7 @@ DASHBOARD_HTML = r"""
   <div class="tab" onclick="showTab('clubs')">Club Averages</div>
   <div class="tab" onclick="showTab('dispersion')">Dispersion</div>
   <div class="tab" onclick="showTab('compare')">Compare</div>
+  <a class="tab" href="/calibration" style="text-decoration:none">Calibration</a>
 </div>
 
 <div class="content">
