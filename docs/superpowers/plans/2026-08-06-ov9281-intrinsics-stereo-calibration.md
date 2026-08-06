@@ -1670,8 +1670,11 @@ import sys
 import cv2 as cv
 import numpy as np
 
-CHESSBOARD_SIZE = (9, 6)
-SUBPIX_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from sp1_vision.frame_analysis import CHESSBOARD_SIZE, SUBPIX_CRITERIA  # noqa: E402
 
 # Square size only scales the translation vectors; the camera matrix and the
 # distortion coefficients are unaffected. It is set for completeness, not
@@ -1846,6 +1849,20 @@ git push origin main
 
 ### Task 11: Stereo extrinsics
 
+> **Corrected during implementation.** The axis decomposition originally
+> planned here had its labels rotated by one: it read the rotation about X as
+> roll, about Y as pitch and about Z as yaw, while the camera frame is X
+> right, Y down, Z forward — so rotation about X is *pitch*, about Y is *yaw*,
+> about Z is *roll*. Since the whole judgement rests on yaw being forgiving
+> and pitch and roll being costly, mislabelled output would have had someone
+> wave through the expensive misalignment as the cheap one. Replaced with the
+> Rodrigues vector and verified against 5° about each axis in turn. Landed as
+> `8b2ba3d`.
+>
+> The stereo solve also no longer borrows `SUBPIX_CRITERIA`; those are tuned
+> for nudging a corner half a pixel and are far too loose for a bundle
+> adjustment. It uses its own `STEREO_CRITERIA`.
+
 **Files:**
 - Create: `Software/CalibrateCameraDistortions/StereoCalibration.py`
 
@@ -1920,24 +1937,26 @@ def paired_corners(dir1, dir2):
     return objpoints, pts1, pts2, size, used, dropped
 
 
-def rotation_to_euler_degrees(R):
-    """Return (roll, pitch, yaw) in degrees.
+def rotation_to_axis_degrees(R):
+    """Return (pitch, yaw, roll) in degrees - rotation about X, Y and Z.
 
-    Camera frame: X along the baseline, Y down, Z forward. Yaw is toe-in/out
-    and feeds horizontal disparity, which rectification absorbs as an offset.
-    Roll and pitch produce vertical disparity - that is what makes
-    correspondence search two-dimensional, so those are the ones to watch.
+    Camera frame is X right (along the baseline), Y down, Z forward. So
+    rotation about X tips a camera up or down relative to the other (pitch),
+    about Y toes it in or out (yaw), and about Z turns the image in its own
+    plane (roll).
+
+    Yaw feeds horizontal disparity and rectification absorbs it as an offset.
+    Pitch and roll produce *vertical* disparity, which is what turns
+    correspondence search from a one-dimensional problem into a
+    two-dimensional one.
+
+    Uses the Rodrigues vector rather than an Euler decomposition. For the few
+    degrees a printed mount produces, its components are the per-axis angles
+    directly, and it avoids the axis-ordering traps that make hand-rolled
+    Euler conversions easy to get subtly - and silently - wrong.
     """
-    sy = math.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
-    if sy > 1e-6:
-        roll = math.atan2(R[2, 1], R[2, 2])
-        pitch = math.atan2(-R[2, 0], sy)
-        yaw = math.atan2(R[1, 0], R[0, 0])
-    else:
-        roll = math.atan2(-R[1, 2], R[1, 1])
-        pitch = math.atan2(-R[2, 0], sy)
-        yaw = 0.0
-    return tuple(math.degrees(a) for a in (roll, pitch, yaw))
+    rvec, _ = cv.Rodrigues(R)
+    return tuple(math.degrees(float(v)) for v in rvec.ravel())
 
 
 def main(argv=None):
@@ -1963,12 +1982,12 @@ def main(argv=None):
     rms, _, _, _, _, R, T, _, _ = cv.stereoCalibrate(
         objpoints, pts1, pts2,
         k1["mtx"], k1["dist"], k2["mtx"], k2["dist"], size,
-        criteria=SUBPIX_CRITERIA,
+        criteria=STEREO_CRITERIA,
         flags=cv.CALIB_FIX_INTRINSIC,
     )
 
     baseline = float(np.linalg.norm(T))
-    roll, pitch, yaw = rotation_to_euler_degrees(R)
+    pitch, yaw, roll = rotation_to_axis_degrees(R)
     fx = float(k1["mtx"][0, 0])
 
     print("\nstereo RMS         {:.4f} px".format(rms))
@@ -1976,11 +1995,11 @@ def main(argv=None):
         baseline, CAD_BASELINE_MM, baseline - CAD_BASELINE_MM))
     print("translation        [{:.2f}, {:.2f}, {:.2f}] mm".format(*T.ravel()))
     print("\nrelative rotation")
-    print("  roll  {:+.3f} deg   vertical disparity, watch this".format(roll))
-    print("  pitch {:+.3f} deg   vertical disparity, watch this".format(pitch))
-    print("  yaw   {:+.3f} deg   toe-in/out, absorbed as a disparity offset".format(yaw))
+    print("  pitch {:+.3f} deg  (about X)  vertical disparity, watch this".format(pitch))
+    print("  roll  {:+.3f} deg  (about Z)  vertical disparity, watch this".format(roll))
+    print("  yaw   {:+.3f} deg  (about Y)  toe-in/out, absorbed as an offset".format(yaw))
 
-    worst = max(abs(roll), abs(pitch))
+    worst = max(abs(pitch), abs(roll))
     shift = fx * math.tan(math.radians(worst))
     print("\nworst vertical misalignment {:.3f} deg -> {:.1f} px shift".format(
         worst, shift))
