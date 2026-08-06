@@ -28,6 +28,16 @@ namespace golf_sim {
         static int resolution_x_override_;
         static int resolution_y_override_;
 
+        // Physical sensor size in mm, same override mechanism. Needed because
+        // the model-specific values below assume a camera this build does not
+        // have: the PiGS branch hardcodes the IMX296's 5.077 x 3.789 mm, and
+        // overriding only the resolution leaves the sensor's aspect ratio
+        // disagreeing with the image's. That skews the vertical world-coordinate
+        // maths in gs_camera.cpp, and does it consistently enough to look
+        // plausible. Set to <= 0 to keep the model-specific value.
+        static float sensor_width_override_mm_;
+        static float sensor_height_override_mm_;
+
         int CAMERA_NUM_PICTURES_TO_TAKE = 2;
 
         enum CameraModel {

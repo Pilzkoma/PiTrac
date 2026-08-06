@@ -35,6 +35,8 @@ namespace golf_sim {
 
     int CameraHardware::resolution_x_override_ = -1;
     int CameraHardware::resolution_y_override_ = -1;
+    float CameraHardware::sensor_width_override_mm_ = -1.0f;
+    float CameraHardware::sensor_height_override_mm_ = -1.0f;
 
     const int kStationaryBallIndex_00 = 0;
     const int kStationaryBallIndex_01 = 1;
@@ -468,6 +470,28 @@ namespace golf_sim {
             video_resolution_y_ = resolution_y_;
         }
 
+
+        // Physical sensor size override, applied after every model branch so it
+        // is not silently missed by whichever one runs.
+        //
+        // The branches above hardcode the sensor of the camera they were
+        // written for. On this build that is the IMX296's 5.077 x 3.789 mm,
+        // while the hardware is an OV9281 measuring 3.840 x 2.400 mm. Only the
+        // resolution was being overridden, which left the sensor's aspect ratio
+        // at 1.340 against an image of 1.600 - and gs_camera.cpp converts
+        // pixels to metres through sensor_width_/focal_length_ and
+        // sensor_height_/focal_length_ separately, so the vertical axis came
+        // out roughly 19% wrong. A focal-length calibration absorbs an error in
+        // the absolute width; it cannot absorb a wrong aspect ratio.
+        if (sensor_width_override_mm_ > 0.0f && sensor_height_override_mm_ > 0.0f) {
+            GS_LOG_TRACE_MSG(trace, "Overriding sensor size with "
+                + std::to_string(sensor_width_override_mm_) + " x "
+                + std::to_string(sensor_height_override_mm_) + " mm (was "
+                + std::to_string(sensor_width_) + " x "
+                + std::to_string(sensor_height_) + ").");
+            sensor_width_ = sensor_width_override_mm_;
+            sensor_height_ = sensor_height_override_mm_;
+        }
 
         // Customize any parameters that have been set in the JSON config file
 

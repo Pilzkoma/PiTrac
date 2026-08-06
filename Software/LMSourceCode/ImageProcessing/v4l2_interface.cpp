@@ -823,6 +823,14 @@ namespace golf_sim {
         CameraHardware::resolution_x_override_ = 1280;
         CameraHardware::resolution_y_override_ = 800;
 
+        // OV9281: 1/4", 1280x800, 3.0 um square pixels -> 3.840 x 2.400 mm.
+        // Confirmed by calibration on 2026-08-06: fy/fx came out at 0.995 on
+        // both cameras, which only holds if the pixels really are square at
+        // the assumed pitch. Without this the sensor stays at the IMX296's
+        // 5.077 x 3.789 mm and the vertical world-coordinate maths is skewed.
+        CameraHardware::sensor_width_override_mm_ = 3.840f;
+        CameraHardware::sensor_height_override_mm_ = 2.400f;
+
         // Replace any previously allocated app pointers (idempotent re-init).
         delete LibCameraInterface::libcamera_app_[0];
         delete LibCameraInterface::libcamera_app_[1];
