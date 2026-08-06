@@ -775,12 +775,32 @@ namespace golf_sim {
     }  // namespace
 
     bool PerformCameraSystemStartup() {
-        // OV9281 device mapping confirmed in LOGBOOK 2026-03-21:
-        //   /dev/video0  → camera 1 (USB bus xhci-2.2.4)
-        //   /dev/video2  → camera 2 (USB bus xhci-2.3)
-        // /dev/video1 and /dev/video3 are UVC metadata devices and are skipped.
-        static const char* kSlot0Path = "/dev/video0";
-        static const char* kSlot1Path = "/dev/video2";
+        // Bind by USB port path, never by /dev/videoN.
+        //
+        // Both B0332 modules report iSerial "UC762" — Arducam's SKU code, not
+        // a per-unit serial — along with identical VID:PID 0c45:6366 and
+        // bcdDevice.  /dev/v4l/by-id/ therefore holds a single colliding
+        // entry, and the device numbers are handed out in enumeration order.
+        // If the two swap across a reboot, the stereo baseline changes sign
+        // and depth comes out mirrored, with nothing visibly wrong in either
+        // image.
+        //
+        // This is not hypothetical.  The comment that stood here recorded the
+        // cameras on xhci-2.2.4 and xhci-2.3; by 2026-08-06 the hardware
+        // enumerated them on 2.3 and 2.4.  The ports had already drifted.
+        //
+        // The port is the identity, so the socket a cable sits in must not
+        // change.  These two strings are mirrored in
+        // sp1_vision/camera_paths.py (CAMERA_PORT_PATHS) — grep for them
+        // there before changing either, because nothing enforces that the two
+        // agree.
+        //
+        // /dev/video1 and /dev/video3 are UVC metadata devices and are skipped;
+        // the -video-index0 suffix selects the capture node.
+        static const char* kSlot0Path =
+            "/dev/v4l/by-path/platform-3610000.xhci-usb-0:2.3:1.0-video-index0";
+        static const char* kSlot1Path =
+            "/dev/v4l/by-path/platform-3610000.xhci-usb-0:2.4:1.0-video-index0";
 
         if (!probe_v4l2_capture_device(kSlot0Path)) return false;
         if (!probe_v4l2_capture_device(kSlot1Path)) return false;
