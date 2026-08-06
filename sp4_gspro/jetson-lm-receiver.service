@@ -1,0 +1,19 @@
+[Unit]
+Description=Jetson LM Shot Receiver — Unix Socket → GSPro/OpenShotGolf + SQLite
+After=network.target
+
+[Service]
+Type=simple
+User=brain
+WorkingDirectory=/home/brain/JetsonLM/sp4_gspro
+ExecStart=/usr/bin/python3 /home/brain/JetsonLM/sp4_gspro/shot_receiver.py --ip 192.168.178.20 --player "Max"
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -98,3 +98,28 @@ Software/GroundTruthAnnotator/yolo/labels/*.cache
 # Dev scripts cache
 Dev/scripts/__pycache__
 packaging/pitrac
+
+# --- Jetson runtime artefacts (added 2026-08-06) ---
+# Diagnostic images written by pitrac_lm at runtime. The VALUE_NOT_SET prefix
+# is a symptom: logging.kLinuxBaseImageLoggingDir resolves to the literal
+# string "VALUE_NOT_SET" and gets prepended as a path.
+Software/LMSourceCode/ImageProcessing/VALUE_NOT_SET*
+Software/LMSourceCode/ImageProcessing/*gs_log_*.png
+Software/LMSourceCode/ImageProcessing/log_cam*.png
+# Runtime share dir for diagnostic images, created by hand, holds no source.
+Software/LMSourceCode/ImageProcessing/WebServer/
+# Hand-made config snapshots. Use git history instead - a stale .bak can
+# silently regress a fix.
+Software/LMSourceCode/ImageProcessing/golf_sim_config.json.*_bak
+
+# SP1 test captures
+sp1_vision/test_capture_*.png
+
+# SP4 runtime state, not source: live shot database and its WAL/SHM sidecars.
+# NOTE: this means the shot history is NOT backed up by git.
+sp4_gspro/jetson_lm.db
+sp4_gspro/jetson_lm.db-shm
+sp4_gspro/jetson_lm.db-wal
+
+__pycache__/
+*.pyc

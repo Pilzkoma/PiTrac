@@ -1,0 +1,20 @@
+[Unit]
+Description=Jetson LM Stats Dashboard — Flask Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=brain
+WorkingDirectory=/home/brain/JetsonLM/sp4_gspro
+ExecStart=/usr/bin/python3 /home/brain/JetsonLM/sp4_gspro/dashboard.py --port 5000
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/brain/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
