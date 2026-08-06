@@ -130,3 +130,101 @@ class CameraPair:
 
     def __exit__(self, *exc):
         self.release()
+
+
+# Seconds without a request before the grabber gives the cameras back. A
+# V4L2 node has a single owner, so a dashboard that never lets go would block
+# pitrac_lm from ever starting.
+DEFAULT_IDLE_TIMEOUT_S = 120.0
+
+
+class CalibrationSession:
+    """One shared CameraPair behind a background grabber.
+
+    Streams and captures both read the most recent pair rather than touching
+    the devices, so any number of viewers cost nothing extra and every
+    captured pair is genuinely simultaneous by construction.
+    """
+
+    def __init__(self, idle_timeout_s=DEFAULT_IDLE_TIMEOUT_S):
+        self.idle_timeout_s = idle_timeout_s
+        self._pair = None
+        self._latest = None
+        self._latest_skew = None
+        self._lock = threading.Lock()
+        self._thread = None
+        self._stop = threading.Event()
+        self._last_use = 0.0
+
+    def is_open(self):
+        with self._lock:
+            return self._pair is not None
+
+    def ensure_open(self, exposure_units=None):
+        with self._lock:
+            self._last_use = time.monotonic()
+            if self._pair is not None:
+                return
+            self._pair = CameraPair(exposure_units=exposure_units).open()
+            self._latest = None
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+
+    def _loop(self):
+        while not self._stop.is_set():
+            with self._lock:
+                pair = self._pair
+                idle = time.monotonic() - self._last_use
+            if pair is None:
+                return
+            if idle > self.idle_timeout_s:
+                self.release()
+                return
+            try:
+                frames, skew = pair.grab_with_skew()
+            except Exception:                   # noqa: BLE001 - keep serving
+                time.sleep(0.05)
+                continue
+            with self._lock:
+                self._latest = frames
+                self._latest_skew = skew
+
+    def touch(self):
+        """Mark the session as in use, deferring the idle release."""
+        with self._lock:
+            self._last_use = time.monotonic()
+
+    def latest_pair_with_skew(self):
+        """Return ({camera: frame}, skew_seconds), or (None, None).
+
+        The skew belongs to the pair it is returned with. Reporting a
+        placeholder here would put a number on screen that never means
+        anything, which is worse than showing none.
+        """
+        self.touch()
+        with self._lock:
+            return self._latest, self._latest_skew
+
+    def latest_pair(self):
+        return self.latest_pair_with_skew()[0]
+
+    def latest(self, camera_number):
+        pair = self.latest_pair()
+        return None if pair is None else pair.get(camera_number)
+
+    def release(self):
+        self._stop.set()
+        thread = self._thread
+        with self._lock:
+            pair, self._pair, self._latest, self._thread = self._pair, None, None, None
+            self._latest_skew = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        if pair is not None:
+            pair.release()
+
+
+# One session per process. The dashboard is single-process, and two grabbers
+# on the same devices would only fight.
+SESSION = CalibrationSession()

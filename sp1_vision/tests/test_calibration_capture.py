@@ -45,5 +45,51 @@ class CameraPairTest(unittest.TestCase):
         self.pair.release()
 
 
+class CalibrationSessionTest(unittest.TestCase):
+    def tearDown(self):
+        calibration_capture.SESSION.release()
+
+    def test_latest_pair_becomes_available_after_start(self):
+        session = calibration_capture.SESSION
+        session.ensure_open()
+        deadline = time.time() + 5.0
+        while session.latest_pair() is None and time.time() < deadline:
+            time.sleep(0.05)
+        pair = session.latest_pair()
+        self.assertIsNotNone(pair, "grabber produced no pair within 5 s")
+        self.assertEqual(sorted(pair), [1, 2])
+
+    def test_ensure_open_is_idempotent(self):
+        session = calibration_capture.SESSION
+        session.ensure_open()
+        session.ensure_open()
+        self.assertTrue(session.is_open())
+
+    def test_release_frees_the_devices_for_another_opener(self):
+        session = calibration_capture.SESSION
+        session.ensure_open()
+        session.release()
+        self.assertFalse(session.is_open())
+        # If the devices were genuinely released, a plain CameraPair opens.
+        pair = calibration_capture.CameraPair()
+        pair.open()
+        pair.release()
+
+    def test_idle_timeout_releases_without_being_asked(self):
+        session = calibration_capture.SESSION
+        session.idle_timeout_s = 1.0
+        try:
+            session.ensure_open()
+            deadline = time.time() + 6.0
+            while session.is_open() and time.time() < deadline:
+                time.sleep(0.1)
+            self.assertFalse(session.is_open(), "session did not release when idle")
+        finally:
+            # idle_timeout_s lives on the shared module-level SESSION, so a
+            # short value left behind here would leak into later tests. See
+            # the note in the task: restore rather than restructure.
+            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+
+
 if __name__ == "__main__":
     unittest.main()
