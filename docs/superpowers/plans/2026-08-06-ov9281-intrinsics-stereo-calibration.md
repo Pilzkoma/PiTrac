@@ -4,7 +4,7 @@
 
 **Goal:** Build a re-runnable calibration tool — clickable from the Jetson dashboard — that measures the real intrinsics of both OV9281 cameras and the stereo extrinsics between them.
 
-**Architecture:** A hardware-facing Python module (`sp1_vision/`) with two front ends over it: a Flask blueprint mounted into the existing `sp4_gspro/dashboard.py`, and a CLI fallback. Cameras bind by USB port path because both modules report the same USB serial. A background grabber thread keeps one barrier-synced frame pair current, which both the live MJPEG streams and the capture button read from, so pair simultaneity is structural rather than something each caller has to get right. Analysis reuses PiTrac's `CameraCalibration.py`, patched for our resolution and extended with `stereoCalibrate`.
+**Architecture:** A hardware-facing Python module (`sp1_vision/`) with two front ends over it: a Flask blueprint mounted into the existing `sp4_gspro/dashboard.py`, and a CLI fallback. Cameras bind by USB port path because both modules report the same USB serial. Every frame comes from a barrier-synced paired grab, so pair simultaneity is structural rather than something each caller has to get right, and one session owns the cameras behind a single lock held across every operation — an earlier cached-frame design produced four concurrency defects before being abandoned. Analysis reuses PiTrac's `CameraCalibration.py`, patched for our resolution and extended with `stereoCalibrate`.
 
 **Tech Stack:** Python 3.8.10, OpenCV 4.5.4, Flask 3.0.3, numpy 1.17.4, `unittest` from the standard library (the Jetson has no pytest and this plan does not add dependencies to a working device), `v4l2-ctl` for exposure control.
 
@@ -48,7 +48,7 @@ git merge --ff-only FETCH_HEAD && git push origin main
 | `sp1_vision/__init__.py` (create) | Makes `sp1_vision` importable as a package |
 | `sp1_vision/camera_paths.py` (create) | Logical camera number → real device node, via USB port path. No OpenCV, no hardware. |
 | `sp1_vision/frame_analysis.py` (create) | Pure frame maths: sharpness score, chessboard detection. No hardware. |
-| `sp1_vision/calibration_capture.py` (create) | `CameraPair` (open/grab/release, barrier-synced) and `CalibrationSession` (background grabber, latest-pair cache, idle release) |
+| `sp1_vision/calibration_capture.py` (create) | `CameraPair` (open/grab/release, barrier-synced) and `CalibrationSession` (owns the cameras behind one lock, releases them when idle) |
 | `sp1_vision/cli_calibrate.py` (create) | CLI front end: `--focus`, `--shots` |
 | `sp1_vision/tests/` (create) | `unittest` suites |
 | `sp4_gspro/calibration_page.py` (create) | Flask blueprint: page, MJPEG streams, capture, run. Kept out of `dashboard.py`, which is already ~1400 lines. |
@@ -813,9 +813,38 @@ git push origin main
 
 ---
 
-### Task 6: Session with a background grabber
+### Task 6: Session that owns the cameras
 
-Live streaming and pair capture must not fight over the devices, and the cameras must be handed back when calibration is not in progress — `pitrac_lm` cannot open a node the dashboard is holding.
+Live streaming and pair capture must not fight over the devices, and the
+cameras must be handed back when calibration is not in progress — `pitrac_lm`
+cannot open a node the dashboard is holding.
+
+> **This task was redesigned during implementation.** It originally specified a
+> background grabber thread caching the most recent pair, so that streams and
+> captures never touched the devices directly. That produced **four** separate
+> concurrency defects, none of them visible by reading the code, and each fix
+> opened a new hole:
+>
+> 1. `release()` nulled state under the lock and closed the descriptors after,
+>    so `is_open()` reported free mid-teardown — the exact `pitrac_lm` handoff
+>    the idle release exists to make safe.
+> 2. A single lock spanned the slow camera open, blocking `touch()` and
+>    staling the idle clock under the load the dashboard produces.
+> 3. The idle clock started at request time rather than readiness; a ~2 s cold
+>    open already exceeded a short timeout, so the session released before
+>    serving a frame.
+> 4. `release()` snapshotted `self._thread` before taking the lock, so a
+>    release racing an open could tear down the freshly opened pair and leave
+>    its grabber spinning on released handles. Reached routinely, not
+>    exotically: the page polls sharpness through `ensure_open()` twice a
+>    second, so clicking release with a stream open lands in that window.
+>
+> Four defects in one small class, each fix creating the next, is a verdict on
+> the design rather than the implementation. The cache bought little — two
+> MJPEG viewers plus a twice-a-second poll is roughly 35 grabs a second at
+> about 8 ms each, well under half duty — so it was dropped in favour of one
+> lock held across every operation. The races are no longer guarded against;
+> they are unrepresentable. Landed as `de71be0`.
 
 **Files:**
 - Modify: `sp1_vision/calibration_capture.py`
@@ -823,22 +852,30 @@ Live streaming and pair capture must not fight over the devices, and the cameras
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `sp1_vision/tests/test_calibration_capture.py`, before the `if __name__` block:
+Append to `sp1_vision/tests/test_calibration_capture.py`, before the
+`if __name__` block, and add `import threading` to the imports:
 
 ```python
 class CalibrationSessionTest(unittest.TestCase):
     def tearDown(self):
+        calibration_capture.SESSION.idle_timeout_s = (
+            calibration_capture.DEFAULT_IDLE_TIMEOUT_S)
         calibration_capture.SESSION.release()
 
-    def test_latest_pair_becomes_available_after_start(self):
+    def test_grab_returns_a_pair_once_open(self):
         session = calibration_capture.SESSION
         session.ensure_open()
-        deadline = time.time() + 5.0
-        while session.latest_pair() is None and time.time() < deadline:
-            time.sleep(0.05)
-        pair = session.latest_pair()
-        self.assertIsNotNone(pair, "grabber produced no pair within 5 s")
-        self.assertEqual(sorted(pair), [1, 2])
+        frames, skew = session.grab()
+        self.assertIsNotNone(frames)
+        self.assertEqual(sorted(frames), [1, 2])
+        self.assertLess(skew, 0.030)
+
+    def test_grab_before_open_returns_nothing_rather_than_raising(self):
+        session = calibration_capture.SESSION
+        session.release()
+        frames, skew = session.grab()
+        self.assertIsNone(frames)
+        self.assertIsNone(skew)
 
     def test_ensure_open_is_idempotent(self):
         session = calibration_capture.SESSION
@@ -856,43 +893,74 @@ class CalibrationSessionTest(unittest.TestCase):
         pair.open()
         pair.release()
 
+    def test_release_is_idempotent(self):
+        session = calibration_capture.SESSION
+        session.ensure_open()
+        session.release()
+        session.release()
+        self.assertFalse(session.is_open())
+
     def test_idle_timeout_releases_without_being_asked(self):
         session = calibration_capture.SESSION
-        try:
-            session.idle_timeout_s = 1.0
-            session.ensure_open()
-            deadline = time.time() + 6.0
-            while session.is_open() and time.time() < deadline:
-                time.sleep(0.1)
-            self.assertFalse(session.is_open(), "session did not release when idle")
-        finally:
-            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+        session.idle_timeout_s = 1.0
+        session.ensure_open()
+        deadline = time.time() + 10.0
+        while session.is_open() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(session.is_open(), "session did not release when idle")
 
     def test_reopen_immediately_after_idle_release(self):
-        # The release-then-reopen sequence is the one the pitrac_lm handoff
-        # depends on, and it is where all three lifecycle defects showed up.
+        # The release-then-reopen sequence is what the pitrac_lm handoff
+        # depends on, and it is where every lifecycle defect showed up.
         session = calibration_capture.SESSION
-        try:
-            session.idle_timeout_s = 1.0
-            session.ensure_open()
-            deadline = time.time() + 6.0
-            while session.is_open() and time.time() < deadline:
-                time.sleep(0.1)
-            self.assertFalse(session.is_open(), "session did not release when idle")
+        session.idle_timeout_s = 1.0
+        session.ensure_open()
+        deadline = time.time() + 10.0
+        while session.is_open() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(session.is_open(), "session did not release when idle")
 
-            session.ensure_open()
-            deadline = time.time() + 5.0
-            while session.latest_pair() is None and time.time() < deadline:
-                time.sleep(0.05)
-            self.assertIsNotNone(
-                session.latest_pair(), "no pair served after reopening")
-        finally:
-            session.idle_timeout_s = calibration_capture.DEFAULT_IDLE_TIMEOUT_S
+        session.ensure_open()
+        frames, _ = session.grab()
+        self.assertIsNotNone(frames, "no pair served after reopening")
+
+    def test_concurrent_release_and_ensure_open_do_not_orphan_a_pair(self):
+        # The fourth defect: a release racing an open could tear down the
+        # freshly opened pair and leave a grabber spinning on dead handles.
+        # With one lock there is no such window, and this pins it.
+        session = calibration_capture.SESSION
+        errors = []
+
+        def opener():
+            for _ in range(5):
+                try:
+                    session.ensure_open()
+                    session.grab()
+                except Exception as exc:            # noqa: BLE001
+                    errors.append(("open", repr(exc)))
+
+        def releaser():
+            for _ in range(5):
+                try:
+                    session.release()
+                    time.sleep(0.05)
+                except Exception as exc:            # noqa: BLE001
+                    errors.append(("release", repr(exc)))
+
+        threads = [threading.Thread(target=opener),
+                   threading.Thread(target=releaser)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=90)
+        for t in threads:
+            self.assertFalse(t.is_alive(), "a worker never finished - deadlock?")
+        self.assertEqual(errors, [])
 ```
 
-The `finally` blocks matter: `SESSION` is module-level, so a leaked
-`idle_timeout_s` of 1.0 makes every later test in the process flaky. That
-leak was observed, not theorised.
+`tearDown` restores `idle_timeout_s` unconditionally: `SESSION` is
+module-level, so a leaked value of 1.0 makes every later test in the process
+flaky. That leak was observed, not theorised.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -908,147 +976,103 @@ Expected: `AttributeError: module 'sp1_vision.calibration_capture' has no attrib
 Append to `sp1_vision/calibration_capture.py`:
 
 ```python
-# Seconds without a request before the grabber gives the cameras back. A
-# V4L2 node has a single owner, so a dashboard that never lets go would block
-# pitrac_lm from ever starting. Keep this well above the cold-open cost,
-# measured at 1.8-2.0 s on these OV9281 modules - a timeout near that figure
-# makes a session release itself before it has served anything.
+# Seconds without a request before the cameras are handed back. A V4L2 node
+# has a single owner, so a dashboard that never lets go would block pitrac_lm
+# from ever starting. Keep this well above the cold-open cost, measured at
+# 1.8-2.0 s on these OV9281 modules.
 DEFAULT_IDLE_TIMEOUT_S = 120.0
+
+# How often the watchdog checks for idleness. One lock acquisition a second.
+IDLE_CHECK_INTERVAL_S = 1.0
 
 
 class CalibrationSession:
-    """One shared CameraPair behind a background grabber.
+    """The cameras, opened on demand and handed back when idle.
 
-    Streams and captures both read the most recent pair rather than touching
-    the devices, so any number of viewers cost nothing extra and every
-    captured pair is genuinely simultaneous by construction.
+    Every operation takes one lock and holds it for the whole operation,
+    including the slow open and the close. No reference to the CameraPair
+    ever escapes that lock, so there is no window in which one caller can act
+    on a pair another caller is tearing down.
 
-    Two locks, deliberately. _lifecycle_lock guards opening and closing, which
-    is slow - a cold camera open takes seconds. _state_lock guards the latest
-    frames and the idle clock, which every request touches. Sharing one lock
-    would make a poll block behind an open, and would let _last_use go stale
-    during it.
+    An earlier version kept a background grabber thread and cached the most
+    recent pair so that streams and captures never touched the devices
+    directly. It produced four separate concurrency defects, and each fix
+    opened a new hole. The cache bought very little - at two MJPEG viewers
+    and a twice-a-second sharpness poll this serialises at well under half
+    duty - so the optimisation was not worth what it cost to make correct.
     """
 
     def __init__(self, idle_timeout_s=DEFAULT_IDLE_TIMEOUT_S):
         self.idle_timeout_s = idle_timeout_s
+        self._lock = threading.Lock()
         self._pair = None
-        self._thread = None
-        self._latest = None
-        self._latest_skew = None
-        self._lifecycle_lock = threading.RLock()
-        self._state_lock = threading.Lock()
-        self._stop = threading.Event()
         self._last_use = 0.0
+        self._watchdog = None
 
     def is_open(self):
-        # Held across teardown, so this cannot report free until the V4L2
-        # descriptors are genuinely closed.
-        with self._lifecycle_lock:
+        with self._lock:
             return self._pair is not None
 
     def ensure_open(self, exposure_units=None):
-        self.touch()
-        with self._lifecycle_lock:
-            if self._pair is not None:
-                return
-            pair = CameraPair(exposure_units=exposure_units).open()
-            with self._state_lock:
-                self._latest = None
-                self._latest_skew = None
-            self._pair = pair
-            # Restart the idle clock from readiness, not from when the request
-            # arrived. A cold OV9281 open takes ~2 s, and counting that as idle
-            # time makes a session with a short timeout release itself before it
-            # has served a single frame.
-            self.touch()
-            self._stop.clear()
-            self._thread = threading.Thread(
-                target=self._loop, args=(pair,), daemon=True)
-            self._thread.start()
+        """Open the cameras if they are not already open.
 
-    def _loop(self, pair):
-        # The pair is passed in rather than read from self, so this thread
-        # never needs _lifecycle_lock. If it did, an external release() that
-        # joins this thread while holding that lock would deadlock.
-        while not self._stop.is_set():
-            with self._state_lock:
-                idle = time.monotonic() - self._last_use
-            if idle > self.idle_timeout_s:
-                self.release()
-                return
-            try:
-                frames, skew = pair.grab_with_skew()
-            except Exception:                   # noqa: BLE001 - keep serving
-                if self._stop.is_set():
-                    return
-                time.sleep(0.05)
-                continue
-            with self._state_lock:
-                self._latest = frames
-                self._latest_skew = skew
-
-    def touch(self):
-        """Mark the session as in use, deferring the idle release."""
-        with self._state_lock:
-            self._last_use = time.monotonic()
-
-    def latest_pair_with_skew(self):
-        """Return ({camera: frame}, skew_seconds), or (None, None).
-
-        The skew belongs to the pair it is returned with. Reporting a
-        placeholder here would put a number on screen that never means
-        anything, which is worse than showing none.
+        Slow on a cold open - around two seconds - and callers are serialised
+        behind it. That is the price of never handing out a pair that someone
+        else might close.
         """
-        self.touch()
-        with self._state_lock:
-            return self._latest, self._latest_skew
+        with self._lock:
+            self._last_use = time.monotonic()
+            if self._pair is None:
+                self._pair = CameraPair(exposure_units=exposure_units).open()
+            if self._watchdog is None:
+                self._watchdog = threading.Thread(target=self._watch, daemon=True)
+                self._watchdog.start()
 
-    def latest_pair(self):
-        return self.latest_pair_with_skew()[0]
+    def grab(self):
+        """Return ({camera_number: frame}, skew_seconds), or (None, None).
 
-    def latest(self, camera_number):
-        pair = self.latest_pair()
-        return None if pair is None else pair.get(camera_number)
+        (None, None) means the session is closed. Callers decide whether that
+        is an error or simply means calibration is not in progress.
+        """
+        with self._lock:
+            if self._pair is None:
+                return None, None
+            self._last_use = time.monotonic()
+            return self._pair.grab_with_skew()
 
     def release(self):
-        self._stop.set()
-        # Join before taking the lifecycle lock: the grabber's own idle-release
-        # path takes that lock, so joining while holding it would deadlock.
-        # Skipped when we are the grabber thread, which cannot join itself.
-        thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
-        with self._lifecycle_lock:
-            pair, self._pair, self._thread = self._pair, None, None
-            with self._state_lock:
-                self._latest = None
-                self._latest_skew = None
+        """Hand the cameras back. Idempotent.
+
+        The descriptors are closed before the lock drops, so is_open() cannot
+        report free while a teardown is still in flight - which is the whole
+        point, since pitrac_lm may be waiting to open the same nodes.
+        """
+        with self._lock:
+            pair, self._pair = self._pair, None
             if pair is not None:
                 pair.release()
 
+    def _watch(self):
+        """Release the cameras once nobody has asked for a frame in a while.
 
-# One session per process. The dashboard is single-process, and two grabbers
+        Lives for the process. Everything it does happens under the same one
+        lock, including the close, so it cannot race a caller.
+        """
+        while True:
+            time.sleep(IDLE_CHECK_INTERVAL_S)
+            with self._lock:
+                if self._pair is None:
+                    continue
+                if time.monotonic() - self._last_use <= self.idle_timeout_s:
+                    continue
+                pair, self._pair = self._pair, None
+                pair.release()
+
+
+# One session per process. The dashboard is single-process, and two of these
 # on the same devices would only fight.
 SESSION = CalibrationSession()
 ```
-
-> **This block was rewritten after implementation.** The version originally
-> planned here carried three defects, none visible by reading it, all found by
-> running the suite repeatedly on real hardware:
->
-> 1. `release()` nulled state under the lock and closed the descriptors
->    afterwards, so `is_open()` reported free mid-teardown — the exact
->    `pitrac_lm` handoff the idle release exists to make safe.
-> 2. A single lock spanned the slow camera open, blocking `touch()` and
->    staling the idle clock under the concurrent load the dashboard will
->    produce.
-> 3. The idle clock started at request time rather than readiness, so a ~2 s
->    cold open already exceeded a short timeout and the session released
->    before serving a frame.
->
-> Landed as `9e07993`. `test_reopen_immediately_after_idle_release` pins the
-> sequence.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1057,27 +1081,36 @@ scp -i ~/.ssh/jetsonlm_key sp1_vision/calibration_capture.py brain@192.168.178.1
 ssh -i ~/.ssh/jetsonlm_key brain@192.168.178.194 "cd ~/JetsonLM && python3 -m unittest sp1_vision.tests.test_calibration_capture -v"
 ```
 
-Expected: `Ran 9 tests` / `OK`
+Expected: `Ran 12 tests` / `OK`
 
 **Run the suite five times, not once.** These tests share module-level state
 (`SESSION`) and real hardware. Every defect in this task was a race or a
 timing assumption, and none of them failed on the first run. Three passes
-would have shipped two of the three bugs.
+would have shipped two of the four bugs.
+
+Also confirm nothing is left holding the devices:
+
+```bash
+ssh -i ~/.ssh/jetsonlm_key brain@192.168.178.194 "fuser -v /dev/video0 /dev/video2"
+```
+
+Expected: no output.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add sp1_vision/calibration_capture.py sp1_vision/tests/test_calibration_capture.py
-git commit -m "SP1: shared calibration session with idle camera release
+git commit -m "SP1: calibration session owning the cameras behind one lock
 
-A background grabber keeps one barrier-synced pair current; streams and
-captures read it rather than touching the devices. Releases after two idle
-minutes, because a V4L2 node has a single owner and a dashboard that never
-lets go would keep pitrac_lm from ever starting."
-git push origin main
+One lock across every operation including the open and the close, and no
+reference to the CameraPair escapes it. Releases after two idle minutes,
+because a V4L2 node has a single owner and a dashboard that never lets go
+would keep pitrac_lm from ever starting."
+GIT_TERMINAL_PROMPT=0 git push origin main
 ```
 
 ---
+
 
 ### Task 7: CLI front end
 
@@ -1416,11 +1449,14 @@ def calibration_stream(camera_number):
     def frames():
         calibration_capture.SESSION.ensure_open()
         while True:
-            frame = calibration_capture.SESSION.latest(camera_number)
-            if frame is None:
-                time.sleep(0.05)
-                continue
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            pair, _ = calibration_capture.SESSION.grab()
+            if pair is None:
+                # Session was released - most likely the user pressed the
+                # button, or it idled out. Stop rather than reopening behind
+                # their back.
+                return
+            ok, buf = cv2.imencode(".jpg", pair[camera_number],
+                                   [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             if ok:
                 yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                        + buf.tobytes() + b"\r\n")
@@ -1433,7 +1469,7 @@ def calibration_stream(camera_number):
 @calibration_bp.route("/calibration/sharpness")
 def calibration_sharpness():
     calibration_capture.SESSION.ensure_open()
-    pair = calibration_capture.SESSION.latest_pair()
+    pair, _ = calibration_capture.SESSION.grab()
     if pair is None:
         return jsonify({"cam1": None, "cam2": None})
     return jsonify({
@@ -1451,9 +1487,9 @@ def calibration_status():
 @calibration_bp.route("/calibration/capture", methods=["POST"])
 def calibration_capture_pair():
     calibration_capture.SESSION.ensure_open()
-    pair, skew = calibration_capture.SESSION.latest_pair_with_skew()
+    pair, skew = calibration_capture.SESSION.grab()
     if pair is None:
-        return jsonify({"error": "no frames yet - cameras still starting"})
+        return jsonify({"error": "cameras are not open"})
 
     dirs = _pair_dirs()
     index = _pair_count() + 1
