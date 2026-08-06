@@ -18,6 +18,7 @@ not a failure - most likely a camera sitting off its seat.
 
 import argparse
 import glob
+import json
 import math
 import os
 import sys
@@ -148,6 +149,11 @@ def main(argv=None):
                              "CameraCalibration.SQUARE_SIZE_MM. This scales "
                              "the baseline linearly - a wrong value here makes "
                              "a correct mount look misbuilt.")
+    parser.add_argument("--save-json", metavar="FILE",
+                        help="write the extrinsics here. Worth doing: R and T "
+                             "are the product of a whole capture session, and "
+                             "nothing downstream consumes them yet, so without "
+                             "this they exist only in a terminal scrollback.")
     parser.add_argument("--drop-above", type=float, default=1.0, metavar="PX",
                         help="re-solve without pairs whose epipolar error "
                              "exceeds this (default %(default)s px); 0 disables")
@@ -217,6 +223,25 @@ def main(argv=None):
     else:
         print("-> over {:.0f} deg, consider shimming before accepting this "
               "calibration".format(ACCEPTABLE_MISALIGNMENT_DEG))
+
+    if args.save_json:
+        with open(args.save_json, "w") as fh:
+            json.dump({
+                "method": "cv.stereoCalibrate with CALIB_FIX_INTRINSIC",
+                "pairs_used": used,
+                "square_mm": args.square_mm,
+                "rms_px": float(rms),
+                "baseline_mm": baseline,
+                "cad_baseline_mm": CAD_BASELINE_MM,
+                "translation_mm": [float(v) for v in T.ravel()],
+                "rotation_matrix": [[float(v) for v in row] for row in R],
+                "rotation_deg": {"pitch_about_x": pitch,
+                                 "yaw_about_y": yaw,
+                                 "roll_about_z": roll},
+                "frame": "X right along the baseline, Y down, Z forward. "
+                         "Camera 1 is the left module facing the unit.",
+            }, fh, indent=2)
+        print("\nextrinsics written to " + args.save_json)
 
     print("\nBaseline and axes are also readable from Hardware/JetsonLM.step.")
     print("A large disagreement means one of the two is wrong, and the mount")

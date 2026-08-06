@@ -1,0 +1,57 @@
+{
+  "method": "cv.stereoCalibrate with CALIB_FIX_INTRINSIC",
+  "pairs_used": [
+    "gs_01.png",
+    "gs_02.png",
+    "gs_03.png",
+    "gs_04.png",
+    "gs_05.png",
+    "gs_06.png",
+    "gs_07.png",
+    "gs_08.png",
+    "gs_09.png",
+    "gs_10.png",
+    "gs_11.png",
+    "gs_12.png",
+    "gs_13.png",
+    "gs_14.png",
+    "gs_15.png",
+    "gs_16.png",
+    "gs_17.png",
+    "gs_18.png",
+    "gs_19.png",
+    "gs_20.png"
+  ],
+  "square_mm": 24.0,
+  "rms_px": 1.1819390215509151,
+  "baseline_mm": 79.83444044240048,
+  "cad_baseline_mm": 80.0,
+  "translation_mm": [
+    79.79212848998054,
+    0.13206956010819054,
+    2.5955094723227217
+  ],
+  "rotation_matrix": [
+    [
+      0.9997827730869787,
+      -0.0160124013395147,
+      0.013342025402958268
+    ],
+    [
+      0.01625878614881739,
+      0.9996954003468398,
+      -0.018567670783884507
+    ],
+    [
+      -0.013040648430116493,
+      0.01878056252389694,
+      0.9997385818101691
+    ]
+  ],
+  "rotation_deg": {
+    "pitch_about_x": 1.0700877641553195,
+    "yaw_about_y": 0.7559066106774045,
+    "roll_about_z": 0.9246221255352259
+  },
+  "frame": "X right along the baseline, Y down, Z forward. Camera 1 is the left module facing the unit."
+}
