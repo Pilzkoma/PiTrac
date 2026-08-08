@@ -1,9 +1,9 @@
 # Calibration capture sets
 
 ```
-cam1/, cam2/           the current set — what the tools read and write
-2026-08-06_springs/    archived set, superseded for extrinsics, still the
-                       source of the intrinsics (see its own README)
+cam1/, cam2/           the current set, 2026-08-08, 24 pairs — the source of
+                       both the intrinsics and the extrinsics in use
+2026-08-06_springs/    archived set, superseded (see its own README)
 ```
 
 `cam1/gs_NN.png` and `cam2/gs_NN.png` with the same NN are one simultaneous
@@ -20,12 +20,10 @@ answer. That is why `2026-08-06_springs/` exists.
 
 ## The current set — 2026-08-08, springs removed
 
-The springs behind the camera mount were removed and the plate bolted solid.
-That changes the pose of the two cameras relative to each other, so the
-extrinsics had to be measured again. **Only the extrinsics.** No lens was
-touched, so focal length, principal point and distortion are unchanged, and
-the archived set measures those better than this one can — it has full-frame
-board coverage, which the unit sitting on the ground cannot reach.
+The springs behind the camera mount were removed and the plate bolted solid,
+which changes the pose of the two cameras relative to each other. This set was
+captured to measure the new pose. It ended up replacing the intrinsics as well;
+see "What came out".
 
 ### Capturing
 
@@ -43,21 +41,15 @@ already.
 Two things to read from it, and one not to:
 
 * **The two cameras against each other.** They were within 3 % on 2026-08-06
-  and should still be. This is the check that catches one lens having been
+  and 2.4 % on 2026-08-08. This is the check that catches one lens having been
   knocked, and it works because both look at the same board in the same light.
 * **The direction the number moves when you turn a lens.** That is what the
   readout is for. Already at a local maximum means focused.
 * **Not the absolute value against a remembered one.** Laplacian variance
-  scales with the square of scene contrast and depends on how large the board
-  sits in the frame, so it is only comparable within one session under one
-  light. The 3028 / 2945 recorded on 2026-08-06 describe that evening's lamp
-  and that evening's board distance, nothing more. Measured 2026-08-08 with
-  the board propped: 1035–1062 and 1066–1083, a factor of 2.8 lower and 2.4 %
-  apart — dimmer room, same relative agreement, no evidence of drift.
-
-If focus has drifted, the intrinsics moved with it and the archived `.npz`
-can no longer be trusted; that is a bigger job than this one and needs its own
-capture with full-frame coverage.
+  scales with the square of scene contrast and with how large the board sits
+  in the frame, so it is only comparable within one session under one light.
+  The 3028 / 2945 of 2026-08-06 and the 1050 / 1075 of 2026-08-08 are the same
+  lenses under different lamps.
 
 ### Conditions to aim for
 
@@ -65,138 +57,133 @@ capture with full-frame coverage.
 |---|---|
 | Board | `Software/CalibrateCameraDistortions/checkerboard.png`, 9×6 inner corners |
 | **Square size** | **24 mm, measured with a ruler** — pass `--square-mm 24.0` |
-| Distance | **30–90 cm, varied** — the widest spread you can reach |
+| Distance | **30–90 cm**, spread across the set |
 | Board | **standing, propped or leaned — not hand-held** |
-| Tilt | 20–45°, varied in direction, across the set |
-| Pairs | ~30, expecting 4–5 to be dropped |
+| Tilt | 20–45°, varied in direction |
+| Coverage | must include the **lower third of the frame** — see below |
+| Pairs | ~24 |
 | Exposure | 20 ms is fine once nothing moves |
-
-Two of these are the whole point of recapturing rather than reusing:
 
 **Standing, not hand-held.** The archived set was shot hand-held at 20 ms in a
 dim room and its per-image reprojection errors run from 0.19 to 3.30 px. With
-the board propped and the unit bolted to the floor, nothing moves and the
-exposure time stops mattering. This is the single largest improvement
-available, and it costs nothing.
+the board propped and the unit bolted down, nothing moves and the exposure time
+stops mattering.
 
-**30–90 cm, not 35–55.** A short depth range leaves the baseline loosely
-constrained — splitting the archived set in half gave 80.24 and 79.31 mm from
-the same hardware. Depth spread is what pins the translation down.
+**Depth spread is what pins the baseline.** Subsets of this set that contain
+the 25–90 cm sweep give a baseline of 78.2–78.5 mm; subsets built only from the
+45–55 cm shots give 81.0–81.7. The archive, which spanned only 35–55 cm, is
+loose for exactly this reason.
 
-The lower image *corners* are genuinely not worth chasing — floor off to the
-side, no ball crosses them, and the radial terms they would constrain sit at
-763 px from the principal point against the upper corners' 747, within 2 % of
-the same radius.
+**The lower third is not optional, and this is the lesson of this set.** The
+lower image *corners* really are pointless — floor off to the side, no ball
+crosses them, and their radii are within 2 % of the upper corners' anyway. But
+vertical coverage as a whole is what separates `cy` from the board's placement,
+and `cy` is what **pitch** is made of. Skipping it does not blur pitch, it
+biases it, and the reprojection error stays low while it happens. The first 18
+pairs of this set stopped at y = 641 of 800 and left pitch uncertain by 1.1°;
+the six shots that reached y = 727 cut that to 0.21°.
 
-**The lower frame as a whole is a different matter, and both sets so far have
-missed it.** Corners reach y = 636 in the archived set and y = 641 in the
-2026-08-08 one, out of 800 — the bottom fifth is empty in both. That is not a
-cosmetic gap. Vertical coverage is what separates `cy` from the board's
-vertical placement, and with one-sided coverage `cy` is free to drift: it came
-out 389.0 on the archive and 420.1 on the new set for the same untouched cam1
-lens, a 31 px swing.
+### The 24 shots, as taken
 
-`cy` is not a spectator here. The relative `cy` between the two cameras trades
-off directly against **pitch**, the angle this mount was rebuilt to null. The
-two intrinsic sets differ by 17.6 px in `cy1 - cy2`; 17.6 / 915 = 1.10°, and
-the two stereo solves differ in pitch by 1.09°. The pitch estimate is
-essentially a readout of an unmeasured `cy`.
+```
+Distance sweep, frontal:      01-07   25, 35, 45, 55, 65, 75, 90 cm
+Rotation about vertical:      08-09   50 cm, ±30°
+Rotation about horizontal:    10-11   50 cm, ±30°
+Image regions:                12-16   left/right top, top centre, left/right middle
+Combined tilt and roll:       17-18   50 cm, ~30°
+Lower frame, centre:          19-22   35, 45, 55, 75 cm
+Lower frame, left and right:  23-24   45 cm
+```
 
-So: reaching the lower frame is the one coverage question that matters, and it
-needs the unit aimed somewhere it currently cannot aim. The 90°-on-its-side
-trick under "if focus has drifted" is the way to get it.
+All 24 gave a board in both cameras. Shot 01 at 25 cm is at the geometric
+limit — the 80 mm baseline leaves only 27 mm of lateral play for a 240 mm
+board at that distance — and it was placed inside it, but the stereo solve
+drops it as an outlier anyway. 30 cm is the sensible floor.
 
 ### Analysing
 
-Not the dashboard's Run button. `/calibration/run` recomputes the intrinsics
-from whatever is in `cam1/`, `cam2/` and feeds those into the stereo solve,
-with no way to say "keep the measured ones". Against a set captured on the
-ground that means weakly-constrained distortion and principal point silently
-replacing good numbers. Capture on the dashboard, then solve here:
+Not the dashboard's Run button: `/calibration/run` writes no JSON, so the
+result stays in a browser window. Run both steps here.
 
 ```bash
 cd Software/CalibrateCameraDistortions
+SET=../../sp1_vision/calibration_images
 
-# intrinsics from the archived full-coverage set
-ARCHIVE=../../sp1_vision/calibration_images/2026-08-06_springs
-python3 CameraCalibration.py --images $ARCHIVE/cam1 --label 1 --save-npz /tmp/cam1.npz
-python3 CameraCalibration.py --images $ARCHIVE/cam2 --label 2 --save-npz /tmp/cam2.npz
+python3 CameraCalibration.py --images $SET/cam1 --label 1 --save-npz /tmp/cam1.npz \
+    --undistort-check /tmp/undistort_cam1.png
+python3 CameraCalibration.py --images $SET/cam2 --label 2 --save-npz /tmp/cam2.npz \
+    --undistort-check /tmp/undistort_cam2.png
 
-# extrinsics from the new set, intrinsics held fixed
 python3 StereoCalibration.py --cam1-npz /tmp/cam1.npz --cam2-npz /tmp/cam2.npz \
-    --cam1-images ../../sp1_vision/calibration_images/cam1 \
-    --cam2-images ../../sp1_vision/calibration_images/cam2 \
-    --square-mm 24.0 \
+    --cam1-images $SET/cam1 --cam2-images $SET/cam2 --square-mm 24.0 \
     --save-json ../../sp1_vision/calibration_results/stereo_extrinsics.json
 ```
 
-`CALIB_FIX_INTRINSIC` is what makes this legitimate: the camera matrices come
-from the `.npz` and only R and T are solved. Six parameters against 30 pairs ×
-54 points × 2 cameras is heavily overdetermined, which is why this set can
-afford to be weak where the archived one is strong.
+**Intrinsics and extrinsics must come from the same solve.** `CALIB_FIX_INTRINSIC`
+means the stereo step absorbs whatever error the camera matrices carry into R
+and T; the two are only self-consistent as a pair. Mixing one set's intrinsics
+with another's extrinsics is the one combination that is definitely wrong, and
+it looks fine in the reprojection error.
 
-### Reading the result
+## What came out — 2026-08-08, 24 pairs
 
-Expect the baseline near 79.8 mm again — it is a property of the printed part
-and the springs did not sit between the two lenses. A baseline that moved by
-more than a millimetre means something else changed, most likely the square
-size or a swapped USB cable, and should be understood before the numbers are
-believed.
+All 24 gave a board in both cameras; the stereo solve keeps 19. Depth 250–928 mm
+against the archive's 350–550, corner coverage y 45–727 of 800 against 71–636.
 
-The angles are the actual result. Against the old pitch 1.070°, yaw 0.756°,
-roll 0.925°: pitch and yaw should now be near zero if the rebuild did what it
-was meant to, and roll should be roughly unchanged, because roll is rotation
-about the optical axis and a tip/tilt mount never controlled it. Roll near a
-degree is not a defect and needs no mechanical fix — rectification absorbs it,
-and it stays well under the 3° at which it starts costing frame height.
+**Intrinsics**, now the authoritative ones and written into `golf_sim_config.json`:
 
-Check which angle is which against the JSON's own labels rather than from
-memory. `rotation_deg` in `calibration_results/stereo_extrinsics.json` names
-all three, and they have been transposed by one position before.
-
-## What came out — 2026-08-08, 18 pairs
-
-18 captured, board found in both cameras in all 18, one dropped by the stereo
-solve (`gs_01`, the 250 mm shot). Depth 250–928 mm, against the archive's
-350–550. Stereo RMS **0.9044 px**, against the archive's 1.1819.
-
-| | archive (springs) | this set |
+| | archive | **this set** |
 |---|---|---|
-| pitch about X | +1.070° | **−0.745°** |
-| yaw about Y | +0.756° | **+0.226°** |
-| roll about Z | +0.925° | **−0.700°** |
-| baseline | 79.83 mm | **78.59 mm** |
+| cam1 fx / fy | 922.30 / 917.97 | **900.38 / 897.39** |
+| cam2 fx / fy | 923.98 / 919.42 | **899.99 / 895.70** |
+| cam1 / cam2 cy | 389.05 / 393.50 | **420.05 / 421.09** |
+| focal length | 2.767 / 2.772 mm | **2.701 / 2.700 mm** |
+| reprojection RMS | 0.557 / 0.550 px | **0.500 / 0.519 px** |
 
-**Rotation is stable, and that is checked, not assumed.** Re-solving on halves,
-odds, evens and with the distance sweep held out moves pitch only between
-−0.72° and −0.83° and roll between −0.70° and −0.75°. Yaw is looser, −0.10° to
-+0.28°, which is tolerable: yaw is toe-in and gets absorbed as a horizontal
-offset.
+The reason to believe this set over the archive is not the RMS, which barely
+moved. It is that the two cameras now agree with each other: fx to 0.04 %
+(against 0.18 %) and cy to 1.0 px (against 4.5 px). They are the same part with
+the same lens, so agreement is evidence and disagreement was error.
 
-**The baseline is not stable, and the split says why.** Subsets that include
-the distance sweep give 78.2–78.5 mm; subsets built only from the 45–55 cm
-shots give 81.0–81.7. Depth spread is what constrains the translation, and
-without it the estimate wanders by 3 mm. Trust the depth-spanning number.
+**Extrinsics**, both sets re-solved against these intrinsics so the comparison
+is like for like:
 
-That has a consequence for the archive: its 79.83 mm came from a 350–550 mm
-set, exactly the narrow-depth condition that produces the 81 mm here. Its
-agreement with the CAD's 80.00 mm was probably luck. 78.59 against 80.00 is
-−1.8 %, which is ordinary print shrinkage for the part the mount is.
+| | with springs | **bolted** |
+|---|---|---|
+| pitch about X | +0.974° | **−0.923°** |
+| yaw about Y | +1.032° | **+0.427°** |
+| roll about Z | +0.757° | **−0.851°** |
+| baseline | 78.63 mm | **78.28 mm** |
 
-**Pitch carries an uncertainty the RMS does not show.** Solving the same 18
-pairs against the new set's own intrinsics instead of the archive's gives pitch
-−1.834° rather than −0.745°, at an identical RMS of 0.90. The data cannot
-choose between them. The cause is `cy`, as above: neither set covers the bottom
-fifth of the frame, `cy1 − cy2` differs by 17.6 px between the two intrinsic
-sets, and 17.6 / 915 = 1.10° — the whole discrepancy.
+Three things follow.
 
-Practically this splits in two:
+**The rebuild did not null pitch, it inverted it.** +0.97° to −0.92°: the plate
+swung through zero and landed almost symmetrically on the far side. Roll did
+the same, +0.76° to −0.85°. Only yaw genuinely improved, +1.03° to +0.43°.
 
-* **For the pipeline it is fine.** Archived intrinsics and the extrinsics
-  solved against them are a matched, self-consistent pair; rectification with
-  both works, because the `cy` error is absorbed into pitch and taken back out
-  by it. Do not mix intrinsics from one source with extrinsics from another.
-* **As a physical statement it does not hold.** "Pitch is −0.745°" is good to
-  about ±1°, so this set cannot confirm or refute that the rebuild nulled
-  pitch — and the old +1.070° carried the same uncertainty. Answering that
-  needs lower-frame coverage first.
+**The baseline never changed.** 78.63 with springs against 78.28 without, from
+the same intrinsics — 0.35 mm apart, which is the estimator's own noise. The
+apparent 79.83 → 78.59 drop reported earlier was an artefact of the archive's
+overestimated fx, not a physical shift. The mount is stable in the one
+dimension it had no reason to move in.
+
+**78.3 mm against the CAD's 80.00 is real, and is print shrinkage.** −2.1 %,
+ordinary for the part. The archive's 0.2 % agreement with the CAD was luck: it
+came from a 35–55 cm set, the narrow-depth condition that produces 81 mm here.
+
+Stability, to say how far these digits can be trusted — halves, odds, evens,
+with and without the six lower-frame shots:
+
+| | spread |
+|---|---|
+| pitch | −0.86° to −0.96° |
+| roll | −0.82° to −0.88° |
+| yaw | +0.36° to +0.47° |
+| baseline | 77.99 to 78.66 mm |
+
+The six lower-frame shots on their own give pitch −0.942° at an RMS of 0.425,
+the cleanest sub-solve in the set, and they agree with the full 24 to 0.02°.
+
+None of the angles is near the 3° at which rectification starts costing real
+frame height, so none of them needs a mechanical fix. Pitch and roll at ~0.9°
+cost about 1.5 % of frame height between them.

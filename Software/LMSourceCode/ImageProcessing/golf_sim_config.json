@@ -252,14 +252,14 @@
       ],
       "kCamera1CalibrationMatrix": [
         [
-          "922.303803134211",
+          "900.375560084984",
           "0.0",
-          "637.172301828044"
+          "635.096908084002"
         ],
         [
           "0.0",
-          "917.967004034412",
-          "389.047222705008"
+          "897.387429150186",
+          "420.048921344356"
         ],
         [
           "0.0",
@@ -269,14 +269,14 @@
       ],
       "kCamera1Contrast": "1.0",
       "kCamera1DistortionVector": [
-        "0.015081179198",
-        "-0.041262650346",
-        "-0.004509393678",
-        "-0.000005791513",
-        "0.007987586309"
+        "0.008554516946",
+        "-0.005966316760",
+        "0.002104237021",
+        "-0.002437562047",
+        "-0.087970856085"
       ],
-      "kCamera1FocalLength": "2.767",
-      "kExpectedBallRadiusPixelsAt40cmCamera1": "49",
+      "kCamera1FocalLength": "2.701",
+      "kExpectedBallRadiusPixelsAt40cmCamera1": "48",
       "kCamera1Gain": "2",
       "kCamera1Saturation": "1",
       "kCamera1HighFPSGain": "15.0",
@@ -295,14 +295,14 @@
       "kCamera2CalibrateOrLocationGain": "1.0",
       "kCamera2CalibrationMatrix": [
         [
-          "923.982509458566",
+          "899.988784896317",
           "0.0",
-          "634.649030632914"
+          "631.043045696175"
         ],
         [
           "0.0",
-          "919.419715274153",
-          "393.503788441184"
+          "895.703541404266",
+          "421.085785377524"
         ],
         [
           "0.0",
@@ -313,14 +313,14 @@
       "kCamera2ComparisonGain": "0.8",
       "kCamera2Contrast": "1.2",
       "kCamera2DistortionVector": [
-        "0.053438639224",
-        "-0.173558649179",
-        "-0.003964705067",
-        "-0.001624207143",
-        "0.184304707290"
+        "0.002061158049",
+        "-0.130768062755",
+        "0.006154690599",
+        "-0.004497920542",
+        "0.120316939867"
       ],
-      "kCamera2FocalLength": "2.772",
-      "kExpectedBallRadiusPixelsAt40cmCamera2": "49",
+      "kCamera2FocalLength": "2.700",
+      "kExpectedBallRadiusPixelsAt40cmCamera2": "48",
       "kCamera2Gain": "6.0",
       "kCamera2Saturation": "1",
       "kCamera2OffsetFromCamera1OriginMeters": [
