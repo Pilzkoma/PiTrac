@@ -34,12 +34,26 @@ per shot, so an unusable frame surfaces while the board is still in front of
 you rather than twenty shots later.
 
 Before the first shot, check focus **on the dashboard's sharpness readout,
-with the board in view and `on_board` true.** Both cameras should read near
-3000 and within about 3 % of each other, as on 2026-08-06. Do not use
+with the board in view and `on_board` true.** Do not use
 `cli_calibrate.py --focus` for this — it calls `sharpness_score`, the centred
 ROI, and will happily report the texture of the wall behind a board held low
 in the frame. That is exactly how a 5.4x focus error stayed hidden once
 already.
+
+Two things to read from it, and one not to:
+
+* **The two cameras against each other.** They were within 3 % on 2026-08-06
+  and should still be. This is the check that catches one lens having been
+  knocked, and it works because both look at the same board in the same light.
+* **The direction the number moves when you turn a lens.** That is what the
+  readout is for. Already at a local maximum means focused.
+* **Not the absolute value against a remembered one.** Laplacian variance
+  scales with the square of scene contrast and depends on how large the board
+  sits in the frame, so it is only comparable within one session under one
+  light. The 3028 / 2945 recorded on 2026-08-06 describe that evening's lamp
+  and that evening's board distance, nothing more. Measured 2026-08-08 with
+  the board propped: 1035–1062 and 1066–1083, a factor of 2.8 lower and 2.4 %
+  apart — dimmer room, same relative agreement, no evidence of drift.
 
 If focus has drifted, the intrinsics moved with it and the archived `.npz`
 can no longer be trusted; that is a bigger job than this one and needs its own
