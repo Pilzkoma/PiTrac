@@ -83,11 +83,28 @@ available, and it costs nothing.
 constrained — splitting the archived set in half gave 80.24 and 79.31 mm from
 the same hardware. Depth spread is what pins the translation down.
 
-Not worth chasing: board coverage of the lower image corners. Those are floor
-off to the side, no ball ever crosses them, and the radial terms they would
-constrain are already measured — the upper corners sit at 747 px from the
-principal point against the lower corners' 763, within 2 % of the same radius.
-The lower *centre* is worth reaching, because that is where the ball rests.
+The lower image *corners* are genuinely not worth chasing — floor off to the
+side, no ball crosses them, and the radial terms they would constrain sit at
+763 px from the principal point against the upper corners' 747, within 2 % of
+the same radius.
+
+**The lower frame as a whole is a different matter, and both sets so far have
+missed it.** Corners reach y = 636 in the archived set and y = 641 in the
+2026-08-08 one, out of 800 — the bottom fifth is empty in both. That is not a
+cosmetic gap. Vertical coverage is what separates `cy` from the board's
+vertical placement, and with one-sided coverage `cy` is free to drift: it came
+out 389.0 on the archive and 420.1 on the new set for the same untouched cam1
+lens, a 31 px swing.
+
+`cy` is not a spectator here. The relative `cy` between the two cameras trades
+off directly against **pitch**, the angle this mount was rebuilt to null. The
+two intrinsic sets differ by 17.6 px in `cy1 - cy2`; 17.6 / 915 = 1.10°, and
+the two stereo solves differ in pitch by 1.09°. The pitch estimate is
+essentially a readout of an unmeasured `cy`.
+
+So: reaching the lower frame is the one coverage question that matters, and it
+needs the unit aimed somewhere it currently cannot aim. The 90°-on-its-side
+trick under "if focus has drifted" is the way to get it.
 
 ### Analysing
 
@@ -136,3 +153,50 @@ and it stays well under the 3° at which it starts costing frame height.
 Check which angle is which against the JSON's own labels rather than from
 memory. `rotation_deg` in `calibration_results/stereo_extrinsics.json` names
 all three, and they have been transposed by one position before.
+
+## What came out — 2026-08-08, 18 pairs
+
+18 captured, board found in both cameras in all 18, one dropped by the stereo
+solve (`gs_01`, the 250 mm shot). Depth 250–928 mm, against the archive's
+350–550. Stereo RMS **0.9044 px**, against the archive's 1.1819.
+
+| | archive (springs) | this set |
+|---|---|---|
+| pitch about X | +1.070° | **−0.745°** |
+| yaw about Y | +0.756° | **+0.226°** |
+| roll about Z | +0.925° | **−0.700°** |
+| baseline | 79.83 mm | **78.59 mm** |
+
+**Rotation is stable, and that is checked, not assumed.** Re-solving on halves,
+odds, evens and with the distance sweep held out moves pitch only between
+−0.72° and −0.83° and roll between −0.70° and −0.75°. Yaw is looser, −0.10° to
++0.28°, which is tolerable: yaw is toe-in and gets absorbed as a horizontal
+offset.
+
+**The baseline is not stable, and the split says why.** Subsets that include
+the distance sweep give 78.2–78.5 mm; subsets built only from the 45–55 cm
+shots give 81.0–81.7. Depth spread is what constrains the translation, and
+without it the estimate wanders by 3 mm. Trust the depth-spanning number.
+
+That has a consequence for the archive: its 79.83 mm came from a 350–550 mm
+set, exactly the narrow-depth condition that produces the 81 mm here. Its
+agreement with the CAD's 80.00 mm was probably luck. 78.59 against 80.00 is
+−1.8 %, which is ordinary print shrinkage for the part the mount is.
+
+**Pitch carries an uncertainty the RMS does not show.** Solving the same 18
+pairs against the new set's own intrinsics instead of the archive's gives pitch
+−1.834° rather than −0.745°, at an identical RMS of 0.90. The data cannot
+choose between them. The cause is `cy`, as above: neither set covers the bottom
+fifth of the frame, `cy1 − cy2` differs by 17.6 px between the two intrinsic
+sets, and 17.6 / 915 = 1.10° — the whole discrepancy.
+
+Practically this splits in two:
+
+* **For the pipeline it is fine.** Archived intrinsics and the extrinsics
+  solved against them are a matched, self-consistent pair; rectification with
+  both works, because the `cy` error is absorbed into pitch and taken back out
+  by it. Do not mix intrinsics from one source with extrinsics from another.
+* **As a physical statement it does not hold.** "Pitch is −0.745°" is good to
+  about ±1°, so this set cannot confirm or refute that the rebuild nulled
+  pitch — and the old +1.070° carried the same uncertainty. Answering that
+  needs lower-frame coverage first.
