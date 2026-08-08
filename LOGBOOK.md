@@ -336,7 +336,7 @@ IMPORTANT RULES FOR THIS CHAT:
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
-|Last Updated|2026-08-07|
+|Last Updated|2026-08-09|
 
 \---
 
@@ -471,6 +471,14 @@ PiTrac's key techniques:
 |2026-08-06|Thermal drift of the printed mount|Split the 20 pairs into cooler (1-10) and warmer (11-20) halves and solved each separately|✅ PASS|Pitch 1.086 vs 1.088°, roll 0.926 vs 0.917° — **identical to 0.01°**, and those two are precisely the ones that produce vertical disparity. Baseline differs by 0.93 mm, but with the wrong sign for thermal expansion and seven times the magnitude plastic gives, so it is estimation noise from 10 pairs over only 35-55 cm of depth. No compensation warranted.|
 |2026-08-06|Measured optics take effect at runtime|`pitrac_lm --logging_level=trace` after writing the config and rebuilding|✅ PASS|`Overriding sensor size with 3.840000 x 2.400000 mm (was 5.077365 x 3.789079)`; matrix `[922.30, 0, 637.17; 0, 917.97, 389.05; 0, 0, 1]`; `Setting focal length (from JSON file) = 2.767000`; `kExpectedBallRadiusPixelsAt40cmCamera1 = 49` — that last override taking effect for the first time ever, the old key lacked the CameraN suffix and fell back silently to the IMX296's 87.|
 |2026-08-07|Calibration reproduces from the committed images|Re-ran both scripts against the 40 PNGs restored out of git|✅ PASS|Bit-identical: 2.767 / 2.772 mm, RMS 0.557 / 0.550, baseline 79.83 mm, same angles. The archive is reproducible, not merely stored.|
+|2026-08-08|Focus unchanged after the mount rebuild|Dashboard `/calibration/sharpness` with the board propped, seven samples|✅ PASS|cam1 1035–1062, cam2 1066–1083, **2.4 % apart** against 3 % on 2026-08-06. The absolute drop from ~3000 is the room, not the lens: Laplacian variance scales with the square of scene contrast. Relative agreement is the only cross-session-valid reading, and it says no lens moved.|
+|2026-08-08|Recapture, 24 pairs, board standing|Dashboard capture; 25–90 cm sweep, ±30° rotations, image regions, and six shots into the lower third|✅ PASS|Board found in both cameras in **all 24**. Depth 250–928 mm against the archive's 350–550; corner coverage y 45–727 of 800 against 71–636. Nothing hand-held, so the 20 ms exposure costs nothing — the archive's 0.19–3.30 px spread was all motion blur.|
+|2026-08-08|Pitch is a readout of `cy` — found, then fixed|Solved the same pairs against two different intrinsic sets and compared|⚠️ FOUND|At 18 pairs the two sets gave pitch −0.745° and −1.834° **at an identical RMS of 0.90**: the data could not choose. Cause is `cy`, unconstrained because neither set covered the bottom fifth. `Δ(cy1−cy2)` = 17.6 px, 17.6/915 = 1.10° against an observed 1.09° gap. Six shots into the lower third cut the ambiguity to **0.21°**, and `cy` converged to 420.05 / 421.09 — 1.0 px apart, from 13.2.|
+|2026-08-08|Intrinsics remeasured, and they replace the archive's|`CameraCalibration.py` over all 24|✅ PASS|**2.701 / 2.700 mm** against 2.767 / 2.772; fx 900.38 / 899.99; cy 420.05 / 421.09; RMS **0.500 / 0.519** against 0.557 / 0.550. The case is not the RMS but inter-camera agreement: fx to **0.04 %** against 0.18 %, cy to 1.0 px against 4.5. Same part, same lens — agreement is evidence.|
+|2026-08-08|Extrinsics after the rebuild, both sets on equal footing|`StereoCalibration.py`, `CALIB_FIX_INTRINSIC`, both capture sets re-solved against the 24-pair intrinsics|✅ PASS|Pitch **+0.974 → −0.923°**, yaw **+1.032 → +0.427°**, roll **+0.757 → −0.851°**. The rebuild *inverted* pitch and roll rather than nulling them; only yaw improved. All well under 3°, ~1.5 % of frame height in total — no mechanical action.|
+|2026-08-08|Baseline did not move, and the earlier "drop" was an artefact|Same two sets, same intrinsics|✅ PASS|78.63 mm with springs against **78.28 mm** bolted — 0.35 mm, the estimator's own noise. The reported 79.83 → 78.59 was the archive's overestimated fx, not hardware. Remaining −2.1 % against the CAD's 80.00 is print shrinkage; the archive's celebrated 0.2 % agreement came from a 35–55 cm set, and that same narrow-depth condition yields 81 mm here.|
+|2026-08-08|Estimate stability, seven ways|Re-solved on halves, odds, evens, with and without the six lower-frame shots|✅ PASS|Pitch −0.86…−0.96°, roll −0.82…−0.88°, yaw +0.36…+0.47°, baseline 77.99…78.66 mm. The six lower-frame shots alone give pitch −0.942° at RMS 0.425, the cleanest sub-solve, agreeing with all 24 to 0.02°.|
+|2026-08-09|New optics reach the C++ at runtime|`pitrac_lm --system_mode=camera1_test_standalone --logging_level=trace --msg_broker_address=tcp://127.0.0.1:61616`|✅ PASS|`Setting focal length (from JSON file) = 2.701000`; matrix `[900.375560084984, 0, 635.0969080840021; 0, 897.387429150186, 420.048921344356]`; `Overriding sensor size with 3.840000 x 2.400000 mm`; `kExpectedBallRadiusPixelsAt40cmCamera1 = 48`. `~/.pitrac/config/user_settings.json` does not exist, so nothing shadows the JSON. **Note the broker argument** — `kWebActiveMQHostAddress` is not in the config at all, and without `--msg_broker_address` the run aborts in IPC init and segfaults on the way out.|
 
 \---
 
@@ -499,11 +507,14 @@ PiTrac's key techniques:
 * ☑ V4L2Capture::ensure_streaming() failure-path fd leak fixed 2026-05-05 (Issue #17 resolved)
 * ☑ motion_detect_stage CV_8UC1/CV_8UC3 byte-step assumption fixed 2026-05-05 (Issue #18 resolved) — derives `hskip_bytes = config_.hskip * frame.channels()` under JETSON_BUILD, used in all 4 pointer-arithmetic spots
 * ☑ Cameras mounted in the enclosure, 80.00 mm baseline, axes parallel (2026-08-06)
-* ☑ **Calibration done 2026-08-06/07.** Own tooling built (dashboard page + CLI), not PiTrac's scripts — theirs depend on `rpicam-still` and `libcamera-hello`, neither of which exists here. 20 simultaneous pairs, focal length 2.767/2.772 mm, sensor 3.840x2.400 mm, baseline 79.83 mm against 80.00 from the CAD, reprojection RMS 0.56 px. Written into `golf_sim_config.json` and the sensor override, verified in a live trace run.
+* ☑ **Calibration done 2026-08-06/07, redone and superseded 2026-08-08/09.** Own tooling built (dashboard page + CLI), not PiTrac's scripts — theirs depend on `rpicam-still` and `libcamera-hello`, neither of which exists here. Current numbers come from 24 pairs after the mount rebuild: focal length **2.701/2.700 mm**, fx 900.38/899.99, cy 420.05/421.09, sensor 3.840x2.400 mm, reprojection RMS **0.500/0.519 px**, baseline **78.28 mm**. In `golf_sim_config.json`, verified in a live trace run 2026-08-09. The 2026-08-06 set is archived under `sp1_vision/calibration_images/2026-08-06_springs/` and is superseded on every figure — see its README for why.
+* ☑ **Mount springs removed and the plate bolted solid (2026-08-08).** Aim is no longer adjustable; changing it is a rework that drags a full recalibration behind it. The rebuild **inverted** pitch and roll rather than nulling them (+0.974 → −0.923°, +0.757 → −0.851°); only yaw improved (+1.032 → +0.427°). All under 3°, ~1.5 % of frame height in total, so rectification absorbs it and no further mechanical work is warranted.
+* ☑ **Baseline settled at 78.28 mm, and it never moved.** Both capture sets solved against the same intrinsics agree to 0.35 mm. The 2026-08-06 figure of 79.83 mm was an artefact of that set's overestimated fx, and its 0.2 % agreement with the CAD's 80.00 was luck from a narrow 35–55 cm depth range. The real −2.1 % against the CAD is print shrinkage.
+* ☑ **Calibration coverage rule learned the hard way:** the lower third of the frame is not optional. It is what constrains `cy`, and `cy` is what pitch is made of. Omitting it does not blur pitch, it biases it, and the reprojection error stays low throughout. Cost 1.1° of pitch until six extra shots fixed it.
 * ☑ `undistort_camera_image` question resolved — and the 2026-04-29 note was wrong. It was **not** a no-op: `use_undistortion_matrix_` was true because the config carried PiTrac's IMX296 matrix, so every still from `TakeRawPicture` (the path `CheckForBall` uses) was remapped through the wrong lens model. Now carries the measured one.
 * ☑ Cameras bound by USB port path in Python and C++ — both modules report the same iSerial, so `/dev/videoN` is not an identity. cam1 = port 2.3 = left module facing the unit, established by covering a lens and independently by parallax.
 * ☑ Thermal drift measured by splitting the capture set into cooler/warmer halves: pitch and roll identical to 0.01°, baseline spread is estimation noise (wrong sign for expansion, 7x too large). No compensation needed.
-* ☐ **Working distance: 50 cm decided, not yet built into the geometry config.** `kCameraNPositionsFromOriginMeters` and `kCameraNAngles` still hold PiTrac's numbers. Ball radius at 50 cm is 39 px, depth precision ~1.7 mm.
+* ☐ **Working distance: 50 cm decided, not yet built into the geometry config.** `kCameraNPositionsFromOriginMeters` and `kCameraNAngles` still hold PiTrac's numbers. With the 2026-08-08 optics: ball radius at 50 cm is 38 px, disparity 141 px, and depth resolution 3.55 mm per pixel of disparity error — so ~1.8 mm at half-pixel matching.
 * ☐ `WaitForCam2Trigger` still a JETSON_STUB returning false. UVC exposes no trigger pin (confirmed: no such control in `v4l2-ctl --list-ctrls`), so this needs a different mechanism, not a translation. `exposure_absolute` reaches 500 ms, which makes "open a long exposure and fire the strobe into it" the obvious candidate.
 * ☐ Triangulation not implemented. Extrinsics are measured and saved in `sp1_vision/calibration_results/stereo_extrinsics.json`, but nothing consumes them — the ball-position path is still PiTrac's monocular radius method, which is roughly an order of magnitude worse at these distances.
 * ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → strobe-lit shot capture → shot data → SP4 GSPro JSON)
@@ -1223,6 +1234,106 @@ PiTrac's key techniques:
 > bedingungen und Schwächen der Serie. Reproduktion aus git verifiziert:
 > identische Zahlen. Extrinsics in sp1_vision/calibration_results/.
 
+**2026-08-08/09 — Federn raus, alles neu vermessen. Der RMS hat gelogen.**
+
+> Die Federn hinter der Kamerahalterung sind entfernt und die Platte ist fest
+> verschraubt. Damit sind die Extrinsics vom 06.08. hinfällig — die Pose der
+> beiden Kameras zueinander hat sich geändert — und ein neuer Bildsatz war
+> fällig. Die Intrinsics sollten stehen bleiben: es wurde kein Objektiv
+> angefasst. Am Ende sind sie es, die ausgetauscht wurden.
+>
+> **Erst die Falle, die keiner gesehen hätte.** Beide Aufnahmewege schreiben
+> nach `calibration_images/cam1|cam2` und nummerieren hinter das, was schon da
+> liegt — `_pair_count() + 1` im Dashboard, `existing` in der CLI, und
+> `IMAGE_ROOT` im Dashboard ist fest verdrahtet. Neue Aufnahmen wären neben die
+> alten zwanzig gefallen, und die Auswertung liest das ganze Verzeichnis: ein
+> Stereo-Solve, der zwei Mount-Geometrien mittelt, mit einer plausiblen Zahl am
+> Ende und nichts, was den Fehler zeigt. Alter Satz also erst nach
+> `2026-08-06_springs/` verschoben.
+>
+> **Der eigentliche Befund kam aus einem Gegentest, nicht aus einer Zahl.**
+> Nach 18 Paaren stand pitch bei −0.745°. Gerechnet gegen die Intrinsics des
+> neuen Satzes statt gegen die archivierten: **−1.834°, bei identischem RMS von
+> 0.90.** Die Daten konnten zwischen den beiden nicht entscheiden — und der
+> Reprojektionsfehler, das Maß, dem man hier üblicherweise glaubt, war für den
+> Unterschied vollkommen blind.
+>
+> Ursache ist `cy`. Kein Satz hatte je das untere Fünftel des Bildes belegt
+> (Ecken endeten bei y=636 bzw. 641 von 800), und ohne vertikale Abdeckung ist
+> der Hauptpunkt kaum bestimmt: für dasselbe unangetastete cam1-Objektiv kam
+> einmal 389.0 und einmal 420.1 heraus. Zwischen den Sätzen unterscheidet sich
+> `cy1 − cy2` um 17.6 px, und 17.6/915 = 1.10° gegen eine beobachtete
+> pitch-Differenz von 1.09. **Nicken war zu großen Teilen ein Ableseinstrument
+> für einen ungemessenen Hauptpunkt.**
+>
+> Sechs Aufnahmen ins untere Drittel (Mitte bei 35/45/55/75 cm, links und
+> rechts bei 45) haben es erledigt. Abdeckung bis y=727, `cy` konvergiert auf
+> 420.05 / 421.09 — 1.0 px auseinander statt 13.2 — und die Mehrdeutigkeit
+> fällt von 1.09° auf 0.21°.
+>
+> **Merksatz fürs nächste Mal:** das untere Drittel ist nicht optional. Ich
+> hatte das Gegenteil behauptet, mit der Begründung, dass dort kein Ball
+> fliegt und die radialen Terme symmetrisch sind. Beides stimmt und beides ist
+> daneben — es geht um `cy`, und `cy` ist der Stoff, aus dem Nicken besteht.
+> Weglassen verrauscht die Schätzung nicht, es verzerrt sie, und der RMS bleibt
+> dabei ruhig.
+>
+> **Die Intrinsics haben deshalb die Quelle gewechselt.** 2.701/2.700 mm gegen
+> 2.767/2.772, fx 900.38/899.99 gegen 922.30/923.98, RMS 0.500/0.519 gegen
+> 0.557/0.550. Das Argument ist nicht der RMS, der kaum sinkt, sondern dass die
+> **beiden Kameras jetzt übereinstimmen**: fx auf 0.04 % gegen vorher 0.18 %,
+> cy auf 1.0 px gegen 4.5. Gleiches Bauteil, gleiches Objektiv — Übereinstimmung
+> ist Evidenz, die Abweichung war Fehler.
+>
+> **Vorher/Nachher, beide Sätze gegen dieselben Intrinsics gerechnet:**
+>
+> | | mit Federn | verschraubt |
+> |-|-|-|
+> | Nicken | +0.974° | **−0.923°** |
+> | Gieren | +1.032° | **+0.427°** |
+> | Rollen | +0.757° | **−0.851°** |
+> | Basislinie | 78.63 mm | **78.28 mm** |
+>
+> Der Umbau hat Nicken und Rollen **umgedreht statt genullt** — durch die Null
+> hindurch auf fast denselben Betrag der anderen Seite. Nur Gieren hat sich
+> echt halbiert. Wer wieder an den Mount geht: es war Überschuss, nicht
+> Rückstand. Bei unter 3° und zusammen ~1.5 % Bildhöhe lohnt es aber nicht,
+> zumal die Platte jetzt verschraubt ist und jede Korrektur eine komplette
+> Neukalibrierung nach sich zöge.
+>
+> **Und die Basislinie hat sich nie bewegt.** 78.63 gegen 78.28 aus gleichen
+> Intrinsics ist das Eigenrauschen der Schätzung. Der zwischenzeitlich
+> gemeldete Abfall 79.83 → 78.59 war ein Artefakt der zu großen fx im Archiv,
+> keine Hardware. Unangenehmer ist die Rückwirkung: die gefeierten 0.2 %
+> Übereinstimmung des Archivs mit den 80.00 aus dem CAD waren Glück. Sie kamen
+> aus 35–55 cm Tiefe, und genau diese enge Bedingung liefert im neuen Satz
+> 81 mm. Die echten −2.1 % gegen das CAD sind Druckschrumpf.
+>
+> **Tiefenspreizung ist das, was die Translation festnagelt.** Teilmengen mit
+> der 25–90-cm-Reihe: 78.2–78.5 mm. Teilmengen nur aus den 45–55-cm-Aufnahmen:
+> 81.0–81.7. Die sieben Abstandsaufnahmen waren die wertvollsten im Satz.
+>
+> **Stabilität**, über Hälften, gerade, ungerade, mit und ohne die sechs neuen:
+> Nicken −0.86…−0.96°, Rollen −0.82…−0.88°, Gieren +0.36…+0.47°, Basislinie
+> 77.99…78.66 mm. Die sechs neuen allein: Nicken −0.942° bei RMS 0.425, der
+> sauberste Teil-Solve überhaupt, auf 0.02° mit allen 24 übereinstimmend.
+>
+> **Aufnahmemethode.** Brett gestellt statt gehalten, Gerät verschraubt am
+> Boden — nichts bewegt sich, und damit ist die Belichtungszeit gleichgültig.
+> Die 0.19–3.30 px Streuung des alten Satzes war vollständig Verwacklung. 24
+> Paare, alle mit Brett in beiden Kameras, keine Wiederholung nötig. Die
+> 25-cm-Aufnahme liegt an der geometrischen Grenze — 80 mm Basislinie lassen
+> einem 240-mm-Brett dort 27 mm seitliches Spiel — sie passte, wird vom Solve
+> aber trotzdem als Ausreißer verworfen. 30 cm ist die sinnvolle Untergrenze.
+>
+> **Nebenbei zwei Werkzeugmängel.** Die Schärfeanzeige der CLI (`--focus`) misst
+> weiter die Bildmitte statt des erkannten Bretts, anders als das Dashboard —
+> also genau die Anzeige, die schon einmal einen 5.4x-Fokusfehler verdeckt hat.
+> Und `kWebActiveMQHostAddress` steht überhaupt nicht in der Config: ohne
+> `--msg_broker_address` bricht `pitrac_lm` in der IPC-Initialisierung ab und
+> segfaultet beim Herunterfahren. Mit dem Argument läuft der Trace sauber und
+> bestätigt Brennweite 2.701, Matrix, Sensorüberschreibung und Ballradius 48.
+
 \---
 
 \---
@@ -1659,5 +1770,5 @@ At the end of our session, tell me exactly what to update in my logbook.
 
 \---
 
-*Last updated: 2026-08-07 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
+*Last updated: 2026-08-09 | Logbook version: 1.0 | Project: DIY Jetson Golf Launch Monitor*
 
