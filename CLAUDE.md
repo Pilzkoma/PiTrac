@@ -13,9 +13,16 @@ hardware, they get changed.
 ## Target hardware
 - NVIDIA Jetson Xavier NX (JetPack 5.1.6, Ubuntu 20.04, CUDA 11.4, OpenCV 4.5.4)
 - 2x Arducam B0332 OV9281 mono global shutter, **USB 2.0 UVC**, 70°(H) low-distortion
-  M12 lens (≈2.7 mm, interchangeable but staying). 1280x800 @ 120 FPS MJPG measured.
-- Cameras mounted **side by side, 80.00 mm baseline**, optical axes parallel at rest,
-  each on a 3-point spring/screw kinematic mount so angles stay adjustable.
+  M12 lens (**measured 2.767 / 2.772 mm**, interchangeable but staying, focus adjustable
+  by screwing the lens). 1280x800 @ 120 FPS MJPG measured.
+- Cameras mounted **side by side, 80.00 mm baseline** (measured 79.83), optical axes
+  parallel. **The mount is no longer adjustable:** the 3-point spring/screw kinematic
+  mount was stripped of its springs on 2026-08-08 and the plate bolted down solid, to
+  take pitch and yaw out. Changing the aim is now a rework, not a turn of a screw —
+  and it invalidates the stereo extrinsics, so it drags a recalibration with it.
+- The unit sits on the floor. The lower image corners cannot be reached with a
+  calibration board and are not worth reaching; see
+  `sp1_vision/calibration_images/README.md`.
 - 850nm IR LED array (Cenpek) + Teensy 4.0 strobe controller + IRLZ44N MOSFET,
   fired from Jetson Pin 29 (PQ.05)
 - No LiDAR in v1 — camera-only trigger
@@ -80,7 +87,19 @@ viable and roughly an order of magnitude more accurate at these distances.
    The IR array is event-driven, so stabilization frames are always ambient-lit.
 
 ## Current task
-SP1 calibration. Cameras are mounted and the geometry is fixed; measuring the real
-intrinsics (the 2.7 mm figure is derived from the 70° spec, not measured) before
-touching any geometry or focal-length config. Checkerboard shots are taken as
-simultaneous pairs so the same data also yields stereo extrinsics.
+SP1 calibration, second pass. The intrinsics are measured and live in
+`golf_sim_config.json` (2.767 / 2.772 mm, sensor 3.840 x 2.400 mm) and they still
+stand — no lens was touched. What is stale is the stereo extrinsics: removing the
+mount springs moved the two cameras relative to each other.
+
+So this pass re-measures **only** R and T. New pairs go into
+`sp1_vision/calibration_images/cam1|cam2`; the old set is archived under
+`2026-08-06_springs/` and remains the source of the intrinsics, because it has the
+full-frame board coverage this one cannot get with the unit on the floor. Solve
+with `StereoCalibration.py --cam1-npz/--cam2-npz` against the archived set, not
+with the dashboard's Run button, which would recompute the intrinsics from the
+weaker data. The operating detail is in `sp1_vision/calibration_images/README.md`.
+
+After that, the next SP1 items are the world geometry
+(`kCameraNPositionsFromOriginMeters`, `kCameraNAngles`, still PiTrac's numbers at
+a decided 50 cm working distance) and triangulation, which nothing consumes yet.
