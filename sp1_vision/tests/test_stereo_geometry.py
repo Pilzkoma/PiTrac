@@ -118,6 +118,24 @@ class ValidateRigTest(unittest.TestCase):
         with self.assertRaises(stereo_geometry.StereoRigError):
             stereo_geometry.validate_rig(stereo_geometry.load_rig(self.ext, self.cfg))
 
+    def test_rejects_wrong_image_size(self):
+        # The intrinsics were solved at (1280, 800). A different image size
+        # means the intrinsics don't match the hardware, so the rig is broken.
+        write_extrinsics(self.ext)
+        write_config(self.cfg)
+        rig = stereo_geometry.load_rig(self.ext, self.cfg)
+        # Manually change the image size to the old IMX296 resolution
+        rig.image_size = (1456, 1088)
+        with self.assertRaises(stereo_geometry.StereoRigError):
+            stereo_geometry.validate_rig(rig)
+
+    def test_rejects_baseline_above_maximum(self):
+        # A baseline above the maximum indicates a wrong scale or file source.
+        # This tests the upper bound, complementing the lower-bound test.
+        write_extrinsics(self.ext, translation_mm=(95.0, 0.0, 0.0))
+        with self.assertRaises(stereo_geometry.StereoRigError):
+            stereo_geometry.validate_rig(stereo_geometry.load_rig(self.ext, self.cfg))
+
 
 if __name__ == "__main__":
     unittest.main()
