@@ -135,23 +135,34 @@ def depth_sensitivity_mm_per_px(rig, depth_m):
     """How much depth error one pixel of disparity error buys, in mm.
 
     Z^2 / (b * f), so it grows as the square of depth and no one number
-    covers the 350-700 mm series. Two get quoted, and they differ only in
-    which distance is put in:
+    covers the 350-700 mm series. The figure at the working distance is
+    3.53 mm/px, at Z = 0.500 m. Every distance the project owner supplied
+    was measured in the vertical plane - the long cathetus from the lens
+    plane to the ball, not the hypotenuse from camera to ball - so 500 mm
+    is the horizontal leg, and because the unit stands level the optical
+    axis is horizontal and that leg IS the ball's Z coordinate. It is the
+    depth this formula wants, unmodified. This is what the analysis prints
+    in its rig header.
 
-      3.53 mm/px at 0.500 m - the DEPTH of a ball at the decided working
-                   distance, i.e. its Z coordinate. This is the argument
-                   the formula actually takes, and what the analysis prints
-                   in its rig header.
-      3.65 mm/px at 0.5087 m - the straight-line RANGE to that same ball's
-                   centre, which sits 93.7 mm below the optical axis:
-                   sqrt(0.500^2 + 0.0937^2). This is the figure quoted in
-                   the spec and in this file's tests.
+    3.65 mm/px is NOT a second valid reading of the same geometry. It came
+    from putting 508.7 mm - the straight-line RANGE to the ball's centre,
+    sqrt(0.500^2 + 0.0937^2) - into a formula that takes a depth. It
+    answers "what if the ball's depth were 508.7 mm", which it is not. The
+    number survives in the spec and in this file's own unit test, where it
+    is correct arithmetic on a stated input and is left alone; read it as
+    an error carried forward, not as an alternative convention, and do not
+    reconcile the two by adopting it.
 
-    The same geometry read two ways, not a disagreement - though 3.53 is
-    the one that answers "how much depth error does a pixel buy", since Z
-    here means depth. Halve either for the roughly half-pixel matching the
-    detector achieves: that is what sets what counts as agreement with a
-    tape measure.
+    508.7 mm is not a useless quantity - it is the RIGHT one for
+    kCameraNPositionsFromExpectedBallMeters, which is consumed as an
+    expected line-of-sight distance to seed the ball-search radius prior:
+    apparent radius scales with true 3D distance, not with depth. Do not
+    "correct" that constant to 500 mm on the strength of this docstring.
+    The two constants want two different distances to the same ball.
+
+    Halve the result for the roughly half-pixel matching the detector
+    achieves: that is what sets what counts as agreement with a tape
+    measure.
     """
     depth = float(depth_m)
     if depth <= 0.0:

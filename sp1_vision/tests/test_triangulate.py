@@ -134,8 +134,17 @@ class ReprojectionErrorTest(unittest.TestCase):
 
 
 class DepthSensitivityTest(unittest.TestCase):
-    def test_matches_the_hand_computed_figure_at_the_working_distance(self):
+    def test_matches_the_hand_computed_figure_for_its_stated_input(self):
         # Z^2 / (b * f) = 0.5087^2 / (0.07872 * 900) = 3.65 mm per pixel.
+        #
+        # 0.5087 m is NOT our working depth, and this test does not claim it
+        # is. It is the straight-line range to a ball centre 500 mm out and
+        # 93.7 mm below the axis, and putting a range into a formula that
+        # takes a depth is the error the docstring now records. The
+        # arithmetic below is correct for the input it states, so it stays
+        # as an exact check on the formula; the working-distance figure is
+        # 3.53 mm/px at Z = 0.500 m, asserted where the analysis prints it
+        # in test_cli_triangulate.
         rig = make_rig()
         self.assertAlmostEqual(
             triangulate.depth_sensitivity_mm_per_px(rig, 0.5087), 3.65, delta=0.05)
