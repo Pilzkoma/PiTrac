@@ -96,5 +96,39 @@ class FindBoardTest(unittest.TestCase):
         np.testing.assert_allclose(corners_colour, corners_gray, atol=1e-6)
 
 
+class FindBallTest(unittest.TestCase):
+    """One ball, found the same way in both images of a pair."""
+
+    def _frame_with_ball(self, cx, cy, r):
+        # Dark background, bright disc - the IR-lit case the detector meets.
+        frame = np.zeros((800, 1280), dtype=np.uint8)
+        cv2.circle(frame, (cx, cy), r, 255, -1)
+        return cv2.GaussianBlur(frame, (5, 5), 0)
+
+    def test_finds_a_ball_near_its_true_centre(self):
+        found, circle = frame_analysis.find_ball(self._frame_with_ball(700, 520, 38))
+        self.assertTrue(found)
+        u, v, r = circle
+        self.assertAlmostEqual(u, 700, delta=3)
+        self.assertAlmostEqual(v, 520, delta=3)
+        self.assertAlmostEqual(r, 38, delta=5)
+
+    def test_reports_absence_rather_than_guessing(self):
+        found, circle = frame_analysis.find_ball(np.zeros((800, 1280), dtype=np.uint8))
+        self.assertFalse(found)
+        self.assertIsNone(circle)
+
+    def test_accepts_colour_frames_like_find_board(self):
+        gray = self._frame_with_ball(640, 400, 30)
+        colour = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        self.assertTrue(frame_analysis.find_ball(colour)[0])
+
+    def test_radius_bounds_are_honoured(self):
+        # A 38 px ball must not be reported when only 50-70 px is allowed.
+        found, _ = frame_analysis.find_ball(
+            self._frame_with_ball(700, 520, 38), min_radius=50, max_radius=70)
+        self.assertFalse(found)
+
+
 if __name__ == "__main__":
     unittest.main()

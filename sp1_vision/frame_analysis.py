@@ -76,3 +76,43 @@ def find_board(frame, refine=True):
     if refine:
         corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), SUBPIX_CRITERIA)
     return True, corners
+
+
+# A golf ball is 42.67 mm across. At fx = 900 px that is a 48 px radius at
+# 40 cm, so the 35-70 cm measurement range spans roughly 55 px down to 27 px.
+# The bounds below leave margin on both ends without admitting the lens
+# barrel or a reflection on the floor.
+BALL_MIN_RADIUS_PX = 20
+BALL_MAX_RADIUS_PX = 70
+
+# One ball is in frame, so any second detection is a false positive rather
+# than a competing candidate. minDist is set wide enough that Hough cannot
+# return two circles for the same ball.
+BALL_MIN_SEPARATION_PX = 200
+
+
+def find_ball(frame, min_radius=BALL_MIN_RADIUS_PX, max_radius=BALL_MAX_RADIUS_PX):
+    """Locate the ball, returning (found, (u, v, r)) in pixels.
+
+    Both images of a pair must be measured by this same function with the
+    same parameters. The centre of a sphere's silhouette is not exactly the
+    projection of its centre - it migrates outward with off-axis angle, by
+    around 0.3 px at our geometry - but that bias is common to both cameras
+    and largely cancels in disparity. A *difference* in how the two images
+    are measured does not cancel, and is far larger. Hence one function.
+
+    Returns (False, None) rather than a best guess when nothing is found:
+    a wrong centre produces a confident, wrong 3D point, and only the
+    reprojection residual would catch it.
+    """
+    gray = _as_gray(frame)
+    gray = cv2.medianBlur(gray, 5)
+    circles = cv2.HoughCircles(
+        gray, cv2.HOUGH_GRADIENT, dp=1.0, minDist=BALL_MIN_SEPARATION_PX,
+        param1=100, param2=30, minRadius=int(min_radius), maxRadius=int(max_radius),
+    )
+    if circles is None:
+        return False, None
+    # OpenCV returns candidates strongest-accumulator first.
+    u, v, r = circles[0][0]
+    return True, (float(u), float(v), float(r))
