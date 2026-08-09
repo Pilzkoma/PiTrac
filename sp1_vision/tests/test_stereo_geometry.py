@@ -137,5 +137,58 @@ class ValidateRigTest(unittest.TestCase):
             stereo_geometry.validate_rig(stereo_geometry.load_rig(self.ext, self.cfg))
 
 
+class FrameConversionTest(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ext = os.path.join(self.root, "stereo_extrinsics.json")
+        self.cfg = os.path.join(self.root, "golf_sim_config.json")
+        write_extrinsics(self.ext)
+        write_config(self.cfg)
+        self.rig = stereo_geometry.load_rig(self.ext, self.cfg)
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def test_pitrac_frame_negates_y_and_nothing_else(self):
+        # gs_camera.cpp:1157 - "Y distance, positive is upward". The
+        # extrinsics are Y down. Getting this backwards inverts launch angle.
+        np.testing.assert_allclose(
+            stereo_geometry.to_pitrac_frame([1.0, 2.0, 3.0]),
+            [1.0, -2.0, 3.0], atol=1e-12)
+
+    def test_pitrac_frame_is_its_own_inverse(self):
+        there = stereo_geometry.to_pitrac_frame([0.1, -0.2, 0.3])
+        np.testing.assert_allclose(
+            stereo_geometry.to_pitrac_frame(there), [0.1, -0.2, 0.3], atol=1e-12)
+
+    def test_camera2_sits_left_of_camera1_in_the_cameras_own_frame(self):
+        # T_x is +78.7 mm, which is camera 1's origin seen from camera 2. So
+        # camera 2 is at NEGATIVE x in camera 1's frame. Reading the positive
+        # T_x as "camera 1 is on the right" is the trap; the unit's frame and
+        # the player's are mirrored, and camera 1 is the player's left module.
+        centre = stereo_geometry.camera2_centre_in_camera1(self.rig)
+        self.assertLess(centre[0], 0.0)
+        self.assertAlmostEqual(centre[0], -0.078720, places=5)
+        # places=7, not 9: the fixture's R is calibration output rounded to
+        # 7 decimals, so R.T @ R deviates from I by ~8.6e-8, not float64
+        # epsilon. Asking for 9-decimal agreement tests the literal's
+        # rounding, not the norm-preservation this check exists to catch.
+        self.assertAlmostEqual(np.linalg.norm(centre), self.rig.baseline_m, places=7)
+
+    def test_camera2_offset_matches_the_hand_computed_value(self):
+        # -R.T @ t, then Y negated for PiTrac. The rotation matters here: a
+        # plain -t gets the small components wrong by more than a factor of
+        # two, which is the argument for computing rather than typing it.
+        offset = stereo_geometry.camera2_offset_from_camera1(self.rig)
+        np.testing.assert_allclose(
+            offset, [-0.078720, 0.000890, 0.001957], atol=2e-6)
+
+    def test_offset_replaces_pitracs_vertical_stacking(self):
+        # PiTrac ships [0, -0.19, 0] - their cameras sit 19 cm apart
+        # vertically. Ours are side by side; the dominant term must be X.
+        offset = stereo_geometry.camera2_offset_from_camera1(self.rig)
+        self.assertGreater(abs(offset[0]), 20 * abs(offset[1]))
+
+
 if __name__ == "__main__":
     unittest.main()

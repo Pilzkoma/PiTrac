@@ -122,3 +122,48 @@ def validate_rig(rig):
         raise StereoRigError(
             "image size {} is not the {} the intrinsics were solved at".format(
                 rig.image_size, EXPECTED_IMAGE_SIZE))
+
+
+# OpenCV's camera frame is X right, Y down, Z forward - right-handed.
+# PiTrac's camera-perspective frame is X right, Y *up*, Z forward
+# (gs_camera.cpp:1132 and :1157, "positive is upward") - left-handed. The
+# cross-check is PiTrac's own kCamera2OffsetFromCamera1OriginMeters of
+# [0, -0.19, 0]: their camera 2 sits 19 cm BELOW camera 1, and a negative Y
+# only means below if Y is up.
+#
+# Negating one axis flips handedness, which is why this is a conversion and
+# not a relabelling.
+_PITRAC_Y_FLIP = np.diag([1.0, -1.0, 1.0])
+
+
+def to_pitrac_frame(xyz):
+    """Convert an OpenCV-frame vector to PiTrac's Y-up frame, or back.
+
+    The operation is its own inverse, so one function serves both directions.
+    """
+    return _PITRAC_Y_FLIP @ np.asarray(xyz, dtype=np.float64).ravel()
+
+
+def camera2_centre_in_camera1(rig):
+    """Camera 2's optical centre in camera 1's frame, metres, OpenCV axes.
+
+    stereoCalibrate gives X2 = R @ X1 + T, so T is camera 1's origin seen
+    from camera 2. Setting X2 = 0 and solving gives the centre below.
+
+    Our T_x is positive, which puts this at negative x: camera 2 is to
+    camera 1's left as the unit looks out. A golfer faces the unit and sees
+    that mirrored, so camera 1 is the player's LEFT module - confirmed
+    independently by the two physical experiments in camera_paths.py.
+    """
+    return -rig.r.T @ rig.t_m
+
+
+def camera2_offset_from_camera1(rig):
+    """The value for kCamera2OffsetFromCamera1OriginMeters, in metres.
+
+    PiTrac ships [0.00, -0.19, 0.0] - 19 cm of vertical camera stacking that
+    our side-by-side mount does not have. Computed from R and T rather than
+    typed: dropping the rotation and using -T alone gets the Y and Z
+    components wrong by more than a factor of two.
+    """
+    return to_pitrac_frame(camera2_centre_in_camera1(rig))
