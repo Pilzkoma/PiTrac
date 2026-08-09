@@ -334,6 +334,12 @@ import numpy as np
 # What a loaded rig must satisfy before anything is computed from it. These
 # are not precision bounds; each one catches a specific way of holding the
 # files wrong.
+# CORRECTION found during implementation (2026-08-09): these two values are
+# WRONG as written here. 0.05-0.12 m does not reject this task's own test
+# case of 66.40 mm - the baseline a 20 mm square size produces against the
+# 24 mm board actually used - so the bound fails at the one job it exists
+# for. The shipped values are 0.070 / 0.090 m, which still leave ample margin
+# around the measured 78.7 mm (subset spread 77.99-78.66 mm). Read the code.
 MIN_BASELINE_M = 0.05        # a wrong square size scales the baseline outright
 MAX_BASELINE_M = 0.12
 MAX_RELATIVE_ROTATION_DEG = 3.0   # the mount is bolted; more means swapped files

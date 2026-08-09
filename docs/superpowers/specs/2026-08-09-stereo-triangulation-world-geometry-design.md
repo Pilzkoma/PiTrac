@@ -223,7 +223,7 @@ Validation at load, failing loudly:
 
 | Check | Bound | Catches |
 |---|---|---|
-| ‖T‖ | 0.05–0.12 m | wrong square size, wrong file |
+| ‖T‖ | 0.070–0.090 m | wrong square size, wrong file |
 | R against identity | < 3° | swapped or corrupt extrinsics |
 | fx, both cameras | within 10% of 900 | mismatched intrinsics source |
 | image size | 1280×800 | wrong capture mode |
