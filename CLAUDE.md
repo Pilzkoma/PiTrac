@@ -13,12 +13,17 @@ hardware, they get changed.
 ## Target hardware
 - NVIDIA Jetson Xavier NX (JetPack 5.1.6, Ubuntu 20.04, CUDA 11.4, OpenCV 4.5.4)
 - 2x Arducam B0332 OV9281 mono global shutter, **USB 2.0 UVC**, 70°(H) low-distortion
-  M12 lens (**measured 2.767 / 2.772 mm**, interchangeable but staying, focus adjustable
-  by screwing the lens). 1280x800 @ 120 FPS MJPG measured.
-- Cameras mounted **side by side, 80.00 mm baseline** (measured 79.83), optical axes
-  parallel. **The mount is no longer adjustable:** the 3-point spring/screw kinematic
-  mount was stripped of its springs on 2026-08-08 and the plate bolted down solid, to
-  take pitch and yaw out. Changing the aim is now a rework, not a turn of a screw —
+  M12 lens (**measured 2.701 / 2.700 mm**, interchangeable but staying, focus adjustable
+  by screwing the lens). 1280x800 @ 120 FPS MJPG measured. The cameras USB-autosuspend
+  when idle (`control=auto`, 2 s) and the dashboard hands the V4L2 nodes back after
+  120 s idle — they are not powered up between uses.
+- Cameras mounted **side by side, measured baseline 78.28 mm** (CAD says 80.00; the
+  −2.1 % is print shrinkage), optical axes parallel to within pitch −0.92°, yaw +0.43°,
+  roll −0.85°. **The mount is no longer adjustable:** the 3-point spring/screw kinematic
+  mount was stripped of its springs on 2026-08-08 and the plate bolted down solid. That
+  rebuild *inverted* pitch and roll rather than nulling them, and only improved yaw;
+  all three are far under the 3° where rectification starts costing frame height, so
+  they stay as they are. Changing the aim is now a rework, not a turn of a screw —
   and it invalidates the stereo extrinsics, so it drags a recalibration with it.
 - The unit sits on the floor. The lower image corners cannot be reached with a
   calibration board and are not worth reaching; see
@@ -86,20 +91,42 @@ viable and roughly an order of magnitude more accurate at these distances.
    Resolved by design — the bypass in `gs_fsm.cpp` is permanent, not a stub.
    The IR array is event-driven, so stabilization frames are always ambient-lit.
 
+## Calibration — done, 2026-08-09. Do not redo it.
+Both intrinsics and extrinsics come from **one** 24-pair set in
+`sp1_vision/calibration_images/cam1|cam2`, captured after the mount rebuild.
+Intrinsics are in `golf_sim_config.json` (2.701 / 2.700 mm, fx 900.38 / 899.99,
+cy 420.05 / 421.09, sensor 3.840 x 2.400 mm), extrinsics in
+`sp1_vision/calibration_results/stereo_extrinsics.json`. Verified reaching the
+C++ in a live trace run.
+
+Two rules that cost a session to learn:
+- **Intrinsics and extrinsics must come from the same solve.** `CALIB_FIX_INTRINSIC`
+  makes the stereo step absorb whatever error the camera matrices carry into R and T,
+  so the pair is only self-consistent together. Mixing sources is the one combination
+  that is definitely wrong and it looks fine in the reprojection error.
+- **A low RMS does not mean the answer is determined.** Two intrinsic sets gave pitch
+  −0.745° and −1.834° at an identical RMS of 0.90, because `cy` was unconstrained.
+  To test whether a number is real, re-solve on subsets and against a second
+  intrinsics source — not by reading the residual.
+
+`2026-08-06_springs/` is a superseded archive, kept as the record of the pre-rebuild
+geometry. It is worse on every figure. Do not solve against it.
+The operating detail is in `sp1_vision/calibration_images/README.md`.
+
 ## Current task
-SP1 calibration, second pass. The intrinsics are measured and live in
-`golf_sim_config.json` (2.767 / 2.772 mm, sensor 3.840 x 2.400 mm) and they still
-stand — no lens was touched. What is stale is the stereo extrinsics: removing the
-mount springs moved the two cameras relative to each other.
+Next SP1 items, in this order:
+1. **World geometry.** `kCameraNPositionsFromOriginMeters` and `kCameraNAngles` still
+   hold PiTrac's numbers at a decided 50 cm working distance.
+2. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
+   still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.55 mm
+   of depth per pixel of disparity error (~1.8 mm at half-pixel matching), which is
+   the largest accuracy gain available.
+3. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false.
 
-So this pass re-measures **only** R and T. New pairs go into
-`sp1_vision/calibration_images/cam1|cam2`; the old set is archived under
-`2026-08-06_springs/` and remains the source of the intrinsics, because it has the
-full-frame board coverage this one cannot get with the unit on the floor. Solve
-with `StereoCalibration.py --cam1-npz/--cam2-npz` against the archived set, not
-with the dashboard's Run button, which would recompute the intrinsics from the
-weaker data. The operating detail is in `sp1_vision/calibration_images/README.md`.
+Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
+centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike
+the dashboard. That is the readout that once hid a 5.4x focus error.
 
-After that, the next SP1 items are the world geometry
-(`kCameraNPositionsFromOriginMeters`, `kCameraNAngles`, still PiTrac's numbers at
-a decided 50 cm working distance) and triangulation, which nothing consumes yet.
+To run `pitrac_lm` at all you must pass `--msg_broker_address=tcp://127.0.0.1:61616`
+— `kWebActiveMQHostAddress` is absent from the config, and without it the run aborts
+in IPC init and segfaults on shutdown.
