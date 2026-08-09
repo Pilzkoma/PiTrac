@@ -444,11 +444,24 @@ class RunAnalysisTest(unittest.TestCase):
             self.assertIn("reproj", output)
             self.assertIn("behind camera 1", output)
 
-            # (c) the config block prints, including the pan/tilt/roll notes.
+            # (c) the measurement is reported as a result in its own right,
+            # separate from and before any PiTrac mapping.
+            self.assertIn("measured attitude of the unit", output)
+            self.assertIn("nose-up positive", output)
+            self.assertIn("right-side-down positive", output)
+            attitude_pos = output.index("measured attitude of the unit")
+            mapping_pos = output.index("writing this into PiTrac's kCameraNAngles")
+            self.assertLess(attitude_pos, mapping_pos)
+
+            # (d) the PiTrac mapping section prints, explicitly labelled as
+            # an inheritance and explicitly lossy, with the pan/tilt/roll
+            # notes and the Block 2 forward-pointer.
             self.assertIn('"kCamera2OffsetFromCamera1OriginMeters"', output)
             self.assertIn('"kCamera1Angles"', output)
             self.assertIn("SIGN UNVERIFIED", output)
-            self.assertIn("nowhere to go", output)
+            self.assertIn("DROPPED", output)
+            self.assertIn("Block 2 should carry the attitude as a full "
+                          "rotation", output)
         finally:
             shutil.rmtree(run_dir)
 
