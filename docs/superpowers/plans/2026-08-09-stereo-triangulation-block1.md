@@ -1100,8 +1100,16 @@ Tape distances and the target-line flag are prompted for **at capture time** and
 - Consumes: `calibration_capture.CameraPair`, `frame_analysis.find_ball` (Task 1).
 - Produces: a run directory containing `cam1/gs_NN.png`, `cam2/gs_NN.png` and `run.json` with the shape:
   ```json
-  {"shots": [{"name": "gs_01.png", "tape_mm": 350.0, "target_line": false}]}
+  {"shots": [{"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"}]}
   ```
+  `series` is exactly one of `"depth"`, `"spread"` or `"target"`, and the three
+  are consumed differently in Task 7 — the plane takes `depth` and `spread`,
+  the scale fit takes `depth` alone, yaw takes `target`. A plain
+  floor/target-line boolean is not enough: the scale fit compares 3D distance
+  against a difference of two tape readings, and that identity only holds for
+  positions on one line. Mixing a laterally offset `spread` shot into it
+  compares a ~250 mm displacement against a ~10 mm tape difference and
+  destroys the fit rather than merely biasing it.
 
 - [ ] **Step 1: Write the capture half**
 
@@ -1123,15 +1131,21 @@ not three:
 
 The suggested layout, 12 shots:
 
-  A. 6 positions along a straight line running directly away from the unit,
-     tape-measured, e.g. 350 / 420 / 490 / 560 / 630 / 700 mm. Consecutive
-     gaps are known precisely, which is what settles the baseline - measuring
-     DIFFERENCES isolates scale from any error in where the lens plane is.
-  B. 4 positions off to the sides at assorted distances. These do nothing for
-     scale and everything for the plane: without spread across the image
-     width the floor fit is undetermined, however small its residual.
-  C. 2 positions along the intended target line, flagged as such. The floor
-     plane cannot give yaw, and this pair is the only thing that can.
+  depth   6 positions along a straight line running directly away from the
+          unit, tape-measured, e.g. 350 / 420 / 490 / 560 / 630 / 700 mm.
+          Consecutive gaps are known precisely, which is what settles the
+          baseline - measuring DIFFERENCES isolates scale from any error in
+          where the lens plane sits. These must be collinear: the scale fit
+          equates 3D distance with a difference of tape readings, and that
+          only holds along one line.
+  spread  4 positions off to the sides at assorted distances. They do nothing
+          for scale and everything for the plane: without spread across the
+          image width the floor fit is undetermined, however small its
+          residual.
+  target  2 positions along the intended target line. The floor plane cannot
+          give yaw - it is rotationally symmetric about its own normal - and
+          this pair is the only thing that can. It cannot be added afterwards
+          without repeating the run.
 """
 
 import argparse
@@ -1156,14 +1170,21 @@ def _ask_float(prompt):
             print("  need a number, e.g. 420.5")
 
 
-def _ask_yes_no(prompt):
+SERIES = {"d": "depth", "s": "spread", "t": "target"}
+
+
+def _ask_series():
+    """Which of the three series this position belongs to.
+
+    Asked rather than inferred because the three are consumed differently and
+    no amount of after-the-fact geometry recovers the distinction reliably.
+    """
     while True:
-        raw = input(prompt).strip().lower()
-        if raw in ("y", "yes"):
-            return True
-        if raw in ("n", "no", ""):
-            return False
-        print("  answer y or n")
+        raw = input("  series - [d]epth line / [s]pread / [t]arget line: ")
+        key = raw.strip().lower()[:1]
+        if key in SERIES:
+            return SERIES[key]
+        print("  answer d, s or t")
 
 
 def run_shots(count, out_dir, exposure_units):
@@ -1185,8 +1206,7 @@ def run_shots(count, out_dir, exposure_units):
             name = "gs_{:02d}.png".format(i)
             print("\n--- shot {} ---".format(i))
             tape_mm = _ask_float("  tape distance to the lens plane, mm: ")
-            target_line = _ask_yes_no("  is this one of the target-line "
-                                      "positions? [y/N]: ")
+            series = _ask_series()
             input("  place the ball, stand clear, press Enter: ")
 
             frames, skew = pair.grab_with_skew()
@@ -1202,19 +1222,27 @@ def run_shots(count, out_dir, exposure_units):
                 skew * 1000.0,
                 "keep" if both else "MOVE THE BALL AND RETAKE"))
 
-            shots.append({"name": name, "tape_mm": tape_mm,
-                          "target_line": target_line})
+            shots.append({"name": name, "tape_mm": tape_mm, "series": series})
             with open(manifest_path, "w") as fh:
                 json.dump({"shots": shots}, fh, indent=2)
 
-    n_target = sum(1 for s in shots if s["target_line"])
-    print("\n{} shots on disk, {} of them on the target line.".format(
-        len(shots), n_target))
-    if n_target < 2:
-        print("Yaw needs 2 target-line positions and cannot be recovered "
-              "later from a floor-only series. Capture them now.")
-        return 1
-    return 0
+    counts = {label: sum(1 for s in shots if s["series"] == label)
+              for label in sorted(set(SERIES.values()))}
+    print("\n{} shots on disk: {}".format(
+        len(shots),
+        ", ".join("{} {}".format(v, k) for k, v in sorted(counts.items()))))
+
+    short = []
+    if counts["target"] < 2:
+        short.append("yaw needs 2 target-line positions and cannot be "
+                     "recovered later from a floor-only series")
+    if counts["depth"] < 4:
+        short.append("the scale fit needs 4+ collinear depth positions")
+    if counts["depth"] + counts["spread"] < 3:
+        short.append("the floor plane needs 3+ positions")
+    for line in short:
+        print("INCOMPLETE: " + line)
+    return 1 if short else 0
 
 
 def main(argv=None):
@@ -1244,7 +1272,7 @@ Run: `python3 -m sp1_vision.cli_triangulate`
 Expected: exits non-zero with `error: give --shots N`
 
 Run: `python3 -m sp1_vision.cli_triangulate --help`
-Expected: the docstring, including the A/B/C layout
+Expected: the docstring, including the depth / spread / target layout
 
 - [ ] **Step 3: Commit**
 
@@ -1393,35 +1421,44 @@ def run_analysis(run_dir, extrinsics_path, config_path):
     with open(os.path.join(run_dir, RUN_MANIFEST)) as fh:
         shots = json.load(fh)["shots"]
 
-    print("\n{:<12} {:>9} {:>9} {:>9} {:>9} {:>7} {:>6}".format(
-        "shot", "X mm", "Y mm", "Z mm", "tape mm", "reproj", "use"))
-    kept, target_line = [], []
+    print("\n{:<12} {:>7} {:>9} {:>9} {:>9} {:>9} {:>7} {:>5}".format(
+        "shot", "series", "X mm", "Y mm", "Z mm", "tape mm", "reproj", "use"))
+    buckets = {"depth": [], "spread": [], "target": []}
     for shot in shots:
+        if shot.get("series") not in buckets:
+            print("{:<12} {:>62}".format(
+                shot["name"], "unknown series " + repr(shot.get("series"))))
+            continue
         xyz, info = _measure_shot(rig, run_dir, shot)
         if xyz is None:
-            print("{:<12} {:>57}".format(shot["name"], info))
+            print("{:<12} {:>7} {:>54}".format(
+                shot["name"], shot["series"], info))
             continue
         usable = info <= MAX_REPROJECTION_PX
-        print("{:<12} {:9.1f} {:9.1f} {:9.1f} {:9.1f} {:7.2f} {:>6}".format(
-            shot["name"], xyz[0] * 1000, xyz[1] * 1000, xyz[2] * 1000,
-            shot["tape_mm"], info, "yes" if usable else "NO"))
-        if not usable:
-            continue
-        (target_line if shot["target_line"] else kept).append((shot, xyz))
+        print("{:<12} {:>7} {:9.1f} {:9.1f} {:9.1f} {:9.1f} {:7.2f} {:>5}".format(
+            shot["name"], shot["series"], xyz[0] * 1000, xyz[1] * 1000,
+            xyz[2] * 1000, shot["tape_mm"], info, "yes" if usable else "NO"))
+        if usable:
+            buckets[shot["series"]].append((shot, xyz))
 
-    if len(kept) < 3:
-        print("\nOnly {} usable floor shots; a plane needs 3.".format(len(kept)))
+    # The plane wants every floor position it can get - spread across the
+    # image width is exactly what makes it determined. The scale fit does
+    # NOT: it equates a 3D distance with a difference of two tape readings,
+    # and that identity holds only along the collinear depth line.
+    floor = buckets["depth"] + buckets["spread"]
+    if len(floor) < 3:
+        print("\nOnly {} usable floor shots; a plane needs 3.".format(len(floor)))
         return 1
 
     # --- attitude -------------------------------------------------------
-    plane = ground_plane.fit_plane(np.array([xyz for _, xyz in kept]))
+    plane = ground_plane.fit_plane(np.array([xyz for _, xyz in floor]))
     pitch, roll = ground_plane.attitude_from_plane(plane)
     print("\nfloor plane: rms {:.2f} mm, conditioning {:.3f}".format(
         plane.rms_m * 1000.0, plane.conditioning))
     print("  pitch {:+.3f} deg   roll {:+.3f} deg".format(pitch, roll))
 
-    if len(target_line) >= 2:
-        ordered = sorted(target_line, key=lambda item: item[1][2])
+    if len(buckets["target"]) >= 2:
+        ordered = sorted(buckets["target"], key=lambda item: item[1][2])
         yaw = ground_plane.yaw_from_target_line(
             plane, ordered[0][1], ordered[-1][1])
         print("  yaw   {:+.3f} deg".format(yaw))
@@ -1430,7 +1467,7 @@ def run_analysis(run_dir, extrinsics_path, config_path):
         print("  yaw     not measured - needs 2 usable target-line shots")
 
     # --- scale ----------------------------------------------------------
-    depth_ordered = sorted(kept, key=lambda item: item[0]["tape_mm"])
+    depth_ordered = sorted(buckets["depth"], key=lambda item: item[0]["tape_mm"])
     measured, taped = [], []
     for (shot_a, xyz_a), (shot_b, xyz_b) in zip(depth_ordered, depth_ordered[1:]):
         gap_tape = (shot_b["tape_mm"] - shot_a["tape_mm"]) / 1000.0
@@ -1523,7 +1560,9 @@ On the Jetson, from the repo root:
 python3 -m sp1_vision.cli_triangulate --shots 12 --out sp1_vision/triangulation_run
 ```
 
-Follow the A/B/C layout printed by the tool. Mark each floor position before capturing so the tape reading and the ball agree; the tape is the limiting instrument in the scale check, not the cameras.
+Follow the depth / spread / target layout printed by the tool, answering `d`, `s` or `t` for each shot. Mark each floor position before capturing so the tape reading and the ball agree; the tape is the limiting instrument in the scale check, not the cameras.
+
+The six `depth` positions must lie on **one straight line** running away from the unit — the scale fit equates their 3D separation with the difference of their tape readings, and that is only true along a line. Snap a chalk line or lay a straightedge before starting.
 
 - [ ] **Step 2: Analyse**
 
