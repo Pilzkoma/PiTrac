@@ -85,28 +85,64 @@ def _find_max_shot_number(cam_dir):
     return max_num
 
 
-def run_shots(count, out_dir, exposure_units):
-    dirs = {n: os.path.join(out_dir, "cam{}".format(n)) for n in (1, 2)}
-    for d in dirs.values():
-        os.makedirs(d, exist_ok=True)
+def _load_manifest(out_dir):
+    """Load run.json from out_dir, returning its shots list.
 
+    Returns an empty list if no manifest exists yet - that is the normal
+    state for a brand-new run directory, not an error. A manifest that
+    exists but cannot be parsed, or parses without a "shots" key, is a
+    different situation: the tape readings it should hold cannot be
+    reconstructed from the images alone, so this prints an operator-facing
+    message naming the run directory and exits rather than guessing.
+    """
     manifest_path = os.path.join(out_dir, RUN_MANIFEST)
-    shots = []
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path) as fh:
-                shots = json.load(fh)["shots"]
-        except (json.JSONDecodeError, KeyError, OSError) as e:
-            print("ERROR: run.json in {} is corrupt or unreadable: {}".format(
-                out_dir, e))
-            print("  The images on disk are still present.")
-            print("  The tape readings for this run are lost.")
-            sys.exit(1)
-        print("{} shots already in {} - new ones are numbered after them."
-              .format(len(shots), out_dir))
+    if not os.path.exists(manifest_path):
+        return []
+    try:
+        with open(manifest_path) as fh:
+            return json.load(fh)["shots"]
+    except (json.JSONDecodeError, KeyError, OSError) as e:
+        print("ERROR: run.json in {} is corrupt or unreadable: {}".format(
+            out_dir, e))
+        print("  The images on disk are still present.")
+        print("  The tape readings for this run are lost.")
+        sys.exit(1)
 
-    # Check if manifest and disk have diverged, which a crash could cause.
-    # Start numbering after the larger of the two.
+
+def _write_manifest(out_dir, shots):
+    """Atomically (re)write run.json in out_dir with the given shots list.
+
+    Writes to a temp file in the same directory - so os.replace is atomic
+    even if out_dir is a different filesystem from the system temp dir -
+    then replaces the manifest in one step. If anything raises before the
+    replace, the temp file is removed and the previous manifest, if any, is
+    left untouched.
+    """
+    manifest_path = os.path.join(out_dir, RUN_MANIFEST)
+    fd, temp_path = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"shots": shots}, fh, indent=2)
+        os.replace(temp_path, manifest_path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _resume_start_number(dirs, shots):
+    """Decide the next shot number to use when resuming into an existing run.
+
+    Compares the highest gs_NN number found on disk (in cam1's directory)
+    against the number of shots already recorded in the manifest. A crash
+    between writing an image pair and writing the manifest entry for it can
+    leave these disagreeing in either direction; starting from the max of
+    the two is the only choice that never overwrites an existing image.
+    Divergence is reported naming both counts, since it means the run
+    directory saw a crash and is worth a second look regardless.
+    """
     max_on_disk = _find_max_shot_number(dirs[1])
     max_in_manifest = len(shots)
     if max_on_disk != max_in_manifest:
@@ -114,10 +150,20 @@ def run_shots(count, out_dir, exposure_units):
             max_in_manifest, max_on_disk))
         if max_on_disk > max_in_manifest:
             print("  Restarting numbering from gs_{:02d}".format(max_on_disk + 1))
-        # In both cases, start from the max
-        start_num = max(max_on_disk, max_in_manifest) + 1
-    else:
-        start_num = len(shots) + 1
+    return max(max_on_disk, max_in_manifest) + 1
+
+
+def run_shots(count, out_dir, exposure_units):
+    dirs = {n: os.path.join(out_dir, "cam{}".format(n)) for n in (1, 2)}
+    for d in dirs.values():
+        os.makedirs(d, exist_ok=True)
+
+    shots = _load_manifest(out_dir)
+    if shots:
+        print("{} shots already in {} - new ones are numbered after them."
+              .format(len(shots), out_dir))
+
+    start_num = _resume_start_number(dirs, shots)
 
     print(__doc__)
     with calibration_capture.CameraPair(exposure_units=exposure_units) as pair:
@@ -142,19 +188,7 @@ def run_shots(count, out_dir, exposure_units):
                 "keep" if both else "MOVE THE BALL AND RETAKE"))
 
             shots.append({"name": name, "tape_mm": tape_mm, "series": series})
-            # Write atomically: write to temp file in same directory, then replace.
-            # This prevents losing the manifest if interrupted.
-            fd, temp_path = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w") as fh:
-                    json.dump({"shots": shots}, fh, indent=2)
-                os.replace(temp_path, manifest_path)
-            except Exception:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
-                raise
+            _write_manifest(out_dir, shots)
 
     counts = {label: sum(1 for s in shots if s["series"] == label)
               for label in sorted(set(SERIES.values()))}

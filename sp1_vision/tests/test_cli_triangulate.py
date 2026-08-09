@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Unit tests for cli_triangulate module."""
 
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 
-from sp1_vision.cli_triangulate import _find_max_shot_number
+from sp1_vision.cli_triangulate import (
+    _find_max_shot_number,
+    _load_manifest,
+    _resume_start_number,
+    _write_manifest,
+)
 
 
 class TestFindMaxShotNumber(unittest.TestCase):
@@ -54,111 +61,168 @@ class TestFindMaxShotNumber(unittest.TestCase):
             shutil.rmtree(test_dir)
 
 
-class TestManifestHandling(unittest.TestCase):
-    """Tests for manifest loading and divergence detection."""
+class TestWriteManifest(unittest.TestCase):
+    """Tests for the atomic manifest write."""
 
-    def test_manifest_and_disk_agreement(self):
-        """Test when manifest and disk agree on shot count."""
+    def test_no_tmp_file_left_behind_on_success(self):
         test_dir = tempfile.mkdtemp()
         try:
-            cam1_dir = os.path.join(test_dir, "cam1")
-            os.makedirs(cam1_dir)
+            shots = [{"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"}]
+            _write_manifest(test_dir, shots)
 
-            # Create 2 images
-            for num in [1, 2]:
-                with open(os.path.join(cam1_dir, "gs_{:02d}.png".format(num)), "w") as f:
-                    f.write("x")
-
-            # Create matching manifest
-            manifest = {
-                "shots": [
-                    {"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"},
-                    {"name": "gs_02.png", "tape_mm": 420.0, "series": "depth"}
-                ]
-            }
-
-            max_disk = _find_max_shot_number(cam1_dir)
-            max_manifest = len(manifest["shots"])
-
-            self.assertEqual(max_disk, 2)
-            self.assertEqual(max_manifest, 2)
-            self.assertEqual(max_disk, max_manifest)
+            entries = os.listdir(test_dir)
+            self.assertIn("run.json", entries)
+            leftover_tmp = [e for e in entries if e.endswith(".tmp")]
+            self.assertEqual(leftover_tmp, [])
         finally:
             shutil.rmtree(test_dir)
 
-    def test_manifest_disk_divergence(self):
-        """Test detection of manifest/disk divergence (crash scenario)."""
+    def test_previous_manifest_intact_when_write_raises(self):
         test_dir = tempfile.mkdtemp()
         try:
-            cam1_dir = os.path.join(test_dir, "cam1")
-            os.makedirs(cam1_dir)
+            good_shots = [{"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"}]
+            _write_manifest(test_dir, good_shots)
 
-            # Create 3 images (simulating crash that wrote images but lost manifest entry)
-            for num in [1, 2, 3]:
-                with open(os.path.join(cam1_dir, "gs_{:02d}.png".format(num)), "w") as f:
-                    f.write("x")
+            manifest_path = os.path.join(test_dir, "run.json")
+            with open(manifest_path) as fh:
+                before = fh.read()
 
-            # Create manifest with only 2 shots (incomplete)
-            manifest = {
-                "shots": [
-                    {"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"},
-                    {"name": "gs_02.png", "tape_mm": 420.0, "series": "depth"}
-                ]
-            }
+            # A set is not JSON-serializable, so json.dump raises partway
+            # through the temp-file write, before os.replace ever runs.
+            bad_shots = [{"name": "gs_02.png", "tape_mm": set([1, 2]), "series": "depth"}]
+            with self.assertRaises(TypeError):
+                _write_manifest(test_dir, bad_shots)
 
-            max_disk = _find_max_shot_number(cam1_dir)
-            max_manifest = len(manifest["shots"])
+            with open(manifest_path) as fh:
+                after = fh.read()
+            self.assertEqual(before, after)
 
-            self.assertEqual(max_disk, 3)
-            self.assertEqual(max_manifest, 2)
-            self.assertNotEqual(max_disk, max_manifest)
-            # Resume should use the max to avoid overwriting images
-            next_num = max(max_disk, max_manifest) + 1
-            self.assertEqual(next_num, 4)
+            leftover_tmp = [e for e in os.listdir(test_dir) if e.endswith(".tmp")]
+            self.assertEqual(leftover_tmp, [])
         finally:
             shutil.rmtree(test_dir)
 
 
-class TestManifestCorruptionHandling(unittest.TestCase):
-    """Tests for corrupt manifest handling."""
+class TestLoadManifest(unittest.TestCase):
+    """Tests for reading run.json back, including corruption handling."""
 
-    def test_corrupt_manifest_missing_shots_key(self):
-        """Test that corrupt manifest (missing 'shots' key) raises KeyError."""
+    def test_missing_manifest_returns_empty_list(self):
         test_dir = tempfile.mkdtemp()
         try:
-            # Write corrupt manifest
-            with open(os.path.join(test_dir, "run.json"), "w") as f:
-                json.dump({"not_shots": []}, f)
-
-            # Try to load it - should raise KeyError
-            with self.assertRaises(KeyError):
-                with open(os.path.join(test_dir, "run.json")) as fh:
-                    shots = json.load(fh)["shots"]
+            self.assertEqual(_load_manifest(test_dir), [])
         finally:
             shutil.rmtree(test_dir)
 
-    def test_manifest_write_uses_tempfile(self):
-        """Test that run_shots implementation uses atomic writes."""
-        import inspect
-        from sp1_vision import cli_triangulate
+    def test_roundtrip_through_write_manifest(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            shots = [
+                {"name": "gs_01.png", "tape_mm": 350.0, "series": "depth"},
+                {"name": "gs_02.png", "tape_mm": 420.0, "series": "spread"},
+                {"name": "gs_03.png", "tape_mm": 490.0, "series": "target"},
+            ]
+            _write_manifest(test_dir, shots)
+            self.assertEqual(_load_manifest(test_dir), shots)
+        finally:
+            shutil.rmtree(test_dir)
 
-        # Check that run_shots implementation uses tempfile.mkstemp and os.replace
-        source = inspect.getsource(cli_triangulate.run_shots)
+    def test_malformed_json_exits_with_operator_message(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(test_dir, "run.json"), "w") as fh:
+                fh.write("{this is not valid json")
 
-        self.assertIn("mkstemp", source, "Should use tempfile.mkstemp for atomic writes")
-        self.assertIn("os.replace", source, "Should use os.replace for atomic swap")
-        self.assertIn("os.fdopen", source, "Should use os.fdopen to write to temp file")
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                with self.assertRaises(SystemExit) as cm:
+                    _load_manifest(test_dir)
 
-    def test_manifest_write_cleanup_on_error(self):
-        """Test that temp file is cleaned up on write error."""
-        import inspect
-        from sp1_vision import cli_triangulate
+            self.assertNotEqual(cm.exception.code, 0)
+            output = stdout.getvalue()
+            self.assertIn(test_dir, output)
+            self.assertIn("corrupt or unreadable", output)
+        finally:
+            shutil.rmtree(test_dir)
 
-        # Check that run_shots has error handling for cleanup
-        source = inspect.getsource(cli_triangulate.run_shots)
+    def test_missing_shots_key_exits_with_operator_message(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(test_dir, "run.json"), "w") as fh:
+                json.dump({"not_shots": []}, fh)
 
-        self.assertIn("except Exception", source, "Should have exception handler")
-        self.assertIn("os.unlink(temp_path)", source, "Should clean up temp file on error")
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                with self.assertRaises(SystemExit) as cm:
+                    _load_manifest(test_dir)
+
+            self.assertNotEqual(cm.exception.code, 0)
+            output = stdout.getvalue()
+            self.assertIn(test_dir, output)
+            self.assertIn("corrupt or unreadable", output)
+        finally:
+            shutil.rmtree(test_dir)
+
+
+class TestResumeStartNumber(unittest.TestCase):
+    """Tests for the max-of-disk-and-manifest resume decision."""
+
+    def _make_cam1(self, test_dir, shot_numbers):
+        cam1_dir = os.path.join(test_dir, "cam1")
+        os.makedirs(cam1_dir)
+        for num in shot_numbers:
+            open(os.path.join(cam1_dir, "gs_{:02d}.png".format(num)), "w").close()
+        return {1: cam1_dir, 2: os.path.join(test_dir, "cam2")}
+
+    def test_agreement_no_warning(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            dirs = self._make_cam1(test_dir, [1, 2])
+            shots = [{"name": "gs_01.png"}, {"name": "gs_02.png"}]
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                start = _resume_start_number(dirs, shots)
+
+            self.assertEqual(start, 3)
+            self.assertNotIn("WARNING", stdout.getvalue())
+        finally:
+            shutil.rmtree(test_dir)
+
+    def test_disk_ahead_of_manifest_warns_naming_both(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            dirs = self._make_cam1(test_dir, [1, 2, 3])
+            shots = [{"name": "gs_01.png"}, {"name": "gs_02.png"}]  # manifest lost one entry
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                start = _resume_start_number(dirs, shots)
+
+            self.assertEqual(start, 4)
+            output = stdout.getvalue()
+            self.assertIn("WARNING", output)
+            self.assertIn("manifest has 2 shots", output)
+            self.assertIn("gs_03", output)
+        finally:
+            shutil.rmtree(test_dir)
+
+    def test_manifest_ahead_of_disk_warns_naming_both(self):
+        test_dir = tempfile.mkdtemp()
+        try:
+            dirs = self._make_cam1(test_dir, [1])
+            shots = [{"name": "gs_01.png"}, {"name": "gs_02.png"}, {"name": "gs_03.png"}]
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                start = _resume_start_number(dirs, shots)
+
+            self.assertEqual(start, 4)
+            output = stdout.getvalue()
+            self.assertIn("WARNING", output)
+            self.assertIn("manifest has 3 shots", output)
+            self.assertIn("gs_01", output)
+        finally:
+            shutil.rmtree(test_dir)
 
 
 if __name__ == "__main__":
