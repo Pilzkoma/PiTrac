@@ -13,6 +13,7 @@ from unittest import mock
 import cv2
 import numpy as np
 
+from sp1_vision import ground_plane, stereo_geometry
 from sp1_vision.cli_triangulate import (
     MAX_REPROJECTION_PX,
     _find_max_shot_number,
@@ -448,6 +449,59 @@ class RunAnalysisTest(unittest.TestCase):
             self.assertIn('"kCamera1Angles"', output)
             self.assertIn("SIGN UNVERIFIED", output)
             self.assertIn("nowhere to go", output)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_reports_a_stereo_rig_error_without_a_traceback(self):
+        # If this were not caught inside run_analysis, StereoRigError would
+        # propagate out of run_analysis and this test itself would fail
+        # with an unhandled exception rather than reach the assertions
+        # below - that failure mode is exactly what the catch prevents.
+        run_dir = tempfile.mkdtemp()
+        try:
+            stdout = io.StringIO()
+            with mock.patch(
+                    "sp1_vision.cli_triangulate.stereo_geometry.load_rig",
+                    side_effect=stereo_geometry.StereoRigError("bad baseline")):
+                with redirect_stdout(stdout):
+                    rc = run_analysis(run_dir, "unused", "unused")
+            self.assertEqual(rc, 1)
+            self.assertIn("bad baseline", stdout.getvalue())
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_reports_a_plane_fit_error_without_a_traceback(self):
+        # Same shape of guard, for the plane fit. fit_plane is mocked
+        # directly rather than engineered via near-collinear geometry, to
+        # keep this test about the catch, not about conditioning.
+        rig = make_rig(pitch_deg=0.0)
+        run_dir = tempfile.mkdtemp()
+        try:
+            floor_truth = [
+                np.array([0.03, 0.09, 0.35]),
+                np.array([-0.20, 0.09, 0.40]),
+                np.array([0.20, 0.09, 0.45]),
+            ]
+            shots = []
+            for i, xyz in enumerate(floor_truth, start=1):
+                name = "gs_{:02d}.png".format(i)
+                self._write(run_dir, name, *project(rig, xyz))
+                shots.append({"name": name, "tape_mm": 400.0 + i,
+                             "series": "depth" if i == 1 else "spread"})
+            with open(os.path.join(run_dir, "run.json"), "w") as fh:
+                json.dump({"shots": shots}, fh)
+
+            stdout = io.StringIO()
+            with mock.patch(
+                    "sp1_vision.cli_triangulate.stereo_geometry.load_rig",
+                    return_value=rig):
+                with mock.patch(
+                        "sp1_vision.cli_triangulate.ground_plane.fit_plane",
+                        side_effect=ground_plane.PlaneFitError("near-collinear")):
+                    with redirect_stdout(stdout):
+                        rc = run_analysis(run_dir, "unused", "unused")
+            self.assertEqual(rc, 1)
+            self.assertIn("near-collinear", stdout.getvalue())
         finally:
             shutil.rmtree(run_dir)
 
