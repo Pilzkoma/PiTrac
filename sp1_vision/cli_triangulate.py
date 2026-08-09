@@ -29,13 +29,32 @@ The suggested layout, 12 shots:
           this pair is the only thing that can. It cannot be added afterwards
           without repeating the run.
 
-HOW TO HOLD THE TAPE, since the analysis depends on it: every reading is the
-PERPENDICULAR distance from the unit's front face to the ball - the distance
-you would get by sliding a set square along the face - and NOT the
-straight-line distance from one fixed mark. The images can be re-analysed
-later; the operator's reading cannot. Only differences between depth readings
-are used, so a constant error in where the face sits costs nothing, while a
-change of method partway through the series costs everything.
+WHERE THE BALL MAY GO: depth 340-700 mm, and no further sideways than 0.43
+of the depth. Not near AND wide at once - the lens distortion is not
+calibrated out there, and an uncalibrated corner reads as a real
+displacement.
+
+HOW TO HOLD THE TAPE, since the analysis depends on it. Lay a rule flat on
+the floor pointing away from the unit, put every depth ball ON the rule, and
+read ALONG the rule. Not the straight-line distance from some fixed mark,
+and not a different method halfway through: the images can be re-analysed
+later, the operator's reading cannot.
+
+Where the rule's zero sits does not matter. A constant offset lands in the
+fit's intercept, which is reported rather than cancelled - it is this
+project's only estimate of how deep the optical centre sits behind the front
+face. Which DIRECTION the rule points matters more, but the run measures it:
+the balls themselves give the angle between the rule and the optical axis,
+and the analysis prints the raw scale and the angle-corrected one side by
+side. Lay the rule roughly square to the front face and the two agree to
+hundredths of a percent.
+
+REPEATS ARE FREE PRECISION, with one condition: RE-PLACE THE BALL between
+them. Three shots at one mark without touching the ball average the sensor
+noise away and leave the detector's sub-pixel bias exactly where it was -
+that shrinks the printed uncertainty without shrinking the error, which is
+worse than not repeating at all. Type the same tape reading for each; the
+fit uses them all and reports their spread separately.
 """
 
 import argparse
@@ -546,43 +565,99 @@ def run_analysis(run_dir, extrinsics_path, config_path):
     # 0.6%. The obliquity in particular is unconstrained, because the unit's
     # forward axis is exactly what this run has not yet measured.
     #
-    # Camera 1's z = 0 plane is not the physical lens plane, but that offset
-    # is constant and cancels in differences. The residual tilt between the
-    # two is the sub-degree attitude measured above, worth under 0.02%.
-    depth_ordered = sorted(buckets["depth"], key=lambda item: item[0]["tape_mm"])
-    measured, taped = [], []
-    for (shot_a, xyz_a), (shot_b, xyz_b) in zip(depth_ordered, depth_ordered[1:]):
-        gap_tape = (shot_b["tape_mm"] - shot_a["tape_mm"]) / 1000.0
-        if gap_tape <= 0.0:
-            print("  skipping {} -> {}: tape did not increase ({:.1f} -> "
-                  "{:.1f} mm)".format(shot_a["name"], shot_b["name"],
-                                       shot_a["tape_mm"], shot_b["tape_mm"]))
-            continue
-        measured.append(float(xyz_b[2] - xyz_a[2]))
-        taped.append(gap_tape)
+    # Camera 1's z = 0 plane is not the physical lens plane. That offset used
+    # to be cancelled by fitting differences; it is now fitted as the
+    # intercept, which cancels it just as completely AND reports it - it is
+    # the project's only estimate of where the optical centre sits behind the
+    # front face.
+    #
+    # The fit is a straight line through all the depth positions, not least
+    # squares through the origin on consecutive differences. That estimator
+    # telescoped, for equally spaced positions, to the two endpoints alone,
+    # and it discarded repeated measurements at one position because their
+    # tape gap is zero - throwing away the cheapest precision on offer.
+    depth_shots = buckets["depth"]
+    if len(depth_shots) >= 3:
+        depths = [float(xyz[2]) for _, xyz in depth_shots]
+        tapes = [shot["tape_mm"] / 1000.0 for shot, _ in depth_shots]
+        fit = triangulate.fit_scale_regression(depths, tapes)
+        # Shots and positions are counted separately because they are not
+        # the same leverage: eighteen shots at six readings has the reach of
+        # six, and "over 18 depth positions" alone invites the other reading.
+        distinct = len(set(shot["tape_mm"] for shot, _ in depth_shots))
+        print("\nscale against tape: {:.4f} +- {:.4f} over {} depth positions "
+              "at {} distinct tape readings (residual {:.2f} mm)".format(
+                  fit.scale, fit.scale_stderr, fit.n, distinct,
+                  fit.rms_m * 1000.0))
+        # Quoted with its uncertainty because the whole question is 0.6% wide:
+        # 78.28 against 78.749. A bare implied baseline to three decimals
+        # reads as settled whatever the scatter behind it was.
+        baseline_mm = rig.baseline_m * 1000.0
+        print("  implied baseline: {:.3f} +- {:.3f} mm against the file's "
+              "{:.3f} mm".format(
+                  baseline_mm / fit.scale,
+                  baseline_mm * fit.scale_stderr / fit.scale ** 2, baseline_mm))
+        print("  lens-plane offset: {:+.1f} mm - the tape's zero sits this far "
+              "in FRONT of camera 1's z = 0 plane, so a positive value means "
+              "the optical centre is that deep inside the housing".format(
+                  fit.offset_m * 1000.0))
 
-    if len(measured) >= 3:
-        scale, rms = triangulate.fit_scale_factor(measured, taped)
-        print("\nscale against tape: {:.4f} over {} depth displacements "
-              "(residual {:.2f} mm)".format(scale, len(measured), rms * 1000.0))
-        print("  implied baseline: {:.3f} mm against the file's {:.3f} mm".format(
-            rig.baseline_m * 1000.0 / scale, rig.baseline_m * 1000.0))
-        # Using the depth component makes the scale immune to a crooked
-        # depth line, but a crooked line is still worth knowing about - it
-        # means the tape readings themselves were taken along something
-        # other than what was intended. Reported so it is visible rather
-        # than silent.
-        straightness = triangulate.straightness_rms_m(
-            np.array([xyz for _, xyz in depth_ordered]))
+        # The stderr above is computed from scatter about the fitted line and
+        # therefore assumes scatter is the only error. It is not: a detection
+        # bias that grows with depth lands entirely in the slope and leaves
+        # the residuals small, so the stderr can be a fraction of the real
+        # error. This is the number that bounds the random part honestly.
+        repeat_spread = triangulate.pooled_repeat_spread_m(depths, tapes)
+        if repeat_spread is None:
+            print("  repeat spread: not measured - no tape reading was "
+                  "captured twice, so nothing independent bounds the stderr "
+                  "above. Three shots per position, RE-PLACING the ball each "
+                  "time, costs two keypresses and measures it.")
+        else:
+            repeated = sum(1 for tape in set(tapes) if tapes.count(tape) > 1)
+            print("  repeat spread: {:.2f} mm rms at repeated positions "
+                  "({} of {} tape readings repeated). Repeats taken without "
+                  "re-placing the ball share the same sub-pixel phase and "
+                  "understate this; a bias that grows with Z is a scale error "
+                  "by another name and no repeat can see it.".format(
+                      repeat_spread * 1000.0, repeated, distinct))
+
+        line = triangulate.fit_line(np.array([xyz for _, xyz in depth_shots]))
+        # A crooked line no longer biases the scale - the fit uses Z alone -
+        # but it still means the tape was run along something other than
+        # what was intended. Reported so it is visible rather than silent.
         print("  depth line straightness: {:.1f} mm rms off its own best-fit "
               "line (scale uses Z alone, so this does not bias it)".format(
-                  straightness * 1000.0))
+                  line.rms_m * 1000.0))
+        # The one thing the run had no measurement of at all. Comparing a
+        # difference of Z against a difference of tape readings assumes the
+        # line the balls sat on ran along the optical axis; the angle between
+        # them multiplies the measured side by its cosine. 2 deg is 0.06%,
+        # 5 deg is 0.38%, against a 0.6% signal.
+        print("  depth line obliquity: {:.2f} deg off the optical axis "
+              "(horizontal {:+.2f}, vertical {:+.2f} deg). Vertical should "
+              "echo the pitch above for a level floor line.".format(
+                  line.obliquity_deg, line.horizontal_deg, line.vertical_deg))
+        # cos(obliquity) IS direction[2] - taking it from the vector rather
+        # than re-cosining the printed, rounded angle.
+        cos_obliquity = float(line.direction[2])
+        if cos_obliquity > 0.7:
+            print("  scale if the tape ran along that line: {:.4f} +- {:.4f} "
+                  "(raw / cos obliquity). Use THIS one if the readings came "
+                  "off a rule the balls sat on; use the raw one if they were "
+                  "perpendicular distances to the front face. The two agree "
+                  "to {:.2f}% here.".format(
+                      fit.scale / cos_obliquity,
+                      fit.scale_stderr / cos_obliquity,
+                      100.0 * (1.0 / cos_obliquity - 1.0)))
+        else:
+            print("  the depth line is {:.1f} deg off the optical axis - too "
+                  "far for either reading of the tape to mean much. Re-lay it "
+                  "roughly straight out from the unit.".format(
+                      line.obliquity_deg))
     else:
-        # len(depth_ordered), not len(measured) + 1 - a skipped non-
-        # increasing pair above would otherwise undercount how many depth
-        # positions are actually present.
-        print("\nscale: needs 4+ usable depth positions laid along one line "
-              "running away from the unit, have {}".format(len(depth_ordered)))
+        print("\nscale: needs 3+ usable depth positions laid along one line "
+              "running away from the unit, have {}".format(len(depth_shots)))
 
     # --- writing this into PiTrac's legacy constant, explicitly a lossy
     # inheritance and not the measurement itself ---------------------------
@@ -642,6 +717,16 @@ def run_analysis(run_dir, extrinsics_path, config_path):
               "counter-clockwise viewed from above - has not been checked. "
               "Confirm against the physical target-line placement when "
               "this capture run is actually done.".format(yaw))
+        # Pitch and roll are pinned by the mount and the floor and are
+        # properties of the device. Yaw is the angle to a line the operator
+        # chose, and the unit is free-standing - no mat edge, no marked
+        # position - so it describes the session. Pasting it into a constant
+        # freezes one afternoon's placement into the geometry.
+        print("  Beyond its sign: with the unit free-standing this angle "
+              "describes TODAY'S PLACEMENT and not the unit. Pitch and roll "
+              "are pinned by the mount and the floor; yaw is pinned by where "
+              "the unit was set down. It becomes a constant only once that "
+              "placement is repeatable - a mat edge or a marked position.")
     print("  roll = {:+.3f} deg is DROPPED, not zero: kCamera1Angles "
           "carries no roll term to hold it.".format(roll))
     print("\nBlock 2 should carry the attitude as a full rotation applied "

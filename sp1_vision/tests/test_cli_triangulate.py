@@ -883,6 +883,231 @@ class RunAnalysisTest(unittest.TestCase):
         finally:
             shutil.rmtree(run_dir)
 
+    @staticmethod
+    def _scale_line_field(output, index):
+        line = next(l for l in output.splitlines()
+                    if l.strip().startswith("scale against tape:"))
+        return line.split(":")[1].split()[index]
+
+    @staticmethod
+    def _labelled_number(output, label):
+        line = next(l for l in output.splitlines() if label in l)
+        return float(line.split(":")[1].split()[0])
+
+    def _spread_pair(self, rig, run_dir, shots):
+        """Two lateral positions, so the floor plane is determined."""
+        for i, (x, z) in enumerate(((-0.22, 0.40), (0.22, 0.60))):
+            name = "gs_s{}.png".format(i)
+            self._write(run_dir, name, *project(rig, np.array([x, 0.0937, z])))
+            shots.append({"name": name, "tape_mm": z * 1000.0,
+                          "series": "spread", "found": True})
+
+    def test_the_scale_carries_its_own_uncertainty(self):
+        # The question the run exists to settle is 0.6% wide. A scale
+        # printed bare cannot answer it either way, and the reader has no
+        # way to tell 1.004 +- 0.001 from 1.004 +- 0.009 - the first
+        # settles it, the second says come back with more shots.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = self._wandering_depth_series(rig, run_dir, lateral_mm=0.0)
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+
+            self.assertIn("+-", self._scale_line_field(output, 1))
+            stderr = float(self._scale_line_field(output, 2))
+            self.assertGreater(stderr, 0.0)
+            self.assertLess(stderr, 0.05)
+            # The implied baseline inherits the same uncertainty; quoting it
+            # to three decimals without one invites reading 78.412 as
+            # settled against 78.749.
+            baseline_line = next(l for l in output.splitlines()
+                                 if "implied baseline" in l)
+            self.assertIn("+-", baseline_line)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_a_lens_plane_offset_reads_as_an_offset_not_a_scale(self):
+        # The tape is read from the unit's front face; Z is measured from
+        # camera 1's z = 0 plane, somewhere inside the housing. Here that
+        # gap is 50 mm. Fitting differences used to cancel it; fitting with
+        # an intercept measures it instead, which is strictly more - it is
+        # the only estimate of that distance the project has.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+            for i, tape in enumerate([350.0, 420.0, 490.0, 560.0, 630.0]):
+                name = "gs_o{:02d}.png".format(i)
+                self._write(run_dir, name, *project(
+                    rig, np.array([0.0, 0.0937, tape / 1000.0 + 0.050])))
+                shots.append({"name": name, "tape_mm": tape,
+                              "series": "depth", "found": True})
+            self._spread_pair(rig, run_dir, shots)
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+
+            self.assertAlmostEqual(float(self._scale_line_field(output, 0)),
+                                   1.0, delta=0.02)
+            self.assertAlmostEqual(
+                self._labelled_number(output, "lens-plane offset"),
+                50.0, delta=8.0)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_repeats_at_one_tape_reading_are_used_rather_than_skipped(self):
+        # Three frames per position without touching the ball is the
+        # cheapest precision available on the floor. The consecutive-
+        # differences estimator dropped every repeat, because a repeated
+        # position has a zero tape gap, and said so in a line the operator
+        # would read as a warning about their own layout.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+            for i, tape in enumerate([380.0, 500.0, 620.0]):
+                for repeat in (1, 2):
+                    name = "gs_r{}{}.png".format(i, repeat)
+                    self._write(run_dir, name, *project(
+                        rig, np.array([0.0, 0.0937, tape / 1000.0])))
+                    shots.append({"name": name, "tape_mm": tape,
+                                  "series": "depth", "found": True})
+            self._spread_pair(rig, run_dir, shots)
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+
+            self.assertNotIn("did not increase", output)
+            self.assertIn("over 6 depth positions", output)
+            self.assertAlmostEqual(float(self._scale_line_field(output, 0)),
+                                   1.0, delta=0.02)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_an_oblique_depth_line_is_measured_and_its_bias_undone(self):
+        # The tape ran along the ball line - a rule on the floor, which is
+        # what an operator actually lays - but the line sat 12 deg off the
+        # optical axis. The raw scale then reads cos(12) = 0.978 low, which
+        # is four times the whole 0.6% signal, and nothing else in the run
+        # would have shown it.
+        psi = np.radians(12.0)
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+            for i, along_m in enumerate([0.0, 0.07, 0.14, 0.21, 0.28]):
+                xyz = np.array([along_m * np.sin(psi), 0.0937,
+                                0.360 + along_m * np.cos(psi)])
+                name = "gs_q{:02d}.png".format(i)
+                self._write(run_dir, name, *project(rig, xyz))
+                shots.append({"name": name, "tape_mm": 360.0 + along_m * 1000.0,
+                              "series": "depth", "found": True})
+            self._spread_pair(rig, run_dir, shots)
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+
+            obliquity = self._labelled_number(output, "depth line obliquity")
+            self.assertAlmostEqual(obliquity, 12.0, delta=1.5)
+
+            raw = float(self._scale_line_field(output, 0))
+            self.assertAlmostEqual(raw, np.cos(psi), delta=0.02)
+
+            corrected = self._labelled_number(
+                output, "scale if the tape ran along")
+            self.assertAlmostEqual(corrected, 1.0, delta=0.02)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_the_scale_line_separates_shots_from_distinct_positions(self):
+        # 18 shots at 6 readings has the leverage of 6, not of 18. A bare
+        # "over 18 depth positions" invites the opposite reading.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+            for i, tape in enumerate([380.0, 500.0, 620.0]):
+                for repeat in (1, 2):
+                    name = "gs_c{}{}.png".format(i, repeat)
+                    self._write(run_dir, name, *project(
+                        rig, np.array([0.0, 0.0937, tape / 1000.0])))
+                    shots.append({"name": name, "tape_mm": tape,
+                                  "series": "depth", "found": True})
+            self._spread_pair(rig, run_dir, shots)
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+            self.assertIn("over 6 depth positions at 3 distinct tape readings",
+                          output)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_the_repeat_spread_bounds_what_the_stderr_cannot(self):
+        # The ball put back on its mark three times, landing 10 mm apart.
+        # The regression's stderr is computed from scatter about the fitted
+        # line and would report this as small; the repeat spread is what
+        # says how repeatable one shot actually was.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+            for i, (tape, z) in enumerate([(380.0, 0.380),
+                                           (500.0, 0.490),
+                                           (500.0, 0.500),
+                                           (500.0, 0.510),
+                                           (620.0, 0.620)]):
+                name = "gs_p{:02d}.png".format(i)
+                self._write(run_dir, name, *project(
+                    rig, np.array([0.0, 0.0937, z])))
+                shots.append({"name": name, "tape_mm": tape,
+                              "series": "depth", "found": True})
+            self._spread_pair(rig, run_dir, shots)
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+            spread = self._labelled_number(output, "repeat spread")
+            self.assertGreater(spread, 5.0)
+            self.assertLess(spread, 20.0)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_a_series_with_no_repeats_says_so_rather_than_printing_a_zero(self):
+        # Zero would read as perfect repeatability. The series measured no
+        # repeatability at all, which is a different statement.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = self._wandering_depth_series(rig, run_dir, lateral_mm=0.0)
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+            line = next(l for l in output.splitlines() if "repeat spread" in l)
+            self.assertIn("not measured", line)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_pan_is_named_a_property_of_the_placement_not_of_the_unit(self):
+        # Pitch and roll are pinned by the mount and the floor. Yaw is the
+        # angle to a line the operator chose, and the unit is free-standing
+        # - no mat edge, no marked position - so it describes the session,
+        # not the device. Pasting it into a constant would freeze one
+        # afternoon's placement into the geometry.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = self._wandering_depth_series(rig, run_dir, lateral_mm=0.0)
+            for i, (x, z) in enumerate(((0.0, 0.40), (0.10, 0.68))):
+                name = "gs_tl{}.png".format(i)
+                self._write(run_dir, name, *project(rig, np.array([x, 0.0937, z])))
+                shots.append({"name": name, "tape_mm": z * 1000.0,
+                              "series": "target", "found": True})
+
+            rc, output = self._run_analysis(run_dir, rig, shots)
+            self.assertEqual(rc, 0, output)
+            self.assertIn("today's placement", output.lower())
+        finally:
+            shutil.rmtree(run_dir)
+
     def test_header_states_the_depth_tolerance_the_table_is_read_against(self):
         rig = make_rig()
         run_dir = tempfile.mkdtemp()

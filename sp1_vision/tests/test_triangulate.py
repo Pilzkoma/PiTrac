@@ -159,79 +159,249 @@ class DepthSensitivityTest(unittest.TestCase):
                 triangulate.depth_sensitivity_mm_per_px(rig, depth)
 
 
-class StraightnessTest(unittest.TestCase):
-    """How far the depth series wandered off the line it was meant to be.
+# Six positions 70 mm apart, the layout the capture protocol asks for. Used
+# by the regression tests below so they all speak about the same series the
+# operator actually lays out on the floor.
+TAPE_SERIES_M = np.array([0.350, 0.420, 0.490, 0.560, 0.630, 0.700])
 
-    Reported next to the scale so a badly-laid line is visible. The scale
-    itself uses the depth component alone and is immune to this, which is
-    the point of measuring it separately rather than letting it hide inside
-    the scale residual.
+
+class ScaleRegressionTest(unittest.TestCase):
+    """Scale from a straight-line fit of triangulated depth against tape.
+
+    This replaces a consecutive-differences estimator, and the reason is not
+    stylistic. Least squares through the origin on consecutive differences
+    telescopes, for equally spaced positions, to exactly
+    (Z_last - Z_first) / (tape_last - tape_first): the four interior
+    positions contribute nothing at all. The operator lays out six and six
+    should count.
+
+    Fitting with an intercept keeps the property that motivated differences
+    in the first place - where camera 1's z = 0 plane sits relative to the
+    tape's zero is unknown, and must land in the intercept rather than in
+    the scale.
     """
 
-    def test_a_perfect_line_reads_zero(self):
-        pts = np.array([[0.03, 0.0937, z] for z in (0.35, 0.42, 0.49, 0.56)])
-        self.assertLess(triangulate.straightness_rms_m(pts), 1e-12)
+    def test_perfect_agreement_gives_unit_scale_and_no_offset(self):
+        fit = triangulate.fit_scale_regression(TAPE_SERIES_M, TAPE_SERIES_M)
+        self.assertAlmostEqual(fit.scale, 1.0, places=9)
+        self.assertAlmostEqual(fit.offset_m, 0.0, places=9)
+        self.assertLess(fit.rms_m, 1e-12)
 
-    def test_a_line_oblique_to_every_axis_still_reads_zero(self):
-        # Straightness, not axis-alignment: a line laid at an angle to the
-        # unit is still a line, and the number must not punish it for that.
-        direction = np.array([0.3, 0.05, 1.0])
-        pts = np.array([np.array([0.0, 0.09, 0.35]) + t * direction
-                        for t in (0.0, 0.07, 0.14, 0.21)])
-        self.assertLess(triangulate.straightness_rms_m(pts), 1e-12)
+    def test_recovers_a_known_scale_error(self):
+        # 78.28 against 78.749 mm of baseline is 0.6%, and a baseline 0.6%
+        # too large makes every triangulated distance 0.6% too large.
+        fit = triangulate.fit_scale_regression(TAPE_SERIES_M * 1.006,
+                                               TAPE_SERIES_M)
+        self.assertAlmostEqual(fit.scale, 1.006, places=9)
 
-    def test_a_lateral_wobble_shows_up(self):
+    def test_an_unknown_lens_plane_lands_in_the_offset_not_the_scale(self):
+        # The tape is read from the unit's front face; Z is measured from
+        # camera 1's z = 0 plane, which sits somewhere inside the housing.
+        # That constant must not read as a scale error.
+        fit = triangulate.fit_scale_regression(TAPE_SERIES_M + 0.137,
+                                               TAPE_SERIES_M)
+        self.assertAlmostEqual(fit.scale, 1.0, places=9)
+        self.assertAlmostEqual(fit.offset_m, 0.137, places=9)
+
+    def test_the_interior_positions_move_the_answer(self):
+        # The defect in the consecutive-differences estimator, stated as a
+        # property: two series with IDENTICAL endpoints and different
+        # interiors must not fit the same scale. The old estimator returned
+        # the same number for both, because it only ever saw the endpoints.
+        straight = TAPE_SERIES_M.copy()
+        bowed = TAPE_SERIES_M.copy()
+        bowed[1] += 0.004
+        bowed[2] += 0.004          # endpoints untouched, one side bowed
+
+        flat_fit = triangulate.fit_scale_regression(straight, TAPE_SERIES_M)
+        bowed_fit = triangulate.fit_scale_regression(bowed, TAPE_SERIES_M)
+
+        self.assertAlmostEqual(flat_fit.scale, 1.0, places=9)
+        self.assertGreater(abs(bowed_fit.scale - flat_fit.scale), 0.003)
+
+    def test_a_noiseless_series_claims_no_uncertainty(self):
+        fit = triangulate.fit_scale_regression(TAPE_SERIES_M, TAPE_SERIES_M)
+        self.assertAlmostEqual(fit.scale_stderr, 0.0, places=12)
+
+    def test_twice_the_scatter_is_twice_the_stated_uncertainty(self):
+        wobble = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0]) * 0.001
+        tight = triangulate.fit_scale_regression(TAPE_SERIES_M + wobble,
+                                                 TAPE_SERIES_M)
+        loose = triangulate.fit_scale_regression(TAPE_SERIES_M + 2 * wobble,
+                                                 TAPE_SERIES_M)
+        self.assertGreater(tight.scale_stderr, 0.0)
+        self.assertAlmostEqual(loose.scale_stderr / tight.scale_stderr,
+                               2.0, places=6)
+
+    def test_repeats_at_one_position_are_used_and_tighten_the_estimate(self):
+        # Three frames at each position, without touching the ball, is two
+        # extra keypresses and it is how the operator buys precision on a
+        # 0.6% question. A consecutive-differences estimator discarded them
+        # outright: repeated positions give a zero tape gap.
+        wobble = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0]) * 0.001
+        once = triangulate.fit_scale_regression(TAPE_SERIES_M + wobble,
+                                                TAPE_SERIES_M)
+        thrice = triangulate.fit_scale_regression(
+            np.tile(TAPE_SERIES_M + wobble, 3), np.tile(TAPE_SERIES_M, 3))
+
+        self.assertEqual(thrice.n, 18)
+        self.assertAlmostEqual(thrice.scale, once.scale, places=9)
+        # n 6 -> 18 triples both the scatter sum and the tape spread, while
+        # the degrees of freedom go 4 -> 16: the uncertainty halves exactly.
+        self.assertAlmostEqual(thrice.scale_stderr / once.scale_stderr,
+                               0.5, places=6)
+
+    def test_refuses_fewer_than_three_positions(self):
+        # Two points fit any line exactly. A zero residual and a zero
+        # uncertainty from that would be a statement about arithmetic.
+        with self.assertRaises(ValueError):
+            triangulate.fit_scale_regression(np.array([0.35, 0.42]),
+                                             np.array([0.35, 0.42]))
+
+    def test_refuses_a_tape_that_never_moved(self):
+        with self.assertRaises(ValueError):
+            triangulate.fit_scale_regression(np.array([0.35, 0.36, 0.37]),
+                                             np.array([0.40, 0.40, 0.40]))
+
+    def test_refuses_mismatched_lengths(self):
+        with self.assertRaises(ValueError):
+            triangulate.fit_scale_regression(np.array([0.35]),
+                                             np.array([0.35, 0.42]))
+
+
+class RepeatSpreadTest(unittest.TestCase):
+    """What repeated shots at one tape reading actually establish.
+
+    The scale's standard error is computed from scatter about the fitted
+    line, and it assumes scatter is the only error there is. It is not: a
+    detection bias that grows with depth is a scale error by another name,
+    it lands entirely in the slope, and no amount of scatter-based
+    arithmetic can see it. Reporting the within-position spread separately
+    is what keeps a small stderr from being read as a small error.
+    """
+
+    def test_identical_repeats_have_no_spread(self):
+        spread = triangulate.pooled_repeat_spread_m(
+            [0.50, 0.50, 0.50, 0.62, 0.62], [500.0, 500.0, 500.0, 620.0, 620.0])
+        self.assertAlmostEqual(spread, 0.0, places=12)
+
+    def test_recovers_a_known_within_group_spread(self):
+        # Deviations of +-10 mm and 0 about the group mean: the pooled
+        # estimate over 2 degrees of freedom is sqrt(0.0002 / 2) = 10 mm.
+        spread = triangulate.pooled_repeat_spread_m(
+            [0.500, 0.510, 0.490], [500.0, 500.0, 500.0])
+        self.assertAlmostEqual(spread, 0.010, places=9)
+
+    def test_pools_across_groups_rather_than_averaging_them(self):
+        # Two groups of two, deviations +-5 mm and +-15 mm about their own
+        # means: sum of squares 2*(0.005^2) + 2*(0.015^2) = 5.0e-4 over 2
+        # degrees of freedom, so 15.81 mm. Averaging the two groups' spreads
+        # would give 14.14 and quietly understate the worse one.
+        spread = triangulate.pooled_repeat_spread_m(
+            [0.495, 0.505, 0.605, 0.635],
+            [500.0, 500.0, 620.0, 620.0])
+        self.assertAlmostEqual(spread, 0.0158114, places=6)
+
+    def test_a_position_measured_once_contributes_nothing(self):
+        # A singleton group has no deviation from its own mean and no
+        # degree of freedom. Counting it would drag the estimate toward zero.
+        with_singleton = triangulate.pooled_repeat_spread_m(
+            [0.500, 0.510, 0.490, 0.700], [500.0, 500.0, 500.0, 700.0])
+        self.assertAlmostEqual(with_singleton, 0.010, places=9)
+
+    def test_returns_none_when_nothing_was_repeated(self):
+        # Not zero. Zero is a measurement of perfect repeatability, and a
+        # series with no repeats made no such measurement.
+        self.assertIsNone(triangulate.pooled_repeat_spread_m(
+            [0.35, 0.42, 0.49], [350.0, 420.0, 490.0]))
+
+    def test_refuses_mismatched_lengths(self):
+        with self.assertRaises(ValueError):
+            triangulate.pooled_repeat_spread_m([0.35, 0.42], [350.0])
+
+
+class LineFitTest(unittest.TestCase):
+    """The depth line's own direction, which the scale fit depends on.
+
+    The scale compares a difference of triangulated Z against a difference
+    of tape readings. Those are the same quantity only insofar as the line
+    the balls sat on runs along camera 1's optical axis. The angle between
+    the two biases the scale by cos of itself - 2 deg is 0.06%, 5 deg is
+    0.38%, against a 0.6% question - and nothing in the run measured it.
+    The points themselves do.
+    """
+
+    def _along(self, direction, start=(0.0, 0.09, 0.35), steps=(0, 1, 2, 3)):
+        direction = np.asarray(direction, dtype=float)
+        direction = direction / np.linalg.norm(direction)
+        return np.array([np.asarray(start, float) + t * 0.07 * direction
+                         for t in steps])
+
+    def test_a_line_along_the_optical_axis_has_no_obliquity(self):
+        fit = triangulate.fit_line(self._along([0.0, 0.0, 1.0]))
+        self.assertAlmostEqual(fit.obliquity_deg, 0.0, places=9)
+        self.assertAlmostEqual(fit.horizontal_deg, 0.0, places=9)
+        self.assertAlmostEqual(fit.vertical_deg, 0.0, places=9)
+
+    def test_direction_points_away_from_the_camera_whatever_the_point_order(self):
+        # SVD returns a direction of arbitrary sign. Left alone, half of all
+        # runs would report a 175 deg obliquity for a line laid 5 deg off,
+        # and the scale correction would be catastrophically wrong rather
+        # than visibly wrong.
+        points = self._along([np.sin(np.radians(5.0)), 0.0,
+                              np.cos(np.radians(5.0))])
+        for ordered in (points, points[::-1]):
+            fit = triangulate.fit_line(ordered)
+            self.assertGreater(fit.direction[2], 0.0)
+            self.assertAlmostEqual(fit.obliquity_deg, 5.0, places=6)
+
+    def test_recovers_a_line_swung_to_the_right(self):
+        # Same sense as yaw_from_target_line: positive means the line runs
+        # to the camera's right as it goes away.
+        fit = triangulate.fit_line(
+            self._along([np.sin(np.radians(5.0)), 0.0, np.cos(np.radians(5.0))]))
+        self.assertAlmostEqual(fit.horizontal_deg, 5.0, places=6)
+        self.assertAlmostEqual(fit.vertical_deg, 0.0, places=9)
+        self.assertAlmostEqual(fit.obliquity_deg, 5.0, places=6)
+
+    def test_recovers_a_line_running_downhill_in_the_camera_frame(self):
+        # Y is down, so a positive vertical angle means the line descends as
+        # it recedes. For a level floor line this equals the camera's own
+        # pitch: a nose-down camera reads negative on both.
+        fit = triangulate.fit_line(
+            self._along([0.0, np.sin(np.radians(-3.0)), np.cos(np.radians(3.0))]))
+        self.assertAlmostEqual(fit.vertical_deg, -3.0, places=6)
+        self.assertAlmostEqual(fit.horizontal_deg, 0.0, places=9)
+        self.assertAlmostEqual(fit.obliquity_deg, 3.0, places=6)
+
+    def test_a_perfect_line_has_no_scatter(self):
+        self.assertLess(triangulate.fit_line(self._along([0.0, 0.0, 1.0])).rms_m,
+                        1e-12)
+
+    def test_a_line_oblique_to_every_axis_still_has_no_scatter(self):
+        # Straightness, not axis-alignment. Taking the scatter from the two
+        # smaller singular values rather than by subtracting the along-line
+        # part keeps this from reading millimetres of pure rounding.
+        self.assertLess(triangulate.fit_line(self._along([0.3, 0.05, 1.0])).rms_m,
+                        1e-12)
+
+    def test_a_lateral_wobble_shows_up_in_the_scatter(self):
         # 5 mm of sideways wander is the figure that would have inflated a
         # 3D-norm scale fit by 0.26% - a quarter of the 0.6% being resolved.
         pts = np.array([[0.03, 0.0937, 0.35],
                         [0.03 + 0.005, 0.0937, 0.42],
                         [0.03, 0.0937, 0.49],
                         [0.03 + 0.005, 0.0937, 0.56]])
-        rms = triangulate.straightness_rms_m(pts)
+        rms = triangulate.fit_line(pts).rms_m
         self.assertGreater(rms, 0.001)
         self.assertLess(rms, 0.005)
 
     def test_refuses_fewer_than_three_points(self):
-        # Two points are exactly collinear by definition; a zero from that
-        # would be a statement about arithmetic, not about the operator.
+        # Two points are exactly collinear by definition; a zero scatter
+        # from that would be a statement about arithmetic, not the operator.
         with self.assertRaises(ValueError):
-            triangulate.straightness_rms_m(
-                np.array([[0.0, 0.09, 0.35], [0.0, 0.09, 0.42]]))
-
-
-class ScaleFactorTest(unittest.TestCase):
-    """Does the triangulated world match the tape's, in size?
-
-    Fitted on DIFFERENCES between positions, never on absolute distances -
-    the lens plane's exact location is a guess, and a constant offset in it
-    would masquerade as a scale error.
-    """
-
-    def test_perfect_agreement_gives_unit_scale(self):
-        tape = np.array([0.070, 0.070, 0.070, 0.070, 0.070])
-        scale, rms = triangulate.fit_scale_factor(tape, tape)
-        self.assertAlmostEqual(scale, 1.0, places=9)
-        self.assertLess(rms, 1e-12)
-
-    def test_recovers_a_known_scale_error(self):
-        # 78.28 against 78.749 mm of baseline is 0.6%, and a baseline that is
-        # 0.6% too large makes every triangulated distance 0.6% too large.
-        tape = np.array([0.070, 0.070, 0.070, 0.070, 0.070, 0.070])
-        measured = tape * 1.006
-        scale, rms = triangulate.fit_scale_factor(measured, tape)
-        self.assertAlmostEqual(scale, 1.006, places=6)
-        self.assertLess(rms, 1e-9)
-
-    def test_noise_shows_up_in_the_residual_not_the_scale(self):
-        tape = np.full(6, 0.070)
-        measured = tape + np.array([0.001, -0.001, 0.0008, -0.0009, 0.0, 0.0011])
-        scale, rms = triangulate.fit_scale_factor(measured, tape)
-        self.assertAlmostEqual(scale, 1.0, delta=0.01)
-        self.assertGreater(rms, 1e-5)
-
-    def test_refuses_mismatched_lengths(self):
-        with self.assertRaises(ValueError):
-            triangulate.fit_scale_factor(np.array([0.07]), np.array([0.07, 0.07]))
+            triangulate.fit_line(np.array([[0.0, 0.09, 0.35],
+                                           [0.0, 0.09, 0.42]]))
 
 
 if __name__ == "__main__":
