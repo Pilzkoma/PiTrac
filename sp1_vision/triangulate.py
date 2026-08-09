@@ -74,6 +74,13 @@ def fit_scale_factor(measured_m, tape_m):
     Both inputs must be DIFFERENCES between positions, not distances from
     the camera. Where exactly the lens plane sits is a guess, and a constant
     error in it would read as a scale error if absolute distances were used.
+
+    The two differences must also be of the SAME quantity. The caller passes
+    differences of triangulated DEPTH against differences of perpendicular
+    tape readings; passing 3D point-to-point separations instead would
+    compare a chord with a perpendicular distance, and every departure from
+    a perfectly straight, perfectly perpendicular line would then inflate
+    the measured side only - a one-directional bias on a 0.6% question.
     """
     measured = np.asarray(measured_m, dtype=np.float64).ravel()
     tape = np.asarray(tape_m, dtype=np.float64).ravel()
@@ -93,6 +100,37 @@ def fit_scale_factor(measured_m, tape_m):
     return scale, float(np.sqrt(np.mean(residuals ** 2)))
 
 
+def straightness_rms_m(points_m):
+    """RMS deviation of points from their own best-fit 3D line, metres.
+
+    The depth series is supposed to be laid along one straight line running
+    away from the unit. Nothing else checks that it was. A line laid with a
+    wobble does not show up in the scale fit's residual in any way that
+    distinguishes it from detection noise, so it is measured separately and
+    reported next to the scale it affects.
+    """
+    pts = np.asarray(points_m, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError("expected an (N, 3) array, got {}".format(pts.shape))
+    if pts.shape[0] < 3:
+        # Two points always lie exactly on a line; fewer than that has no
+        # line at all. Neither is evidence, so neither gets a number.
+        raise ValueError(
+            "straightness needs at least 3 points, got {}".format(pts.shape[0]))
+
+    # The two smaller singular values ARE the perpendicular spread: the
+    # squared distances to the best-fit line sum to s[1]^2 + s[2]^2. Taking
+    # it from them rather than as (total - along^2) matters - that
+    # subtraction cancels two nearly equal large numbers and leaves 2e-9 m
+    # of pure rounding on a line that is exactly straight but not
+    # axis-aligned, which is a millimetre-scale readout claiming precision
+    # it does not have.
+    centred = pts - pts.mean(axis=0)
+    singular = np.linalg.svd(centred, compute_uv=False)
+    perpendicular_sq = float(singular[1] ** 2 + singular[2] ** 2)
+    return float(np.sqrt(perpendicular_sq / pts.shape[0]))
+
+
 def depth_sensitivity_mm_per_px(rig, depth_m):
     """How much depth error one pixel of disparity error buys, in mm.
 
@@ -100,5 +138,13 @@ def depth_sensitivity_mm_per_px(rig, depth_m):
     pixel, so roughly 1.8 mm at half-pixel detection - the figure that sets
     what counts as agreement with a tape measure.
     """
+    depth = float(depth_m)
+    if depth <= 0.0:
+        # Z = 0 is the camera's own centre and Z < 0 is behind it. Squaring
+        # would quietly turn a negative depth into a plausible-looking
+        # positive tolerance, which is worse than no answer.
+        raise ValueError(
+            "depth must be positive, got {:.4f} m - a point at or behind the "
+            "camera centre has no depth tolerance".format(depth))
     fx = float(rig.k1[0, 0])
-    return 1000.0 * (float(depth_m) ** 2) / (rig.baseline_m * fx)
+    return 1000.0 * (depth ** 2) / (rig.baseline_m * fx)

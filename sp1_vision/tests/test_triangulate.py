@@ -140,6 +140,55 @@ class DepthSensitivityTest(unittest.TestCase):
         self.assertAlmostEqual(
             triangulate.depth_sensitivity_mm_per_px(rig, 0.5087), 3.65, delta=0.05)
 
+    def test_refuses_a_non_positive_depth(self):
+        # Z is squared, so a negative depth would come back as a perfectly
+        # plausible positive tolerance - the one arithmetic here that can
+        # turn a nonsense input into a believable output.
+        rig = make_rig()
+        for depth in (0.0, -0.5):
+            with self.assertRaises(ValueError):
+                triangulate.depth_sensitivity_mm_per_px(rig, depth)
+
+
+class StraightnessTest(unittest.TestCase):
+    """How far the depth series wandered off the line it was meant to be.
+
+    Reported next to the scale so a badly-laid line is visible. The scale
+    itself uses the depth component alone and is immune to this, which is
+    the point of measuring it separately rather than letting it hide inside
+    the scale residual.
+    """
+
+    def test_a_perfect_line_reads_zero(self):
+        pts = np.array([[0.03, 0.0937, z] for z in (0.35, 0.42, 0.49, 0.56)])
+        self.assertLess(triangulate.straightness_rms_m(pts), 1e-12)
+
+    def test_a_line_oblique_to_every_axis_still_reads_zero(self):
+        # Straightness, not axis-alignment: a line laid at an angle to the
+        # unit is still a line, and the number must not punish it for that.
+        direction = np.array([0.3, 0.05, 1.0])
+        pts = np.array([np.array([0.0, 0.09, 0.35]) + t * direction
+                        for t in (0.0, 0.07, 0.14, 0.21)])
+        self.assertLess(triangulate.straightness_rms_m(pts), 1e-12)
+
+    def test_a_lateral_wobble_shows_up(self):
+        # 5 mm of sideways wander is the figure that would have inflated a
+        # 3D-norm scale fit by 0.26% - a quarter of the 0.6% being resolved.
+        pts = np.array([[0.03, 0.0937, 0.35],
+                        [0.03 + 0.005, 0.0937, 0.42],
+                        [0.03, 0.0937, 0.49],
+                        [0.03 + 0.005, 0.0937, 0.56]])
+        rms = triangulate.straightness_rms_m(pts)
+        self.assertGreater(rms, 0.001)
+        self.assertLess(rms, 0.005)
+
+    def test_refuses_fewer_than_three_points(self):
+        # Two points are exactly collinear by definition; a zero from that
+        # would be a statement about arithmetic, not about the operator.
+        with self.assertRaises(ValueError):
+            triangulate.straightness_rms_m(
+                np.array([[0.0, 0.09, 0.35], [0.0, 0.09, 0.42]]))
+
 
 class ScaleFactorTest(unittest.TestCase):
     """Does the triangulated world match the tape's, in size?
