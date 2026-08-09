@@ -115,8 +115,26 @@ The operating detail is in `sp1_vision/calibration_images/README.md`.
 
 ## Current task
 Next SP1 items, in this order:
-1. **World geometry.** `kCameraNPositionsFromOriginMeters` and `kCameraNAngles` still
-   hold PiTrac's numbers at a decided 50 cm working distance.
+1. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
+   not equally important:
+   - `kCameraNPositionsFromExpectedBallMeters` (cam1 `[-0.200, -0.234, 0.54]`, cam2
+     `[0.0, -0.051, 0.45]`). **Note the name** — `kCameraNPositionsFromOriginMeters`
+     appears only in PiTrac's `docs/camera/camera-calibration.md` and does not exist
+     in this code. The origin is the *expected ball*, not a point on the floor. Only
+     the **magnitude** is ever read, at `gs_camera.cpp:455/458` via
+     `CvUtils::GetDistance`, as the expected ball distance for the search radius;
+     direction and sign go nowhere. Confirmed at runtime: the trace prints
+     `distance: 0.621575`, which is exactly the length of cam1's vector. At a 50 cm
+     working distance this is currently 24 % too far.
+   - `kCameraNAngles` (cam1 `[18.72, -24.18]`, cam2 `[-2.06, 3.83]`), pan/tilt against
+     a level bore per `docs/camera/camera-calibration.md:170-173`. These feed
+     `camera_angles_` into `AdjustXYZDistancesForCameraAngles` and become HLA and VLA,
+     so they are the ones that actually matter.
+   - `kCamera2OffsetFromCamera1OriginMeters` = `[0.00, -0.19, 0.0]`, added at
+     `gs_camera.cpp:700-703` and `lm_main.cpp:865`. This is PiTrac's **vertical** 19 cm
+     camera stacking. Ours sit side by side at 78.28 mm, so until this is changed the
+     delta path carries a 19 cm offset that does not exist. Note the axis permutation
+     at 701-703: `position_deltas_ball_perspective_` takes offset `[2],[1],[0]`.
 2. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
    still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.55 mm
    of depth per pixel of disparity error (~1.8 mm at half-pixel matching), which is
