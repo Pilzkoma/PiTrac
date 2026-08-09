@@ -99,10 +99,14 @@ class AttitudeTest(unittest.TestCase):
         self.assertAlmostEqual(roll, -1.1, places=3)
 
     def test_recovers_both_together(self):
+        # Both formulas in attitude_from_plane are exact for this fixture's
+        # rotation order (not small-angle approximations - see that
+        # function's docstring), so this holds to the same tolerance as
+        # its single-angle neighbours rather than needing a looser one.
         pitch, roll = ground_plane.attitude_from_plane(
             ground_plane.fit_plane(floor_points(pitch_deg=-0.9, roll_deg=0.8)))
-        self.assertAlmostEqual(pitch, -0.9, places=2)
-        self.assertAlmostEqual(roll, 0.8, places=2)
+        self.assertAlmostEqual(pitch, -0.9, places=3)
+        self.assertAlmostEqual(roll, 0.8, places=3)
 
 
 class YawTest(unittest.TestCase):

@@ -91,36 +91,38 @@ def attitude_from_plane(plane):
     Positive roll is right-side-down (rotation about +Z: +X rotates toward
     +Y).
 
-    With the camera level, world-up expressed in the camera frame is
-    exactly (0, -1, 0). A camera pitched nose-up by theta has its bore axis
-    Z_c = (0, -sin theta, cos theta) and, forced by right-handedness,
-    Y_c = (0, cos theta, sin theta); resolving world-up onto those axes
-    gives normal (0, -cos theta, sin theta). So pitch_deg = arcsin(n[2]),
-    positive for nose-up as required.
+    Both formulas below are exact for this module's own composition -
+    pitch about X applied first, then roll about the fixed Z, i.e. points
+    are rotated by R = Rz(roll) @ Rx(pitch) in test_ground_plane's
+    floor_points, and a world-fixed point in a camera rotated by R
+    transforms by R^-1 = R.T. Working that through for the level-camera
+    normal (0, -1, 0) gives, for pitch theta and roll phi together:
 
-    For a pure roll phi the normal is (-sin phi, -cos phi, 0), so
-    roll_deg = -arctan2(n[0], -n[1]) recovers it exactly there. This form,
-    not -arcsin(n[0]), is what is shipped, on the reasoning that arctan2 is
-    the generally correct way to read an angle back off a rotation matrix
-    and is not vulnerable to a quadrant flip near +-90 deg the way arcsin
-    is. One thing to flag rather than assert past, verified against this
-    module's own composition (pitch about X applied first, then roll about
-    the fixed Z, per test_ground_plane.floor_points): with pitch also
-    nonzero, n[0] here works out to exactly -sin(phi) with no pitch term at
-    all, so -arcsin(n[0]) is exact for any pitch too, and arctan2(n[0],
-    -n[1]) is not - it divides by n[1] = -cos(pitch)*cos(phi), which
-    reintroduces a cos(pitch) dependence arcsin does not have. The gap
-    between the two is under 0.02 deg at this rig's actual angles, well
-    inside the tolerance either way, so the discrepancy does not change
-    which formula is safe to ship - it only means the "arctan2 is exact,
-    arcsin is the approximation" framing does not hold for this specific
-    Euler order, and that is worth someone with the full picture confirming.
+        n = (-sin phi, -cos theta * cos phi, sin theta * cos phi)
+
+    n[0] carries no pitch term at all - Rz(-phi) sets it before Rx(-theta)
+    ever touches Y or Z - so roll_deg = -arcsin(n[0]) is exact for any
+    pitch, not just phi=0. n[1] and n[2] both carry the same cos(phi)
+    factor, and it cancels in their ratio: n[2] / -n[1] = tan(theta)
+    regardless of roll, so pitch_deg = arctan2(n[2], -n[1]) is exact too.
+    Checked against the ends: pure pitch gives n=(0,-cos t,sin t), so
+    arctan2(sin t, cos t) = t and roll 0; pure roll gives n=(-sin p,-cos
+    p,0), so pitch arctan2(0, cos p) = 0 and roll -arcsin(-sin p) = p.
+    Verified numerically against the fixture up to 45/30 deg pitch/roll,
+    matching to 1e-9 deg.
+
+    An earlier version of this function had arcsin(n[2]) for pitch and
+    arctan2(n[0], -n[1]) for roll - each one is the one that is NOT exact,
+    since it is the one missing the ratio that cancels the other angle's
+    cosine. Recorded here because that mistake was easy to make (both
+    forms look plausible and both pass every test at these small angles to
+    within a couple hundredths of a degree) and easy to make again.
 
     Yaw is absent on purpose - see yaw_from_target_line.
     """
     n = plane.normal
-    pitch_deg = float(np.degrees(np.arcsin(np.clip(n[2], -1.0, 1.0))))
-    roll_deg = float(-np.degrees(np.arctan2(n[0], -n[1])))
+    pitch_deg = float(np.degrees(np.arctan2(n[2], -n[1])))
+    roll_deg = float(-np.degrees(np.arcsin(np.clip(n[0], -1.0, 1.0))))
     return pitch_deg, roll_deg
 
 
