@@ -177,11 +177,19 @@ class FrameConversionTest(unittest.TestCase):
 
     def test_camera2_offset_matches_the_hand_computed_value(self):
         # -R.T @ t, then Y negated for PiTrac. The rotation matters here: a
-        # plain -t gets the small components wrong by more than a factor of
-        # two, which is the argument for computing rather than typing it.
+        # plain -t gets Y wrong in sign and 3.2x wrong in size, and Z wrong by
+        # 1.26x - which is the argument for computing rather than typing it.
+        # Asserted below against the naive value, so the claim is checked and
+        # not merely stated.
         offset = stereo_geometry.camera2_offset_from_camera1(self.rig)
         np.testing.assert_allclose(
             offset, [-0.078720, 0.000890, 0.001957], atol=2e-6)
+
+        naive = stereo_geometry.to_pitrac_frame(-self.rig.t_m)
+        self.assertLess(naive[1] * offset[1], 0.0)          # Y sign flipped
+        self.assertAlmostEqual(abs(offset[1] / naive[1]), 3.19, delta=0.05)
+        self.assertAlmostEqual(naive[2] / offset[2], 1.256, delta=0.01)
+        self.assertAlmostEqual(naive[0], offset[0], places=4)
 
     def test_offset_replaces_pitracs_vertical_stacking(self):
         # PiTrac ships [0, -0.19, 0] - their cameras sit 19 cm apart

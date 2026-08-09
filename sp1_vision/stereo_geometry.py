@@ -27,6 +27,12 @@ MAX_BASELINE_M = 0.090
 MAX_RELATIVE_ROTATION_DEG = 3.0   # the mount is bolted; more means swapped files
 NOMINAL_FX_PX = 900.0             # 2.70 mm lens on 3.0 um pixels
 FX_TOLERANCE_FRACTION = 0.10
+
+# The resolution the intrinsics were solved at, and therefore the resolution
+# every frame fed to them must be. calibration_capture.FRAME_WIDTH/HEIGHT read
+# their values from here rather than repeating them, so the capture size and
+# the size the maths assumes cannot drift apart. It is defined in this module,
+# not that one, because this is the module that has to reject a mismatch.
 EXPECTED_IMAGE_SIZE = (1280, 800)
 
 DEFAULT_EXTRINSICS_PATH = "sp1_vision/calibration_results/stereo_extrinsics.json"
@@ -118,6 +124,13 @@ def validate_rig(rig):
                 "looks like a different source.".format(
                     label, fx, FX_TOLERANCE_FRACTION * 100, NOMINAL_FX_PX))
 
+    # load_rig never sets image_size, so against a loaded rig this compares
+    # the default with itself and cannot fire. It is kept for a rig
+    # constructed directly with a stated size. The check that actually bites
+    # is on the FRAMES - see cli_triangulate._measure_shot, which compares
+    # each image's own shape against rig.image_size. That is the one that
+    # catches calibration_capture's best-effort resolution request falling
+    # back, which its own docstring says can happen.
     if rig.image_size != EXPECTED_IMAGE_SIZE:
         raise StereoRigError(
             "image size {} is not the {} the intrinsics were solved at".format(
@@ -163,7 +176,11 @@ def camera2_offset_from_camera1(rig):
 
     PiTrac ships [0.00, -0.19, 0.0] - 19 cm of vertical camera stacking that
     our side-by-side mount does not have. Computed from R and T rather than
-    typed: dropping the rotation and using -T alone gets the Y and Z
-    components wrong by more than a factor of two.
+    typed: dropping the rotation and using -T alone gets Y wrong in SIGN, and
+    3.2x wrong in magnitude on top of that (0.279 mm against the true
+    0.890 mm, pointing the other way), and Z wrong by a factor of 1.26
+    (2.457 mm against 1.957 mm). X is right to a micron. Only Y is "more than
+    a factor of two"; the sign is what actually matters there, since Y is the
+    term that says which module sits higher.
     """
     return to_pitrac_frame(camera2_centre_in_camera1(rig))

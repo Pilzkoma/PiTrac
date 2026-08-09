@@ -18,10 +18,13 @@ import time
 
 import cv2
 
-from sp1_vision import camera_paths
+from sp1_vision import camera_paths, stereo_geometry
 
-FRAME_WIDTH = 1280
-FRAME_HEIGHT = 800
+# One number, named once. The intrinsics in golf_sim_config.json were solved
+# at this resolution and stereo_geometry rejects frames of any other, so the
+# size we ASK the driver for and the size the maths ASSUMES must not be two
+# separate literals that can drift apart.
+FRAME_WIDTH, FRAME_HEIGHT = stereo_geometry.EXPECTED_IMAGE_SIZE
 FOURCC = cv2.VideoWriter_fourcc("M", "J", "P", "G")
 WARMUP_FRAMES = 5
 
