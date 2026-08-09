@@ -123,3 +123,7 @@ sp4_gspro/jetson_lm.db-wal
 
 __pycache__/
 *.pyc
+
+# Subagent-driven-development scratch: ledgers, task briefs, review packages.
+# Session bookkeeping, not source - the git history is the durable record.
+.superpowers/
