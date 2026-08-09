@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -19,6 +20,7 @@ from sp1_vision.cli_triangulate import (
     _measure_shot,
     _resume_start_number,
     _write_manifest,
+    run_analysis,
 )
 from sp1_vision.tests.test_triangulate import make_rig, project
 
@@ -325,6 +327,127 @@ class TestMeasureShot(unittest.TestCase):
             xyz, reason = _measure_shot(rig, run_dir, shot)
             self.assertIsNone(xyz)
             self.assertIn("cam1", reason)
+        finally:
+            shutil.rmtree(run_dir)
+
+
+class RunAnalysisTest(unittest.TestCase):
+    """run_analysis end to end: the properties this task exists for.
+
+    stereo_geometry.load_rig is resolved as a module attribute of
+    cli_triangulate at call time, so it can be patched there without any
+    production change - no dependency injection needed. Everything else
+    (image files, run.json, the printed output) is exercised for real.
+    """
+
+    def _write(self, run_dir, name, uv1, uv2):
+        for n, uv in ((1, uv1), (2, uv2)):
+            cam_dir = os.path.join(run_dir, "cam{}".format(n))
+            os.makedirs(cam_dir, exist_ok=True)
+            cv2.imwrite(os.path.join(cam_dir, name), _frame_with_ball(uv))
+
+    def test_routing_all_four_rejections_and_config_block(self):
+        # R = I: the swap shot below is residual-silent here, so its
+        # rejection can only come from the depth-sign check - the property
+        # this task's addendum is about.
+        rig = make_rig(pitch_deg=0.0)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shots = []
+
+            # depth series: 4 collinear points (X, Y fixed; only Z moves),
+            # so the true 3D displacement between consecutive points equals
+            # the tape gap exactly, and the fitted scale should land near 1.
+            depth_truth = [
+                (np.array([0.03, 0.09, 0.35]), 350.0),
+                (np.array([0.03, 0.09, 0.42]), 420.0),
+                (np.array([0.03, 0.09, 0.49]), 490.0),
+                (np.array([0.03, 0.09, 0.56]), 560.0),
+            ]
+            for i, (xyz, tape) in enumerate(depth_truth, start=1):
+                name = "gs_depth_{:02d}.png".format(i)
+                self._write(run_dir, name, *project(rig, xyz))
+                shots.append({"name": name, "tape_mm": tape, "series": "depth"})
+
+            # (a) One accepted spread shot, tagged with a tape_mm that would
+            # visibly wreck the scale fit if it ever leaked into the depth
+            # bucket: a huge, unrelated "gap". buckets["spread"] must never
+            # reach the scale fit for this to stay near 1.0 below.
+            spread_xyz = np.array([-0.20, 0.09, 0.40])
+            self._write(run_dir, "gs_spread.png", *project(rig, spread_xyz))
+            shots.append({"name": "gs_spread.png", "tape_mm": 9999.0,
+                         "series": "spread"})
+
+            # target series: 2 points, needed for the config block's pan.
+            target_truth = [
+                (np.array([0.0, 0.09, 0.40]), 400.0),
+                (np.array([0.0, 0.09, 0.60]), 600.0),
+            ]
+            for i, (xyz, tape) in enumerate(target_truth, start=1):
+                name = "gs_target_{}.png".format(i)
+                self._write(run_dir, name, *project(rig, xyz))
+                shots.append({"name": name, "tape_mm": tape, "series": "target"})
+
+            # (b) Rejection 1: missing file - no image ever written for this name.
+            shots.append({"name": "gs_missing.png", "tape_mm": 1.0,
+                         "series": "depth"})
+
+            # (b) Rejection 2: no ball - both frames blank.
+            blank = np.zeros((800, 1280), dtype=np.uint8)
+            for n in (1, 2):
+                cam_dir = os.path.join(run_dir, "cam{}".format(n))
+                os.makedirs(cam_dir, exist_ok=True)
+                cv2.imwrite(os.path.join(cam_dir, "gs_blank.png"), blank)
+            shots.append({"name": "gs_blank.png", "tape_mm": 1.0,
+                         "series": "depth"})
+
+            # (b) Rejection 3: high residual - an unrelated correspondence,
+            # not a swap of a real point.
+            bad_uv1, _ = project(rig, np.array([0.02, 0.09, 0.5]))
+            _, bad_uv2 = project(rig, np.array([-0.20, -0.05, 1.5]))
+            self._write(run_dir, "gs_bad.png", bad_uv1, bad_uv2)
+            shots.append({"name": "gs_bad.png", "tape_mm": 1.0, "series": "depth"})
+
+            # (b) Rejection 4: swapped correspondence of a REAL point, on
+            # this R = I rig - zero residual, negative depth.
+            suv1, suv2 = project(rig, np.array([0.02, 0.09, 0.5]))
+            self._write(run_dir, "gs_swap.png", suv2, suv1)  # swapped
+            shots.append({"name": "gs_swap.png", "tape_mm": 1.0, "series": "depth"})
+
+            with open(os.path.join(run_dir, "run.json"), "w") as fh:
+                json.dump({"shots": shots}, fh)
+
+            stdout = io.StringIO()
+            with mock.patch("sp1_vision.cli_triangulate.stereo_geometry.load_rig",
+                            return_value=rig):
+                with redirect_stdout(stdout):
+                    rc = run_analysis(run_dir, "unused", "unused")
+            output = stdout.getvalue()
+
+            self.assertEqual(rc, 0, output)
+
+            # (a) routing: the spread shot's absurd tape value did not
+            # reach the scale fit - if it had, scale would be nowhere near
+            # 1.0. buckets["spread"] is written to in exactly one place in
+            # cli_triangulate.py, and depth_ordered is built from
+            # buckets["depth"] alone.
+            scale_line = next(
+                l for l in output.splitlines()
+                if l.strip().startswith("scale against tape:"))
+            scale_value = float(scale_line.split(":")[1].split()[0])
+            self.assertAlmostEqual(scale_value, 1.0, delta=0.05)
+
+            # (b) all four rejection reasons appear, distinguishably.
+            self.assertIn("missing", output)
+            self.assertIn("no ball in cam", output)
+            self.assertIn("reproj", output)
+            self.assertIn("behind camera 1", output)
+
+            # (c) the config block prints, including the pan/tilt/roll notes.
+            self.assertIn('"kCamera2OffsetFromCamera1OriginMeters"', output)
+            self.assertIn('"kCamera1Angles"', output)
+            self.assertIn("SIGN UNVERIFIED", output)
+            self.assertIn("nowhere to go", output)
         finally:
             shutil.rmtree(run_dir)
 

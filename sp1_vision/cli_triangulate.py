@@ -268,8 +268,12 @@ def _measure_shot(rig, run_dir, shot):
 
 
 def run_analysis(run_dir, extrinsics_path, config_path):
-    rig = stereo_geometry.load_rig(extrinsics_path, config_path)
-    stereo_geometry.validate_rig(rig)
+    try:
+        rig = stereo_geometry.load_rig(extrinsics_path, config_path)
+        stereo_geometry.validate_rig(rig)
+    except stereo_geometry.StereoRigError as e:
+        print("ERROR: {}".format(e))
+        return 1
     print("rig: baseline {:.3f} mm, fx {:.1f} / {:.1f}".format(
         rig.baseline_m * 1000.0, rig.k1[0, 0], rig.k2[0, 0]))
 
@@ -307,19 +311,30 @@ def run_analysis(run_dir, extrinsics_path, config_path):
         return 1
 
     # --- attitude -------------------------------------------------------
-    plane = ground_plane.fit_plane(np.array([xyz for _, xyz in floor]))
-    pitch, roll = ground_plane.attitude_from_plane(plane)
+    try:
+        plane = ground_plane.fit_plane(np.array([xyz for _, xyz in floor]))
+        pitch, roll = ground_plane.attitude_from_plane(plane)
+    except ground_plane.PlaneFitError as e:
+        # fit_plane's near-collinear message names exactly what to do about
+        # it - spread the ball positions across the image width - so it is
+        # written for the operator reading this output, and is wasted
+        # inside a stack trace instead.
+        print("\nERROR: {}".format(e))
+        return 1
     print("\nfloor plane: rms {:.2f} mm, conditioning {:.3f}".format(
         plane.rms_m * 1000.0, plane.conditioning))
     print("  pitch {:+.3f} deg   roll {:+.3f} deg".format(pitch, roll))
 
+    yaw = None
     if len(buckets["target"]) >= 2:
         ordered = sorted(buckets["target"], key=lambda item: item[1][2])
-        yaw = ground_plane.yaw_from_target_line(
-            plane, ordered[0][1], ordered[-1][1])
-        print("  yaw   {:+.3f} deg".format(yaw))
+        try:
+            yaw = ground_plane.yaw_from_target_line(
+                plane, ordered[0][1], ordered[-1][1])
+            print("  yaw   {:+.3f} deg".format(yaw))
+        except ground_plane.PlaneFitError as e:
+            print("  yaw     could not be measured: {}".format(e))
     else:
-        yaw = None
         print("  yaw     not measured - needs 2 usable target-line shots")
 
     # --- scale ----------------------------------------------------------
@@ -328,6 +343,9 @@ def run_analysis(run_dir, extrinsics_path, config_path):
     for (shot_a, xyz_a), (shot_b, xyz_b) in zip(depth_ordered, depth_ordered[1:]):
         gap_tape = (shot_b["tape_mm"] - shot_a["tape_mm"]) / 1000.0
         if gap_tape <= 0.0:
+            print("  skipping {} -> {}: tape did not increase ({:.1f} -> "
+                  "{:.1f} mm)".format(shot_a["name"], shot_b["name"],
+                                       shot_a["tape_mm"], shot_b["tape_mm"]))
             continue
         measured.append(float(np.linalg.norm(xyz_b - xyz_a)))
         taped.append(gap_tape)
@@ -339,18 +357,44 @@ def run_analysis(run_dir, extrinsics_path, config_path):
         print("  implied baseline: {:.3f} mm against the file's {:.3f} mm".format(
             rig.baseline_m * 1000.0 / scale, rig.baseline_m * 1000.0))
     else:
+        # len(depth_ordered), not len(measured) + 1 - a skipped non-
+        # increasing pair above would otherwise undercount how many depth
+        # positions are actually present.
         print("\nscale: needs 4+ usable collinear depth positions, "
-              "have {}".format(len(measured) + 1))
+              "have {}".format(len(depth_ordered)))
 
     # --- what to type into the config -----------------------------------
     offset = stereo_geometry.camera2_offset_from_camera1(rig)
     print("\n--- values for golf_sim_config.json (enter by hand) ---")
     print('  "kCamera2OffsetFromCamera1OriginMeters": '
           "[{:.6f}, {:.6f}, {:.6f}]".format(*offset))
-    print('  "kCamera1Angles": [{:+.3f}, {:+.3f}]'.format(
+    print('  "kCamera1Angles": [{:+.3f}, {:+.3f}]  (pan, tilt)'.format(
         0.0 if yaw is None else yaw, pitch))
-    print("  (pan, tilt. Yaw is pan; pitch is tilt. Roll {:+.3f} deg is not "
-          "representable in this constant.)".format(roll))
+    # Tilt's sign is anchored, not guessed: PiTrac ships kCamera1Angles =
+    # [18.72, -24.18] for a camera physically tilted DOWN toward the tee,
+    # and docs/camera/camera-calibration.md:171 says "Y/tilt is negative as
+    # the camera starts to face down" - exactly attitude_from_plane's
+    # convention (negative pitch for nose-down). Do not re-derive this.
+    print("  tilt {:+.3f} deg - sign checked against PiTrac's own "
+          "camera-tilted-down convention.".format(pitch))
+    if yaw is None:
+        print("  pan: not measured - needs 2 usable target-line shots.")
+    else:
+        # Pan has NO such anchor. yaw_from_target_line's convention is
+        # "positive means the target line runs to the camera's right";
+        # PiTrac's pan is the camera's own twist, positive counter-
+        # clockwise viewed from above - plausibly the opposite sign, or not
+        # even the same quantity. A wrong sign here lands 1:1 in horizontal
+        # launch angle, silently, so this is not printed as settled.
+        print("  pan {:+.3f} deg - SIGN UNVERIFIED. This is the angle from "
+              "the camera's forward axis to the target line, positive "
+              "meaning the target line runs to the camera's right. Whether "
+              "that matches PiTrac's own pan convention has not been "
+              "checked - confirm against the physical target-line "
+              "placement when this capture run is actually done.".format(yaw))
+    print("  roll {:+.3f} deg has nowhere to go in this two-element "
+          "constant - kCamera1Angles carries no roll term, so this "
+          "measured quantity is dropped here, not zero.".format(roll))
     return 0
 
 
