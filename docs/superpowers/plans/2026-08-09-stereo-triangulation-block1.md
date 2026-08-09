@@ -711,6 +711,10 @@ class ReprojectionErrorTest(unittest.TestCase):
 class DepthSensitivityTest(unittest.TestCase):
     def test_matches_the_hand_computed_figure_at_the_working_distance(self):
         # Z^2 / (b * f) = 0.5087^2 / (0.07872 * 900) = 3.65 mm per pixel.
+        # CORRECTION 2026-08-10: this is a correct unit test of the
+        # arithmetic, but 0.5087 m is the straight-line RANGE to the ball,
+        # not its depth. The formula takes depth. Our working depth is the
+        # 500 mm horizontal leg, giving 3.53 mm/px - see the spec.
         rig = make_rig()
         self.assertAlmostEqual(
             triangulate.depth_sensitivity_mm_per_px(rig, 0.5087), 3.65, delta=0.05)
@@ -790,6 +794,10 @@ def reprojection_error(rig, xyz_m, uv1, uv2):
 def depth_sensitivity_mm_per_px(rig, depth_m):
     """How much depth error one pixel of disparity error buys, in mm.
 
+    Z^2 / (b * f). CORRECTION 2026-08-10: the figure at the 50 cm working
+    DEPTH is 3.53 mm/px. The 3.65 below came from substituting the 508.7 mm
+    range, which is the wrong quantity for this formula. Read the shipped
+    docstring, not this.
     Z^2 / (b * f). At the 50 cm working distance this is about 3.65 mm per
     pixel, so roughly 1.8 mm at half-pixel detection - the figure that sets
     what counts as agreement with a tape measure.

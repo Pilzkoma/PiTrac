@@ -12,15 +12,26 @@ still PiTrac's monocular radius method, and the world-geometry constants still
 hold PiTrac's numbers for a physically different machine. Two consequences:
 
 **Accuracy left on the table.** At the decided 50 cm working distance the
-stereo pair resolves roughly 3.65 mm of depth per pixel of disparity error, or
-about 1.8 mm at half-pixel correspondence. The radius method's precision is
+stereo pair resolves roughly **3.53 mm** of depth per pixel of disparity error,
+or about 1.8 mm at half-pixel correspondence. The radius method's precision is
 governed by how well a Hough circle's radius can be estimated, which is a much
 softer quantity.
 
-(CLAUDE.md quotes 3.55 mm for the same figure. Both are correct for their
-inputs: 3.55 uses Z = 500 mm and b = 78.28 mm, this document uses the actual
-line-of-sight Z = 508.7 mm and the committed b = 78.71 mm. The difference is not
-a disagreement, and the baseline question below is a separate matter.)
+**Correction, 2026-08-10.** An earlier draft of this document said 3.65 mm, and
+explained the gap against CLAUDE.md's 3.55 as two valid readings of the same
+geometry. That was wrong. `dZ/dd = Z²/(b·f)` takes the ball's **depth** — its Z
+coordinate along the optical axis — and the draft substituted the 508.7 mm
+straight-line range instead. The device stands level, so the optical axis is
+horizontal and the depth is exactly the horizontal leg the operator measured:
+500 mm. With the committed b = 78.71 mm that gives 3.53 mm/px and a disparity of
+141.7 px. CLAUDE.md's 3.55 was right in method and differs only through its
+78.28 mm baseline.
+
+The 508.7 mm is not discarded — it is the correct quantity for
+`kCameraNPositionsFromExpectedBallMeters`, which is consumed as an expected
+line-of-sight distance for the ball-search radius prior, because apparent radius
+scales with true 3D distance rather than with depth. Two different quantities,
+each right in its own place; only the depth-sensitivity use was wrong.
 
 **The device's attitude in the world is unmeasured.** The measured rotations —
 pitch −0.94°, yaw +0.36°, roll −0.82° — describe *camera 1 against camera 2*.
@@ -307,8 +318,9 @@ No new capture path. Binding **must** go through `camera_paths.device_for_camera
 Three results from one capture series:
 
 1. **Is triangulation correct at all?** Absolute distance against tape. At
-   508.7 mm the disparity is 139 px and the sensitivity is 3.65 mm of depth per
-   pixel of disparity error, so roughly 1.8 mm at half-pixel detection.
+   a depth of 500 mm the disparity is 141.7 px and the sensitivity is 3.53 mm of
+   depth per pixel of disparity error, so roughly 1.8 mm at half-pixel detection.
+   (Depth, not the 508.7 mm range — see the correction above.)
    Disagreement beyond about 5 mm is not noise.
 
 2. **How does the device sit?** A plane through the ball centres yields pitch
