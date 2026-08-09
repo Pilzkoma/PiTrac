@@ -1,0 +1,112 @@
+"""Triangulation against synthetic geometry, where truth is known exactly.
+
+Testing against real images would confound the arithmetic with detection
+error. Here a known 3D point is projected into two known cameras and must
+come back.
+"""
+
+import unittest
+
+import cv2
+import numpy as np
+
+from sp1_vision import stereo_geometry, triangulate
+
+
+def make_rig(camera2_centre_m=(-0.07872, 0.0, 0.0), pitch_deg=0.0,
+             distortion=None):
+    """A rig with camera 2 placed where we say, in camera 1's frame.
+
+    Placing the CENTRE rather than T keeps the test readable: T = -R @ centre
+    is exactly the conversion the production code has to get right, so
+    stating it here in the opposite direction is a genuine cross-check.
+    """
+    k = np.array([[900.0, 0.0, 640.0],
+                  [0.0, 900.0, 400.0],
+                  [0.0, 0.0, 1.0]])
+    d = np.zeros(5) if distortion is None else np.asarray(distortion, float)
+    r, _ = cv2.Rodrigues(np.array([np.radians(pitch_deg), 0.0, 0.0]))
+    centre = np.asarray(camera2_centre_m, dtype=float)
+    t = -r @ centre
+    return stereo_geometry.StereoRig(k1=k, d1=d, k2=k, d2=d, r=r, t_m=t)
+
+
+def project(rig, xyz):
+    """Where a camera-1-frame point lands in each image."""
+    xyz = np.asarray(xyz, dtype=float).reshape(1, 3)
+    zero = np.zeros(3)
+    uv1, _ = cv2.projectPoints(xyz, zero, zero, rig.k1, rig.d1)
+    rvec, _ = cv2.Rodrigues(rig.r)
+    uv2, _ = cv2.projectPoints(xyz, rvec, rig.t_m, rig.k2, rig.d2)
+    return uv1.reshape(2), uv2.reshape(2)
+
+
+class TriangulateTest(unittest.TestCase):
+    def test_recovers_a_known_point_exactly(self):
+        rig = make_rig()
+        truth = np.array([0.05, 0.0937, 0.500])
+        xyz = triangulate.triangulate_point(rig, *project(rig, truth))
+        np.testing.assert_allclose(xyz, truth, atol=1e-9)
+
+    def test_recovers_a_known_point_through_lens_distortion(self):
+        rig = make_rig(distortion=[0.0086, -0.0060, 0.0021, -0.0024, -0.0880])
+        truth = np.array([-0.08, 0.05, 0.42])
+        xyz = triangulate.triangulate_point(rig, *project(rig, truth))
+        np.testing.assert_allclose(xyz, truth, atol=1e-7)
+
+    def test_recovers_a_known_point_with_the_pair_rotated(self):
+        rig = make_rig(pitch_deg=-0.94)
+        truth = np.array([0.02, 0.09, 0.65])
+        xyz = triangulate.triangulate_point(rig, *project(rig, truth))
+        np.testing.assert_allclose(xyz, truth, atol=1e-9)
+
+    def test_depth_is_positive_for_a_point_in_front(self):
+        # A swapped pair or an inverted T produces mirrored depth with
+        # nothing else visibly wrong. Depth sign is the cheapest guard.
+        rig = make_rig()
+        xyz = triangulate.triangulate_point(rig, *project(rig, [0.0, 0.0, 0.5]))
+        self.assertGreater(xyz[2], 0.0)
+
+    def test_swapped_correspondences_are_caught_by_reprojection(self):
+        # A rig with R = I and identical K in both cameras is a degenerate
+        # choice here: for pure-X translation, swapping which ray is which
+        # still satisfies the epipolar constraint exactly (the essential
+        # matrix [T]_x is skew-symmetric, so u2^T F u1 = 0 implies
+        # u1^T F u2 = 0 too), so the swap lands on a real - just mirrored -
+        # intersection with zero reprojection error. The real rig always
+        # carries the mount's pitch, so exercise that here.
+        rig = make_rig(pitch_deg=-0.94)
+        truth = np.array([0.05, 0.0937, 0.500])
+        uv1, uv2 = project(rig, truth)
+        # Feed the images in the wrong order - a plausible wiring mistake.
+        xyz = triangulate.triangulate_point(rig, uv2, uv1)
+        e1, e2 = triangulate.reprojection_error(rig, xyz, uv2, uv1)
+        self.assertGreater(max(e1, e2), 1.0)
+
+
+class ReprojectionErrorTest(unittest.TestCase):
+    def test_a_true_point_reprojects_onto_its_own_measurements(self):
+        rig = make_rig()
+        truth = np.array([0.05, 0.0937, 0.500])
+        uv1, uv2 = project(rig, truth)
+        e1, e2 = triangulate.reprojection_error(rig, truth, uv1, uv2)
+        self.assertLess(max(e1, e2), 1e-6)
+
+    def test_a_displaced_point_shows_a_residual(self):
+        rig = make_rig()
+        truth = np.array([0.05, 0.0937, 0.500])
+        uv1, uv2 = project(rig, truth)
+        e1, e2 = triangulate.reprojection_error(rig, truth + [0.01, 0, 0], uv1, uv2)
+        self.assertGreater(max(e1, e2), 1.0)
+
+
+class DepthSensitivityTest(unittest.TestCase):
+    def test_matches_the_hand_computed_figure_at_the_working_distance(self):
+        # Z^2 / (b * f) = 0.5087^2 / (0.07872 * 900) = 3.65 mm per pixel.
+        rig = make_rig()
+        self.assertAlmostEqual(
+            triangulate.depth_sensitivity_mm_per_px(rig, 0.5087), 3.65, delta=0.05)
+
+
+if __name__ == "__main__":
+    unittest.main()
