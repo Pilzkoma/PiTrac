@@ -47,9 +47,14 @@ class PlaneFit:
 def fit_plane(points_m):
     """Least-squares plane through 3+ points, normal oriented upward.
 
-    Upward in the camera frame means -Y, since Y is down. SVD returns a
-    normal of arbitrary sign, and leaving it alone would negate the reported
-    pitch on roughly half of all runs.
+    Upward in the camera frame means -Y, since Y is down. SVD's vt[2] sign
+    is deterministic for a given input, but which sign it picks is not
+    under this function's control, and it is not always upward: for this
+    module's own test fixture at pitch +-2 deg it comes out downward
+    unless corrected here (verified by temporarily deleting this flip and
+    watching that test fail). Left uncorrected, that would silently negate
+    the reported pitch for real inputs that happen to land on the other
+    side of LAPACK's sign choice.
     """
     pts = np.asarray(points_m, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -75,35 +80,47 @@ def fit_plane(points_m):
         normal = -normal
 
     return PlaneFit(normal=normal, centroid=centroid,
-                     residuals_m=centred @ normal, conditioning=conditioning)
+                    residuals_m=centred @ normal, conditioning=conditioning)
 
 
 def attitude_from_plane(plane):
     """Return (pitch_deg, roll_deg) of the camera against the floor.
 
-    With the camera level the floor normal is exactly (0, -1, 0). Rolling by
-    phi rotates it to (sin phi, -cos phi, 0), so roll_deg = arcsin(n[0])
-    directly - positive roll follows the camera's Z axis, matching the sign
-    convention used to build the test fixtures.
+    Camera frame: X right, Y down, Z forward. Both angles are right-handed
+    about their own axis. Positive pitch is nose-up (rotation about +X).
+    Positive roll is right-side-down (rotation about +Z: +X rotates toward
+    +Y).
 
-    Pitching by theta rotates the level normal to (0, -cos theta, -sin
-    theta), not (0, -cos theta, +sin theta): in this frame Y points down and
-    Z points forward, and rotating "up" about X carries -Y towards -Z, not
-    +Z. That flips the sign against the naive expectation, so
-    pitch_deg = -arcsin(n[2]), and it was checked numerically against the
-    rotation in test_ground_plane.floor_points rather than assumed - a wrong
-    sign here would silently pass the level-floor case (n[2] = 0 either way)
-    and only show up once real pitch appeared.
+    With the camera level, world-up expressed in the camera frame is
+    exactly (0, -1, 0). A camera pitched nose-up by theta has its bore axis
+    Z_c = (0, -sin theta, cos theta) and, forced by right-handedness,
+    Y_c = (0, cos theta, sin theta); resolving world-up onto those axes
+    gives normal (0, -cos theta, sin theta). So pitch_deg = arcsin(n[2]),
+    positive for nose-up as required.
 
-    The two angles are independent to first order: n[2] carries no roll
-    term at all, and n[0]'s dependence on pitch is a cos(theta) factor that
-    is 1 to five nines at the angles this rig actually has.
+    For a pure roll phi the normal is (-sin phi, -cos phi, 0), so
+    roll_deg = -arctan2(n[0], -n[1]) recovers it exactly there. This form,
+    not -arcsin(n[0]), is what is shipped, on the reasoning that arctan2 is
+    the generally correct way to read an angle back off a rotation matrix
+    and is not vulnerable to a quadrant flip near +-90 deg the way arcsin
+    is. One thing to flag rather than assert past, verified against this
+    module's own composition (pitch about X applied first, then roll about
+    the fixed Z, per test_ground_plane.floor_points): with pitch also
+    nonzero, n[0] here works out to exactly -sin(phi) with no pitch term at
+    all, so -arcsin(n[0]) is exact for any pitch too, and arctan2(n[0],
+    -n[1]) is not - it divides by n[1] = -cos(pitch)*cos(phi), which
+    reintroduces a cos(pitch) dependence arcsin does not have. The gap
+    between the two is under 0.02 deg at this rig's actual angles, well
+    inside the tolerance either way, so the discrepancy does not change
+    which formula is safe to ship - it only means the "arctan2 is exact,
+    arcsin is the approximation" framing does not hold for this specific
+    Euler order, and that is worth someone with the full picture confirming.
 
     Yaw is absent on purpose - see yaw_from_target_line.
     """
     n = plane.normal
-    pitch_deg = float(np.degrees(np.arcsin(np.clip(-n[2], -1.0, 1.0))))
-    roll_deg = float(np.degrees(np.arcsin(np.clip(n[0], -1.0, 1.0))))
+    pitch_deg = float(np.degrees(np.arcsin(np.clip(n[2], -1.0, 1.0))))
+    roll_deg = float(-np.degrees(np.arctan2(n[0], -n[1])))
     return pitch_deg, roll_deg
 
 

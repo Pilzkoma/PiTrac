@@ -12,10 +12,20 @@ from sp1_vision import ground_plane
 
 
 def floor_points(pitch_deg=0.0, roll_deg=0.0, n_x=4, n_z=3):
-    """Ball centres on a floor seen by a camera at the given attitude.
+    """Ball centres on a floor, as seen by a camera at the given attitude.
 
     Camera frame: X right, Y down, Z forward. A level camera sees the floor
-    below it, so the plane's normal is -Y.
+    below it, so the plane's normal is -Y. Positive pitch is nose-up;
+    positive roll is right-side-down.
+
+    `rz @ rx` is the camera's own rotation (pitch about X, then roll about
+    Z, relative to level). The points below are fixed in the world, so what
+    the camera sees is the INVERSE of that rotation applied to them -
+    world-fixed points expressed in a rotated camera's frame transform by
+    R^-1 = R^T, not by R itself. `pts @ M` applies `M.T` to each row, so
+    `pts @ (rz @ rx)` is what does that (dropping the .T here is not a typo:
+    it is what turns "rotate the points by R" into "view the points from a
+    camera rotated by R").
     """
     xs = np.linspace(-0.25, 0.25, n_x)
     zs = np.linspace(0.35, 0.70, n_z)
@@ -29,7 +39,7 @@ def floor_points(pitch_deg=0.0, roll_deg=0.0, n_x=4, n_z=3):
     rz = np.array([[np.cos(q), -np.sin(q), 0],
                    [np.sin(q), np.cos(q), 0],
                    [0, 0, 1]])
-    return pts @ (rz @ rx).T
+    return pts @ (rz @ rx)
 
 
 class FitPlaneTest(unittest.TestCase):
@@ -39,8 +49,13 @@ class FitPlaneTest(unittest.TestCase):
         self.assertLess(plane.rms_m, 1e-9)
 
     def test_normal_is_always_oriented_upward(self):
-        # SVD returns a normal of arbitrary sign. Left alone, half the runs
-        # would report the pitch negated.
+        # LAPACK's vt[2] sign is deterministic per input, not random, but
+        # which sign it picks depends on the data in a way that is not
+        # under our control - and for both these inputs it comes out
+        # downward without the flip in fit_plane. Verified by temporarily
+        # deleting that flip and re-running this test: it fails with
+        # normal[1] == +0.999..., not close to zero, so this genuinely
+        # exercises the guard rather than passing regardless of it.
         for pitch in (-2.0, 2.0):
             plane = ground_plane.fit_plane(floor_points(pitch_deg=pitch))
             self.assertLess(plane.normal[1], 0.0)
