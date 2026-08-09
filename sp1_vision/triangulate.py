@@ -134,9 +134,24 @@ def straightness_rms_m(points_m):
 def depth_sensitivity_mm_per_px(rig, depth_m):
     """How much depth error one pixel of disparity error buys, in mm.
 
-    Z^2 / (b * f). At the 50 cm working distance this is about 3.65 mm per
-    pixel, so roughly 1.8 mm at half-pixel detection - the figure that sets
-    what counts as agreement with a tape measure.
+    Z^2 / (b * f), so it grows as the square of depth and no one number
+    covers the 350-700 mm series. Two get quoted, and they differ only in
+    which distance is put in:
+
+      3.53 mm/px at 0.500 m - the DEPTH of a ball at the decided working
+                   distance, i.e. its Z coordinate. This is the argument
+                   the formula actually takes, and what the analysis prints
+                   in its rig header.
+      3.65 mm/px at 0.5087 m - the straight-line RANGE to that same ball's
+                   centre, which sits 93.7 mm below the optical axis:
+                   sqrt(0.500^2 + 0.0937^2). This is the figure quoted in
+                   the spec and in this file's tests.
+
+    The same geometry read two ways, not a disagreement - though 3.53 is
+    the one that answers "how much depth error does a pixel buy", since Z
+    here means depth. Halve either for the roughly half-pixel matching the
+    detector achieves: that is what sets what counts as agreement with a
+    tape measure.
     """
     depth = float(depth_m)
     if depth <= 0.0:

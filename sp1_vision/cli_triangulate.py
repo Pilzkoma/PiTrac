@@ -295,7 +295,13 @@ def _report_completeness(shots):
         short.append("yaw needs 2 usable target-line positions and cannot be "
                      "recovered later from a floor-only series")
     if counts["depth"] < 4:
-        short.append("the scale fit needs 4+ usable collinear depth positions")
+        # Not "collinear": the fit compares depth differences and does not
+        # depend on the line being straight. It is still meant to be one,
+        # because an uncontrolled layout is an uncontrolled measurement, and
+        # the analysis reports how far off a line the positions actually
+        # were.
+        short.append("the scale fit needs 4+ usable depth positions, laid "
+                     "along one line running away from the unit")
     if counts["spread"] < 2:
         # The gate this replaces was depth + spread >= 3, which six depth
         # shots satisfy on their own - and six depth shots are a LINE. The
@@ -445,8 +451,18 @@ def run_analysis(run_dir, extrinsics_path, config_path):
 
     # The plane wants every floor position it can get - spread across the
     # image width is exactly what makes it determined. The scale fit does
-    # NOT: it equates a 3D distance with a difference of two tape readings,
-    # and that identity holds only along the collinear depth line.
+    # NOT: it compares differences of triangulated DEPTH against differences
+    # of perpendicular tape readings, which is the same quantity on both
+    # sides no matter where the ball sat laterally, so a spread position
+    # would contribute a tape gap that means nothing. Depth only.
+    #
+    # That estimator no longer needs the depth positions to be collinear -
+    # see the scale section below for why the depth component was chosen
+    # over the 3D separation. Lay them along a line anyway: a wandering line
+    # means the tape was run along something other than what was intended,
+    # and a measurement whose setup was not controlled is worth less than
+    # its arithmetic suggests. straightness_rms_m exists to make that
+    # visible rather than to make it harmless.
     floor = buckets["depth"] + buckets["spread"]
     if len(floor) < 3:
         print("\nOnly {} usable floor shots; a plane needs 3.".format(len(floor)))
@@ -492,21 +508,27 @@ def run_analysis(run_dir, extrinsics_path, config_path):
     # leave it to be inferred - and do NOT quietly negate one to match, since
     # which sign the unit's own pan convention wants is unresolved until the
     # hardware run.
-    print("  NOTE the yaw sign is not the same sense as the other two. Pitch")
-    print("  and roll describe how the CAMERA is rotated; yaw describes where")
-    print("  the TARGET LINE runs as the camera sees it, so it is the")
-    print("  NEGATION of the unit's own yaw - a unit yawed to the right sees")
-    print("  the line off to its left.")
+    #
+    # Only when there is a yaw to qualify. Printed under the "not measured"
+    # line it explains the sign of a number that is not there.
+    if yaw is not None:
+        print("  NOTE the yaw sign is not the same sense as the other two. Pitch")
+        print("  and roll describe how the CAMERA is rotated; yaw describes where")
+        print("  the TARGET LINE runs as the camera sees it, so it is the")
+        print("  NEGATION of the unit's own yaw - a unit yawed to the right sees")
+        print("  the line off to its left.")
     print("  from {} floor positions, plane rms {:.2f} mm, conditioning "
           "{:.3f}".format(len(floor), plane.rms_m * 1000.0, plane.conditioning))
     # A direct measurement of the 115 mm mounting height the rest of the
     # project only assumes. The plane runs through ball CENTRES, one radius
     # above the floor, so the radius is added back.
+    height_m = ground_plane.camera_height_above_floor_m(plane)
+    # "below camera 1", not "below it": the nearest antecedent in the first
+    # clause is the floor, and above the FLOOR the figure would be 21.3 mm.
     print("  camera 1 sits {:.1f} mm above the floor (the spec assumes 115); "
-          "ball centres are {:.1f} mm below it".format(
-              ground_plane.camera_height_above_floor_m(plane) * 1000.0,
-              (ground_plane.camera_height_above_floor_m(plane)
-               - ground_plane.GOLF_BALL_RADIUS_M) * 1000.0))
+          "ball centres are {:.1f} mm below camera 1".format(
+              height_m * 1000.0,
+              (height_m - ground_plane.GOLF_BALL_RADIUS_M) * 1000.0))
 
     # --- scale ----------------------------------------------------------
     # The measured side is the DEPTH COMPONENT, xyz_b[2] - xyz_a[2], and not
@@ -559,8 +581,8 @@ def run_analysis(run_dir, extrinsics_path, config_path):
         # len(depth_ordered), not len(measured) + 1 - a skipped non-
         # increasing pair above would otherwise undercount how many depth
         # positions are actually present.
-        print("\nscale: needs 4+ usable collinear depth positions, "
-              "have {}".format(len(depth_ordered)))
+        print("\nscale: needs 4+ usable depth positions laid along one line "
+              "running away from the unit, have {}".format(len(depth_ordered)))
 
     # --- writing this into PiTrac's legacy constant, explicitly a lossy
     # inheritance and not the measurement itself ---------------------------

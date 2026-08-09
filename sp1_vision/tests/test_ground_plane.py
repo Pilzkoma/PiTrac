@@ -77,7 +77,15 @@ class FitPlaneTest(unittest.TestCase):
             centred = pts - pts.mean(axis=0)
             _, _, vt = np.linalg.svd(centred, full_matrices=False)
             raw_signs.append(np.sign(vt[2][1]))
-        self.assertEqual(sorted(raw_signs), [-1.0, 1.0])
+        self.assertEqual(
+            sorted(raw_signs), [-1.0, 1.0],
+            "raw SVD normals came back with signs {} - both the same, so the "
+            "two inputs no longer straddle LAPACK's sign choice and "
+            "test_normal_is_always_oriented_upward has gone vacuous: it would "
+            "now pass whether or not fit_plane flips the normal. This is not "
+            "a bug in fit_plane. Find a pair of inputs that does straddle, or "
+            "the upward-orientation guard is untested on this build."
+            .format(raw_signs))
 
     def test_reports_residuals_for_a_noisy_floor(self):
         pts = floor_points()

@@ -920,6 +920,12 @@ class RunAnalysisTest(unittest.TestCase):
             self.assertIn("????", angles_line)
             self.assertIn("NOT MEASURED", angles_line)
             self.assertNotIn("+0.000", angles_line)
+
+            # And the note explaining yaw's sign sense stays away too: under
+            # a "not measured" line it would be explaining the sign of a
+            # number that is not there.
+            self.assertIn("yaw    not measured", output)
+            self.assertNotIn("yaw sign is not the same sense", output)
         finally:
             shutil.rmtree(run_dir)
 
