@@ -237,11 +237,41 @@ Validation at load, failing loudly:
   both images and returns the residuals.
 
 The reprojection residual is a per-measurement validity flag, not decoration. It
-catches swapped cameras, inverted signs and mis-associated points immediately.
-It is necessary and not sufficient: a small residual means the two rays
-intersect, not that the scale is right. Scale is the tape measure's job. This
-distinction is the same one that cost a session during calibration and is
-restated here deliberately.
+is necessary and not sufficient: a small residual means the two rays intersect,
+not that the scale is right. Scale is the tape measure's job. This distinction
+is the same one that cost a session during calibration and is restated here
+deliberately.
+
+**Correction, established during implementation (2026-08-09):** an earlier draft
+of this section claimed the residual also catches swapped cameras and inverted
+signs. It does not, and the claim was dangerous because the flag was to be
+trusted on that basis. On a rectified rig — R = I, translation along X, matched
+intrinsics — a swapped correspondence solves in closed form to Z′ = −Z,
+X′ = −(X+b), Y′ = −Y. That is an exact ray intersection, so the residual is
+identically zero for every point. Equivalently E = [T]ₓR is skew-symmetric at
+R = I, making the epipolar constraint swap-invariant. An inverted translation is
+worse still: the residual is computed from the same extrinsics it would have to
+indict, so it is self-consistent with them by construction.
+
+The residual's swap sensitivity is roughly proportional to the rig's departure
+from rectified, and is carried almost entirely by **pitch**:
+
+| rig pitch | swap residual |
+|---|---|
+| 0.00° | 0.00 px |
+| 0.10° | 2.30 px |
+| 0.50° | 11.5 px |
+| 0.92° (measured) | 21.2 px |
+
+On this rig's yaw alone (+0.43°) a swapped pair gives 0.32 px, and on roll alone
+(−0.85°) 3.4 px, falling to 1.5 px for an on-axis point. So the residual does
+detect a swap here — but only because the mount happens to carry pitch, and it
+would fall silent if the mount were ever re-shimmed to null it, which is exactly
+what the 2026-08-08 rebuild was attempting.
+
+**The structural swap guard is the sign of Z**, which holds for any rig: a
+swapped pair yields Z′ = −Z exactly. Any consumer of the residual must require
+Z > 0 alongside it, never the residual alone.
 
 **`sp1_vision/ground_plane.py`** — plane and attitude.
 
@@ -322,7 +352,9 @@ TDD, against synthetic geometry rather than images:
 - Plane fit against synthetically tilted planes, including the ill-conditioned
   near-collinear case, which must raise rather than return a number.
 - A swapped-camera rig, asserting the guards fire rather than returning silently
-  mirrored depth.
+  mirrored depth. Note which guard: on a pitched rig the residual fires, on a
+  rectified one only the depth sign does, and both cases need a test so the
+  difference is on the record rather than rediscovered.
 
 ### Known inaccuracy accepted in v1
 
