@@ -28,7 +28,14 @@ def make_rig(camera2_centre_m=(-0.07872, 0.0, 0.0), pitch_deg=0.0,
     r, _ = cv2.Rodrigues(np.array([np.radians(pitch_deg), 0.0, 0.0]))
     centre = np.asarray(camera2_centre_m, dtype=float)
     t = -r @ centre
-    return stereo_geometry.StereoRig(k1=k, d1=d, k2=k, d2=d, r=r, t_m=t)
+    rig = stereo_geometry.StereoRig(k1=k, d1=d, k2=k, d2=d, r=r, t_m=t)
+    # Every test below uses rig.t_m and never camera2_centre_m directly, so
+    # a globally inverted T would leave the whole file green. Cross-check
+    # here, once, against the production conversion this helper deliberately
+    # runs backwards (see the docstring above).
+    np.testing.assert_allclose(
+        stereo_geometry.camera2_centre_in_camera1(rig), centre, atol=1e-12)
+    return rig
 
 
 def project(rig, xyz):
@@ -67,14 +74,16 @@ class TriangulateTest(unittest.TestCase):
         xyz = triangulate.triangulate_point(rig, *project(rig, [0.0, 0.0, 0.5]))
         self.assertGreater(xyz[2], 0.0)
 
-    def test_swapped_correspondences_are_caught_by_reprojection(self):
+    def test_swapped_correspondences_show_a_residual_on_a_pitched_rig(self):
         # A rig with R = I and identical K in both cameras is a degenerate
         # choice here: for pure-X translation, swapping which ray is which
         # still satisfies the epipolar constraint exactly (the essential
         # matrix [T]_x is skew-symmetric, so u2^T F u1 = 0 implies
         # u1^T F u2 = 0 too), so the swap lands on a real - just mirrored -
         # intersection with zero reprojection error. The real rig always
-        # carries the mount's pitch, so exercise that here.
+        # carries the mount's pitch, so exercise that here. The residual
+        # scales roughly as 2*f*theta - see the sibling test below for the
+        # R = I case where this guard provides nothing at all.
         rig = make_rig(pitch_deg=-0.94)
         truth = np.array([0.05, 0.0937, 0.500])
         uv1, uv2 = project(rig, truth)
@@ -82,6 +91,30 @@ class TriangulateTest(unittest.TestCase):
         xyz = triangulate.triangulate_point(rig, uv2, uv1)
         e1, e2 = triangulate.reprojection_error(rig, xyz, uv2, uv1)
         self.assertGreater(max(e1, e2), 1.0)
+
+    def test_swapped_correspondences_show_zero_residual_at_r_identity(self):
+        # The counter-case to the test above: at R = I the swap is
+        # algebraically invisible to reprojection_error (worked by hand in
+        # triangulate.py's module docstring: the swapped solution sits at
+        # exactly z' = -Z, a real ray intersection, just behind the camera).
+        # The residual is not a swap guard here - only the sign of Z is.
+        rig = make_rig()
+        truth = np.array([0.05, 0.0937, 0.500])
+        uv1, uv2 = project(rig, truth)
+        xyz = triangulate.triangulate_point(rig, uv2, uv1)
+        self.assertLess(xyz[2], 0.0)
+
+
+class TriangulationErrorTest(unittest.TestCase):
+    def test_raises_on_parallel_rays_from_identical_points(self):
+        # Feeding the same pixel to both cameras on an R = I rig gives two
+        # rays with the same direction, offset only by the baseline - they
+        # never meet, which is exactly the degenerate case the function
+        # exists to catch rather than silently return nonsense for.
+        rig = make_rig()
+        uv = np.array([700.0, 450.0])
+        with self.assertRaises(triangulate.TriangulationError):
+            triangulate.triangulate_point(rig, uv, uv)
 
 
 class ReprojectionErrorTest(unittest.TestCase):

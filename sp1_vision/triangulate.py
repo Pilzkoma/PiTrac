@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Two image points in, one 3D point out - plus the check that it is real.
 
-The reprojection residual returned alongside is not decoration. It catches
-swapped images, an inverted translation and a mis-detected ball, all of
-which otherwise produce a confident number that is simply wrong.
+The reprojection residual returned alongside catches a mis-detected ball
+and a genuinely inconsistent pair (correspondences that do not come from
+one real point under this rig's geometry). It does NOT reliably catch a
+left/right swap or an inverted translation: the residual is computed from
+the same rig - K, R and T - that produced the point, so it is self-
+consistent with whatever extrinsics it is handed, wrong sign and all. Its
+sensitivity to a swap is proportional to the rig's departure from
+rectified, roughly 2*f*theta px for a pitch or roll of theta radians - about
+21 px at this rig's measured 0.92 deg pitch, and zero at R = I. The
+structural guard against a swap is the sign of Z, not this residual; that
+check belongs in the caller, not here.
 
 It is necessary and not sufficient. A small residual means the two rays
 intersect; it says nothing about scale. Scale comes from the baseline, and
@@ -36,8 +44,9 @@ def triangulate_point(rig, uv1, uv2):
     w = homogeneous[3, 0]
     if not np.isfinite(w) or abs(w) < 1e-12:
         raise TriangulationError(
-            "degenerate triangulation for {} / {}: the rays are parallel, "
-            "which usually means the same point was fed twice".format(uv1, uv2))
+            "degenerate triangulation for {} / {}: the two rays do not "
+            "converge to a finite point under this rig's geometry".format(
+                uv1, uv2))
     return (homogeneous[:3, 0] / w).astype(np.float64)
 
 
