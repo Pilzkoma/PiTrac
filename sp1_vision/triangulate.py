@@ -64,6 +64,35 @@ def reprojection_error(rig, xyz_m, uv1, uv2):
     return e1, e2
 
 
+def fit_scale_factor(measured_m, tape_m):
+    """Least-squares scale between triangulated and tape distances.
+
+    Returns (scale, rms_residual_m). A scale of 1.006 means the triangulated
+    world is 0.6% too large, which is what a baseline 0.6% too large would
+    produce - the 78.28 against 78.749 question, answered by measurement.
+
+    Both inputs must be DIFFERENCES between positions, not distances from
+    the camera. Where exactly the lens plane sits is a guess, and a constant
+    error in it would read as a scale error if absolute distances were used.
+    """
+    measured = np.asarray(measured_m, dtype=np.float64).ravel()
+    tape = np.asarray(tape_m, dtype=np.float64).ravel()
+    if measured.shape != tape.shape:
+        raise ValueError(
+            "measured and tape must be the same length, got {} and {}".format(
+                measured.shape, tape.shape))
+    if measured.size == 0:
+        raise ValueError("no displacements to fit a scale from")
+
+    denominator = float(np.dot(tape, tape))
+    if denominator <= 0.0:
+        raise ValueError("tape displacements are all zero")
+
+    scale = float(np.dot(measured, tape) / denominator)
+    residuals = measured - scale * tape
+    return scale, float(np.sqrt(np.mean(residuals ** 2)))
+
+
 def depth_sensitivity_mm_per_px(rig, depth_m):
     """How much depth error one pixel of disparity error buys, in mm.
 

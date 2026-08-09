@@ -38,8 +38,10 @@ import sys
 import tempfile
 
 import cv2
+import numpy as np
 
-from sp1_vision import calibration_capture, frame_analysis
+from sp1_vision import (calibration_capture, frame_analysis, ground_plane,
+                        stereo_geometry, triangulate)
 
 RUN_MANIFEST = "run.json"
 
@@ -209,6 +211,149 @@ def run_shots(count, out_dir, exposure_units):
     return 1 if short else 0
 
 
+# A residual above this means the two rays did not really meet, so the point
+# is not evidence about anything. Half a pixel is detection noise; two
+# pixels is a mis-detection or a wrong correspondence.
+MAX_REPROJECTION_PX = 2.0
+
+
+def _measure_shot(rig, run_dir, shot):
+    """Return (xyz_m, worst_reprojection_px) or (None, reason).
+
+    A shot is accepted only when BOTH hold:
+      - the worse of the two reprojection residuals is within
+        MAX_REPROJECTION_PX;
+      - the triangulated point is in front of camera 1 (xyz[2] > 0).
+
+    The residual by itself is not a sufficient guard against a left/right
+    camera swap. On a rig that happened to be exactly rectified, a swapped
+    correspondence solves in closed form to Z' = -Z - a real ray
+    intersection, just behind the camera - with a reprojection residual of
+    EXACTLY ZERO (worked through in triangulate.py's module docstring). This
+    rig is not exactly rectified - it carries 0.92 deg of pitch - so the
+    residual happens to also catch a swap here, but that is a property of
+    THIS mount, not of the check: the residual's swap sensitivity is
+    roughly 2*f*theta px, which goes to zero as the mount is ever shimmed
+    flatter. The sign of Z is the guard that holds regardless, so it stays
+    even though it looks redundant with the residual check on this
+    particular rig. Do not remove it as redundant.
+    """
+    frames = {}
+    for n in (1, 2):
+        path = os.path.join(run_dir, "cam{}".format(n), shot["name"])
+        frame = cv2.imread(path)
+        if frame is None:
+            return None, "missing {}".format(path)
+        frames[n] = frame
+
+    circles = {}
+    for n, frame in frames.items():
+        found, circle = frame_analysis.find_ball(frame)
+        if not found:
+            return None, "no ball in cam{}".format(n)
+        circles[n] = circle
+
+    uv1 = circles[1][:2]
+    uv2 = circles[2][:2]
+    xyz = triangulate.triangulate_point(rig, uv1, uv2)
+    e1, e2 = triangulate.reprojection_error(rig, xyz, uv1, uv2)
+    worst = max(e1, e2)
+
+    if worst > MAX_REPROJECTION_PX:
+        return None, "reproj {:.2f} px > {:.1f} px".format(worst, MAX_REPROJECTION_PX)
+    if xyz[2] <= 0.0:
+        return None, ("behind camera 1 (Z {:.1f} mm) - check for a "
+                      "left/right camera swap".format(xyz[2] * 1000.0))
+    return xyz, worst
+
+
+def run_analysis(run_dir, extrinsics_path, config_path):
+    rig = stereo_geometry.load_rig(extrinsics_path, config_path)
+    stereo_geometry.validate_rig(rig)
+    print("rig: baseline {:.3f} mm, fx {:.1f} / {:.1f}".format(
+        rig.baseline_m * 1000.0, rig.k1[0, 0], rig.k2[0, 0]))
+
+    shots = _load_manifest(run_dir)
+
+    print("\n{:<12} {:>7} {:>9} {:>9} {:>9} {:>9} {:>7} {:>5}".format(
+        "shot", "series", "X mm", "Y mm", "Z mm", "tape mm", "reproj", "use"))
+    buckets = {"depth": [], "spread": [], "target": []}
+    for shot in shots:
+        if shot.get("series") not in buckets:
+            print("{:<12} {:>62}".format(
+                shot["name"], "unknown series " + repr(shot.get("series"))))
+            continue
+        xyz, info = _measure_shot(rig, run_dir, shot)
+        if xyz is None:
+            # info is a rejection reason - distinct text for a missing
+            # file, a missed detection, a residual over threshold, and a
+            # negative-depth (swap) rejection, so the table shows which of
+            # those four happened rather than a single flat "NO".
+            print("{:<12} {:>7} {:>54}".format(
+                shot["name"], shot["series"], info))
+            continue
+        print("{:<12} {:>7} {:9.1f} {:9.1f} {:9.1f} {:9.1f} {:7.2f} {:>5}".format(
+            shot["name"], shot["series"], xyz[0] * 1000, xyz[1] * 1000,
+            xyz[2] * 1000, shot["tape_mm"], info, "yes"))
+        buckets[shot["series"]].append((shot, xyz))
+
+    # The plane wants every floor position it can get - spread across the
+    # image width is exactly what makes it determined. The scale fit does
+    # NOT: it equates a 3D distance with a difference of two tape readings,
+    # and that identity holds only along the collinear depth line.
+    floor = buckets["depth"] + buckets["spread"]
+    if len(floor) < 3:
+        print("\nOnly {} usable floor shots; a plane needs 3.".format(len(floor)))
+        return 1
+
+    # --- attitude -------------------------------------------------------
+    plane = ground_plane.fit_plane(np.array([xyz for _, xyz in floor]))
+    pitch, roll = ground_plane.attitude_from_plane(plane)
+    print("\nfloor plane: rms {:.2f} mm, conditioning {:.3f}".format(
+        plane.rms_m * 1000.0, plane.conditioning))
+    print("  pitch {:+.3f} deg   roll {:+.3f} deg".format(pitch, roll))
+
+    if len(buckets["target"]) >= 2:
+        ordered = sorted(buckets["target"], key=lambda item: item[1][2])
+        yaw = ground_plane.yaw_from_target_line(
+            plane, ordered[0][1], ordered[-1][1])
+        print("  yaw   {:+.3f} deg".format(yaw))
+    else:
+        yaw = None
+        print("  yaw     not measured - needs 2 usable target-line shots")
+
+    # --- scale ----------------------------------------------------------
+    depth_ordered = sorted(buckets["depth"], key=lambda item: item[0]["tape_mm"])
+    measured, taped = [], []
+    for (shot_a, xyz_a), (shot_b, xyz_b) in zip(depth_ordered, depth_ordered[1:]):
+        gap_tape = (shot_b["tape_mm"] - shot_a["tape_mm"]) / 1000.0
+        if gap_tape <= 0.0:
+            continue
+        measured.append(float(np.linalg.norm(xyz_b - xyz_a)))
+        taped.append(gap_tape)
+
+    if len(measured) >= 3:
+        scale, rms = triangulate.fit_scale_factor(measured, taped)
+        print("\nscale against tape: {:.4f} over {} displacements "
+              "(residual {:.2f} mm)".format(scale, len(measured), rms * 1000.0))
+        print("  implied baseline: {:.3f} mm against the file's {:.3f} mm".format(
+            rig.baseline_m * 1000.0 / scale, rig.baseline_m * 1000.0))
+    else:
+        print("\nscale: needs 4+ usable collinear depth positions, "
+              "have {}".format(len(measured) + 1))
+
+    # --- what to type into the config -----------------------------------
+    offset = stereo_geometry.camera2_offset_from_camera1(rig)
+    print("\n--- values for golf_sim_config.json (enter by hand) ---")
+    print('  "kCamera2OffsetFromCamera1OriginMeters": '
+          "[{:.6f}, {:.6f}, {:.6f}]".format(*offset))
+    print('  "kCamera1Angles": [{:+.3f}, {:+.3f}]'.format(
+        0.0 if yaw is None else yaw, pitch))
+    print("  (pan, tilt. Yaw is pan; pitch is tilt. Roll {:+.3f} deg is not "
+          "representable in this constant.)".format(roll))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -219,11 +364,20 @@ def main(argv=None):
     parser.add_argument("--exposure", type=int, metavar="N",
                         help="manual exposure in 100 us units (1-5000); "
                              "omit for auto")
+    parser.add_argument("--analyse", metavar="RUNDIR",
+                        help="analyse a captured run directory")
+    parser.add_argument("--extrinsics",
+                        default=stereo_geometry.DEFAULT_EXTRINSICS_PATH)
+    parser.add_argument("--config", default=stereo_geometry.DEFAULT_CONFIG_PATH)
     args = parser.parse_args(argv)
 
+    if args.analyse and args.shots:
+        parser.error("--analyse and --shots do different things; pick one")
     if args.shots:
         return run_shots(args.shots, args.out, args.exposure)
-    parser.error("give --shots N")
+    if args.analyse:
+        return run_analysis(args.analyse, args.extrinsics, args.config)
+    parser.error("give either --shots N or --analyse RUNDIR")
 
 
 if __name__ == "__main__":

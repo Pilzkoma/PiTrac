@@ -141,5 +141,40 @@ class DepthSensitivityTest(unittest.TestCase):
             triangulate.depth_sensitivity_mm_per_px(rig, 0.5087), 3.65, delta=0.05)
 
 
+class ScaleFactorTest(unittest.TestCase):
+    """Does the triangulated world match the tape's, in size?
+
+    Fitted on DIFFERENCES between positions, never on absolute distances -
+    the lens plane's exact location is a guess, and a constant offset in it
+    would masquerade as a scale error.
+    """
+
+    def test_perfect_agreement_gives_unit_scale(self):
+        tape = np.array([0.070, 0.070, 0.070, 0.070, 0.070])
+        scale, rms = triangulate.fit_scale_factor(tape, tape)
+        self.assertAlmostEqual(scale, 1.0, places=9)
+        self.assertLess(rms, 1e-12)
+
+    def test_recovers_a_known_scale_error(self):
+        # 78.28 against 78.749 mm of baseline is 0.6%, and a baseline that is
+        # 0.6% too large makes every triangulated distance 0.6% too large.
+        tape = np.array([0.070, 0.070, 0.070, 0.070, 0.070, 0.070])
+        measured = tape * 1.006
+        scale, rms = triangulate.fit_scale_factor(measured, tape)
+        self.assertAlmostEqual(scale, 1.006, places=6)
+        self.assertLess(rms, 1e-9)
+
+    def test_noise_shows_up_in_the_residual_not_the_scale(self):
+        tape = np.full(6, 0.070)
+        measured = tape + np.array([0.001, -0.001, 0.0008, -0.0009, 0.0, 0.0011])
+        scale, rms = triangulate.fit_scale_factor(measured, tape)
+        self.assertAlmostEqual(scale, 1.0, delta=0.01)
+        self.assertGreater(rms, 1e-5)
+
+    def test_refuses_mismatched_lengths(self):
+        with self.assertRaises(ValueError):
+            triangulate.fit_scale_factor(np.array([0.07]), np.array([0.07, 0.07]))
+
+
 if __name__ == "__main__":
     unittest.main()
