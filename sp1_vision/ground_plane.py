@@ -48,13 +48,13 @@ def fit_plane(points_m):
     """Least-squares plane through 3+ points, normal oriented upward.
 
     Upward in the camera frame means -Y, since Y is down. SVD's vt[2] sign
-    is deterministic for a given input, but which sign it picks is not
-    under this function's control, and it is not always upward: for this
-    module's own test fixture at pitch +-2 deg it comes out downward
-    unless corrected here (verified by temporarily deleting this flip and
-    watching that test fail). Left uncorrected, that would silently negate
-    the reported pitch for real inputs that happen to land on the other
-    side of LAPACK's sign choice.
+    is deterministic for a given input, but which sign it picks is a
+    property of the LAPACK build and the data, not something this function
+    or its tests can rely on. So the orientation is forced here
+    unconditionally rather than observed. Left to LAPACK, the reported
+    pitch would silently negate for inputs landing on the other side of
+    that choice - and the test for this asserts the postcondition on two
+    inputs rather than on any particular sign coming back from the SVD.
     """
     pts = np.asarray(points_m, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -126,12 +126,47 @@ def attitude_from_plane(plane):
     return pitch_deg, roll_deg
 
 
-def yaw_from_target_line(plane, near_m, far_m):
-    """Angle between the target line and the camera's forward axis, degrees.
+def camera_height_above_floor_m(plane):
+    """Height of camera 1's optical centre above the floor, metres.
 
-    Both points are projected into the floor plane first, so a height error
-    in either one cannot tilt the answer. Positive yaw means the target line
-    runs to the camera's right.
+    The fitted plane runs through the ball CENTRES, which sit exactly one
+    ball radius above the floor - so the floor is one radius further away
+    than the plane is, and the radius is ADDED, not subtracted.
+
+    dot(centroid, -normal) is the perpendicular distance from the camera
+    origin to the ball-centre plane: the plane is
+    {p : dot(p - centroid, normal) = 0}, so the origin's signed distance
+    along the upward normal is -dot(centroid, normal), positive because the
+    floor is below the camera.
+
+    This is the one direct measurement of a number the rest of the project
+    only assumes - the spec's 115 mm mounting height - so it is worth
+    printing even though nothing consumes it yet.
+    """
+    return float(np.dot(plane.centroid, -plane.normal) + GOLF_BALL_RADIUS_M)
+
+
+def yaw_from_target_line(plane, near_m, far_m):
+    """Bearing of the target line in the camera's frame, degrees.
+
+    Positive means the target line runs to the camera's RIGHT.
+
+    THE SIGN SENSE IS OPPOSITE TO attitude_from_plane's, deliberately.
+    Pitch and roll there describe the CAMERA's own rotation. This describes
+    the TARGET LINE's bearing as the camera sees it, which is the negation
+    of the unit's own yaw: a unit yawed to the right sees the target line
+    off to its left. Nothing here negates it to match, because which sign
+    the unit's own pan convention wants is unresolved until the hardware
+    run, and a guess would be indistinguishable from a measurement. Stating
+    the relationship is the honest half of it.
+
+    The DIRECTION far - near is projected into the floor plane - not the
+    two points individually - so a height error in either one cannot tilt
+    the answer. The angle is then arctan2 on the raw X and Z components of
+    that in-plane direction, i.e. read off in the camera's own XZ plane,
+    NOT measured as a rotation about the plane normal. At this rig's
+    sub-degree attitude the two agree to well under 0.01 deg; at a large
+    tilt they would not, and this would be the wrong formula.
     """
     near = np.asarray(near_m, dtype=np.float64).ravel()
     far = np.asarray(far_m, dtype=np.float64).ravel()

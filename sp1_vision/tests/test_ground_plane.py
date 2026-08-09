@@ -49,16 +49,35 @@ class FitPlaneTest(unittest.TestCase):
         self.assertLess(plane.rms_m, 1e-9)
 
     def test_normal_is_always_oriented_upward(self):
-        # LAPACK's vt[2] sign is deterministic per input, not random, but
-        # which sign it picks depends on the data in a way that is not
-        # under our control - and for both these inputs it comes out
-        # downward without the flip in fit_plane. Verified by temporarily
-        # deleting that flip and re-running this test: it fails with
-        # normal[1] == +0.999..., not close to zero, so this genuinely
-        # exercises the guard rather than passing regardless of it.
+        # This asserts the POSTCONDITION, on a point set and on its
+        # Y-mirrored twin. Negating the Y column of the input negates the Y
+        # component of every right singular vector, so if LAPACK's sign
+        # choice were left to decide the answer, the two would come out
+        # opposite and one of these assertions would fail. Which of the two
+        # needs the flip is a property of the LAPACK build, so the test must
+        # not depend on knowing it - an earlier version asserted only the
+        # first case and would have gone quietly vacuous on another build,
+        # taking fit_plane's docstring with it.
         for pitch in (-2.0, 2.0):
-            plane = ground_plane.fit_plane(floor_points(pitch_deg=pitch))
-            self.assertLess(plane.normal[1], 0.0)
+            pts = floor_points(pitch_deg=pitch)
+            mirrored = pts * np.array([1.0, -1.0, 1.0])
+            for name, candidate in (("as-is", pts), ("Y-mirrored", mirrored)):
+                plane = ground_plane.fit_plane(candidate)
+                self.assertLess(plane.normal[1], 0.0,
+                                "{} at pitch {}".format(name, pitch))
+
+    def test_the_flip_is_exercised_by_one_of_the_two_orientations(self):
+        # Companion to the test above: it proves the pair of inputs really
+        # does straddle LAPACK's sign choice, so that test is doing work.
+        # If a future numpy made both raw normals point the same way, this
+        # fails and says so rather than letting the guard go untested.
+        raw_signs = []
+        for factor in (1.0, -1.0):
+            pts = floor_points(pitch_deg=2.0) * np.array([1.0, factor, 1.0])
+            centred = pts - pts.mean(axis=0)
+            _, _, vt = np.linalg.svd(centred, full_matrices=False)
+            raw_signs.append(np.sign(vt[2][1]))
+        self.assertEqual(sorted(raw_signs), [-1.0, 1.0])
 
     def test_reports_residuals_for_a_noisy_floor(self):
         pts = floor_points()
@@ -101,12 +120,61 @@ class AttitudeTest(unittest.TestCase):
     def test_recovers_both_together(self):
         # Both formulas in attitude_from_plane are exact for this fixture's
         # rotation order (not small-angle approximations - see that
-        # function's docstring), so this holds to the same tolerance as
-        # its single-angle neighbours rather than needing a looser one.
+        # function's docstring), so this holds far tighter than its
+        # single-angle neighbours.
+        #
+        # places=5, not 3: the abandoned inexact pair - arcsin(n[2]) for
+        # pitch, arctan2(n[0], -n[1]) for roll - is wrong here by only
+        # 8.8e-5 deg and sails through places=3, so that tolerance does not
+        # discriminate between the two versions at all. Exactness cost two
+        # rounds of fixes to establish; this is the assertion that keeps it.
         pitch, roll = ground_plane.attitude_from_plane(
             ground_plane.fit_plane(floor_points(pitch_deg=-0.9, roll_deg=0.8)))
-        self.assertAlmostEqual(pitch, -0.9, places=3)
-        self.assertAlmostEqual(roll, 0.8, places=3)
+        self.assertAlmostEqual(pitch, -0.9, places=5)
+        self.assertAlmostEqual(roll, 0.8, places=5)
+
+    def test_stays_exact_at_a_large_attitude(self):
+        # The same claim where the inexact pair is not merely detectable but
+        # obvious: at 30/20 deg it errs by degrees, not by 1e-4 of one.
+        pitch, roll = ground_plane.attitude_from_plane(
+            ground_plane.fit_plane(floor_points(pitch_deg=30.0, roll_deg=20.0)))
+        self.assertAlmostEqual(pitch, 30.0, places=5)
+        self.assertAlmostEqual(roll, 20.0, places=5)
+
+
+class CameraHeightTest(unittest.TestCase):
+    """The 115 mm mounting height, measured rather than assumed.
+
+    The fixture's ball centres sit at Y = +0.0937 m, one ball radius below
+    the 0.115 m the spec states - so a correct implementation returns 115 mm
+    and the sign error of subtracting the radius instead of adding it
+    returns 72 mm, which is not a subtle difference.
+    """
+
+    def test_level_floor_gives_the_spec_height(self):
+        plane = ground_plane.fit_plane(floor_points())
+        height = ground_plane.camera_height_above_floor_m(plane)
+        self.assertAlmostEqual(height, 0.0937 + ground_plane.GOLF_BALL_RADIUS_M,
+                               places=9)
+        self.assertAlmostEqual(height * 1000.0, 115.0, delta=0.1)
+
+    def test_the_radius_is_added_not_subtracted(self):
+        # The floor is FURTHER from the camera than the ball centres are,
+        # so the height must exceed the perpendicular distance to the fitted
+        # plane by exactly one radius.
+        plane = ground_plane.fit_plane(floor_points())
+        to_plane = float(np.dot(plane.centroid, -plane.normal))
+        self.assertGreater(
+            ground_plane.camera_height_above_floor_m(plane), to_plane)
+
+    def test_is_unchanged_by_the_attitude_it_is_measured_at(self):
+        # Tilting the unit rotates the plane but does not move the camera,
+        # so the perpendicular height is the same number at any attitude.
+        level = ground_plane.camera_height_above_floor_m(
+            ground_plane.fit_plane(floor_points()))
+        tilted = ground_plane.camera_height_above_floor_m(
+            ground_plane.fit_plane(floor_points(pitch_deg=3.0, roll_deg=-2.0)))
+        self.assertAlmostEqual(level, tilted, places=9)
 
 
 class YawTest(unittest.TestCase):
