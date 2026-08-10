@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|99%|🟡 In Progress|2026-05-12|
+|SP1 — Hardware & Build|HW+SW|Build|99%|🟡 In Progress|2026-08-10|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -516,7 +516,10 @@ PiTrac's key techniques:
 * ☑ Thermal drift measured by splitting the capture set into cooler/warmer halves: pitch and roll identical to 0.01°, baseline spread is estimation noise (wrong sign for expansion, 7x too large). No compensation needed.
 * ☐ **Working distance: 50 cm decided, not yet built into the geometry config.** With the 2026-08-08 optics: ball radius at 50 cm is 38 px, disparity 141 px, and depth resolution 3.55 mm per pixel of disparity error — so ~1.8 mm at half-pixel matching. Three live constants still hold PiTrac's numbers: `kCameraNPositionsFromExpectedBallMeters` (**not** `...FromOriginMeters`, which exists only in PiTrac's docs — the origin is the expected ball, and only the vector's *magnitude* is ever read, at `gs_camera.cpp:455/458`; the trace's `distance: 0.621575` is exactly cam1's vector length, 24 % beyond the intended 50 cm); `kCameraNAngles`, which feed `AdjustXYZDistancesForCameraAngles` and become HLA/VLA, so they are the ones that matter; and `kCamera2OffsetFromCamera1OriginMeters` = `[0.00, -0.19, 0.0]`, PiTrac's **vertical** 19 cm camera stacking, applied at `gs_camera.cpp:700-703` and `lm_main.cpp:865` — ours are side by side at 78.28 mm, so the delta path currently carries a 19 cm offset that does not exist.
 * ☐ `WaitForCam2Trigger` still a JETSON_STUB returning false. UVC exposes no trigger pin (confirmed: no such control in `v4l2-ctl --list-ctrls`), so this needs a different mechanism, not a translation. `exposure_absolute` reaches 500 ms, which makes "open a long exposure and fire the strobe into it" the obvious candidate.
-* ☐ Triangulation not implemented. Extrinsics are measured and saved in `sp1_vision/calibration_results/stereo_extrinsics.json`, but nothing consumes them — the ball-position path is still PiTrac's monocular radius method, which is roughly an order of magnitude worse at these distances.
+* ☑ **Triangulation Block 1 built and merged (2026-08-10).** Python only, nothing in the C++ runtime path yet: `stereo_geometry.py` (the sole frame/unit conversion point, and the rig validation that refuses a mismatched intrinsics/extrinsics pairing), `triangulate.py`, `ground_plane.py`, `cli_triangulate.py`. 147 tests on the Jetson. The extrinsics are consumed for the first time.
+* ☐ **Measurement run at the device — the only step left in Block 1.** 24 shots, protocol in `sp1_vision/triangulation_run/PROTOCOL.md`. Settles: whether the shipped scale holds and to what stated precision, the unit's attitude against the floor (which nothing has ever measured — the calibration measures camera against camera), the mounting height against the assumed 115 mm, and the sign of `yaw_from_target_line`.
+* ☐ **The baseline figure needs correcting, independently of that run.** 78.28 mm is from the springs-against-bolted comparison table in `calibration_images/README.md`, a different solve from the shipped one — it reports pitch −0.923° where `stereo_extrinsics.json` says −0.9423°. The file the code actually reads says **78.749 mm**, and `CALIB_FIX_INTRINSIC` means 78.28 cannot be substituted into its R/T without re-solving. Every "78.28" in this logbook and in CLAUDE.md is quoting the comparison table, not the shipped geometry. Depth resolution follows: 3.53 mm/px at 0.500 m with the shipped baseline, not 3.55.
+* ☐ Nothing consumes the extrinsics inside `pitrac_lm` yet — the ball-position path there is still PiTrac's monocular radius method, roughly an order of magnitude worse at these distances. That is Block 2, and for the flying ball it waits on `WaitForCam2Trigger`.
 * ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → strobe-lit shot capture → shot data → SP4 GSPro JSON)
 
 \---
@@ -1333,6 +1336,108 @@ PiTrac's key techniques:
 > `--msg_broker_address` bricht `pitrac_lm` in der IPC-Initialisierung ab und
 > segfaultet beim Herunterfahren. Mit dem Argument läuft der Trace sauber und
 > bestätigt Brennweite 2.701, Matrix, Sensorüberschreibung und Ballradius 48.
+
+**2026-08-10 — Zweig gemergt, und die Basislinienfrage war falsch gestellt.**
+
+> Block 1 der Triangulation ist in `main`: 29 Commits, 123 Tests grün auf dem
+> gemergten Baum, gepusht, Jetson gezogen. Danach ging die Sitzung an etwas,
+> das erst beim Nachrechnen sichtbar wurde. Der geplante Messlauf hätte eine
+> Frage entschieden, die so nicht existiert — mit einem Werkzeug, das vier von
+> sechs Messpunkten wegwirft.
+>
+> **78,28 gegen 78,749 ist nicht Mechanik gegen Kalibrierung.** Beide Zahlen
+> kommen aus derselben Pipeline. 78,749 mm ist der ausgelieferte Solve in
+> `stereo_extrinsics.json` — 19 von 24 Paaren, Nicken −0,9423°. 78,28 mm steht
+> in der Vergleichstabelle des Kalibrier-READMEs, Federn gegen verschraubt, und
+> das ist ein **anderer** Solve: er nennt Nicken −0,923°, Gieren +0,427°,
+> Rollen −0,851°, wo die Datei −0,9423 / +0,3598 / −0,8241 sagt. Die
+> dokumentierte Teilmengenstreuung ist 77,99–78,66 mm; der ausgelieferte Wert
+> liegt knapp darüber. Und wegen `CALIB_FIX_INTRINSIC` lässt sich 78,28 gar
+> nicht in die ausgelieferten R/T einsetzen, ohne neu zu lösen.
+>
+> Die beantwortbare Frage lautet damit **„stimmt der Maßstab der ausgelieferten
+> Datei"**, nicht „welche der beiden Zahlen". CLAUDE.md und der Eintrag in den
+> Next Steps führen 78,28 als *die* Basislinie — das widerspricht der Datei,
+> die der Code liest, unabhängig davon, was der Messlauf ergibt. Nebenwirkung:
+> 3,55 mm/px folgt aus b = 78,28 und 3,53 aus 78,749. Die beiden Korrekturen
+> sind keine unabhängigen.
+>
+> **Das Präzisionsbudget, vorher gerechnet statt hinterher.** Z²/(b·f) gibt
+> 1,73 / 3,53 / 6,91 mm pro Pixel Disparitätsfehler bei 0,35 / 0,50 / 0,70 m,
+> am echten Rig auf dem Jetson bestätigt. Bei 0,2 px Detektionsrauschen sind
+> das 0,35 mm nah und 1,40 mm fern. Über eine 350-mm-Spanne kommt die
+> Regressionssteigung auf ~0,33 %, Lineal und Ballplatzierung legen ~0,34 %
+> drauf — zusammen ~0,45 % gegen ein 0,6-%-Signal. **Der Lauf ist knapp
+> entscheidungsfähig, und das ist Rechnung, nicht Pessimismus.** Die Lage
+> dagegen ist immun: ein Maßstabsfehler ist eine radiale Streckung, die eine
+> Ebene auf eine parallele abbildet und die Normale in Ruhe lässt. Nicken,
+> Rollen und Gieren landen unabhängig davon, wie die Maßstabsfrage ausgeht.
+>
+> **Der alte Maßstabsschätzer teleskopierte.** Least-Squares durch den Ursprung
+> auf Nachbardifferenzen fällt bei gleichen Abständen exakt auf (Z₆−Z₁)/(t₆−t₁)
+> zusammen — die vier inneren Positionen einer Sechserreihe tragen **nichts**
+> bei. Wiederholungen an derselben Position warf er ganz weg, weil deren
+> Ablesedifferenz null ist, mit einer Meldung, die der Bediener als Kritik an
+> seinem eigenen Aufbau liest. Ersetzt durch eine Geradenanpassung
+> `Tiefe = Maßstab · Ablesewert + Versatz` über alle Punkte. Der Achsenabschnitt
+> trägt den unbekannten Linsenebenenversatz, den die Differenzen vorher
+> weggekürzt haben — und **meldet** ihn, was mehr ist: es ist die einzige
+> Schätzung, die das Projekt davon hat, wie tief das optische Zentrum hinter
+> der Frontfläche sitzt.
+>
+> Drei Dinge, die der Lauf vorher nicht sagen konnte: den Standardfehler auf
+> Maßstab und implizierte Basislinie — 1,004 ± 0,001 entscheidet die Frage,
+> 1,004 ± 0,009 nicht, und blank gedruckt sehen beide gleich aus; den Winkel
+> zwischen Tiefenlinie und optischer Achse, aus den Bällen selbst, denn der
+> Vergleich ΔZ gegen ΔAblesewert setzt ihn als null voraus und 5° sind 0,38 %
+> Verzerrung; und die Wiederholstreuung.
+>
+> **Eine synthetische Probe hat das Aufnahmeprotokoll geändert.** Ein
+> realistischer 22-Schuss-Lauf ergab Maßstab **1,0086 ± 0,0016 gegen eine
+> Wahrheit von cos 2° = 0,9994**. Ursache: die Testvorrichtung zeichnet
+> Ballmittelpunkte auf ganze Pixel gerundet — ein halbes Pixel, gleichsinnig an
+> jeder Position. Ein Versatz, der linear mit Z wächst, **ist** ein
+> Maßstabsfehler und von innen unsichtbar: er landet vollständig in der
+> Steigung und lässt die Residuen klein. Für den Bediener heißt das:
+> Wiederholungen **ohne den Ball anzufassen** mitteln das Sensorrauschen weg
+> und lassen die Subpixel-Phase stehen — sie verkleinern die gedruckte
+> Unsicherheit, nicht den Fehler. Also Ball dazwischen neu setzen, und lieber
+> mehr verschiedene Positionen als mehr Wiederholungen derselben.
+>
+> **Das Ableseprotokoll ändert sich mit dem Schätzer.** Bisher: lotrechter
+> Abstand zur Frontfläche. Jetzt: Lineal flach auf den Boden, Nullende an die
+> Frontfläche, **Ball daneben auf dem Boden** an der Längskante, abgelesen an
+> der dem Gerät zugewandten **Kante** des Balls. Die Richtung eines Lineals kann
+> der Bediener kontrollieren und der Lauf nachmessen; eine Flächennormale ist
+> keines von beidem. Kante statt Mitte, weil eine Kante scharf und eine Mitte
+> eine Schätzung ist — der Ballradius daneben ist konstant und verschwindet im
+> Achsenabschnitt, ebenso die Lage der Linealnull.
+>
+> Ein Detail, das beinahe durchgerutscht wäre: der Ball darf **nicht auf dem
+> Lineal** liegen. Er säße dann eine Linealdicke über allen seitlichen Bällen,
+> und die Ebenenanpassung mittelt zwischen zwei parallelen Ebenen und verkippt
+> — Nicken und Rollen wären falsch, und nichts in der Ausgabe würde es sagen.
+>
+> **Gieren ist keine Konstante.** Nicken und Rollen sind durch Mount und Boden
+> festgenagelt; Gieren ist der Winkel zu einer Linie, die der Bediener wählt.
+> Das Gerät steht frei, ohne Mattenkante und ohne markierte Position, also
+> beschreibt Gieren die heutige Aufstellung und nicht das Gerät. `kCameraNAngles`
+> wird deshalb **nicht** befüllt — die Konstante könnte unsere drei Winkel
+> ohnehin nicht tragen, Rollen fällt dort heraus. Die zwei
+> Ziellinien-Aufnahmen behalten trotzdem ihren Zweck: sie klären das Vorzeichen
+> von `yaw_from_target_line` gegen eine bewusst 100 mm nach rechts gelegte
+> Linie, und ein falsches Vorzeichen dort landet 1:1 im horizontalen
+> Abflugwinkel.
+>
+> **Ein Fehler, den der Test gefunden hat und kein Review.** Der Guard gegen
+> eine Serie ohne Spreizung stand als `sxx <= 0.0` und feuerte nicht: drei
+> identische Ablesungen von 0,40 zentrieren sich auf je ~5·10⁻¹⁷, nicht auf
+> null. Eine Serie, die sich nie bewegt hat, hätte einen selbstbewussten
+> Maßstab aus Rundungsrauschen geliefert.
+>
+> **Stand:** `main` bei `aa209e1`, 147 Tests grün im echten Jetson-Checkout.
+> Der Messlauf am Gerät steht aus; die Anleitung mit allen 24 Aufnahmen
+> einzeln liegt in `sp1_vision/triangulation_run/PROTOCOL.md`.
 
 \---
 

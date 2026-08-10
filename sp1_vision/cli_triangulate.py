@@ -34,16 +34,24 @@ of the depth. Not near AND wide at once - the lens distortion is not
 calibrated out there, and an uncalibrated corner reads as a real
 displacement.
 
-HOW TO HOLD THE TAPE, since the analysis depends on it. Lay a rule flat on
-the floor pointing away from the unit, put every depth ball ON the rule, and
-read ALONG the rule. Not the straight-line distance from some fixed mark,
-and not a different method halfway through: the images can be re-analysed
-later, the operator's reading cannot.
+HOW TO READ THE RULE, since the analysis depends on it. Lay a rule flat on
+the floor, its end against the unit's front face, pointing away. Put the ball
+on the FLOOR beside it, touching its long edge, always the same side. Read
+the rule where the ball's NEAR edge - the side facing the unit - meets it.
 
-Where the rule's zero sits does not matter. A constant offset lands in the
-fit's intercept, which is reported rather than cancelled - it is this
-project's only estimate of how deep the optical centre sits behind the front
-face. Which DIRECTION the rule points matters more, but the run measures it:
+The ball must not sit ON the rule. It would then ride a rule's thickness
+above every spread and target ball, and the floor-plane fit would tilt to
+split the difference between two parallel planes, taking pitch and roll with
+it. All of them on the floor, or the attitude is wrong and nothing says so.
+
+Reading an edge rather than the centre is deliberate: an edge is a sharp
+thing to sight down on, a centre is a judgement, and the ball radius the
+edge costs is a CONSTANT that lands in the fit's intercept. So does the
+rule's zero, wherever it sits. The intercept is reported rather than
+cancelled - it is this project's only estimate of how deep the optical
+centre sits behind the front face.
+
+Which DIRECTION the rule points matters more, but the run measures that too:
 the balls themselves give the angle between the rule and the optical axis,
 and the analysis prints the raw scale and the angle-corrected one side by
 side. Lay the rule roughly square to the front face and the two agree to
@@ -84,13 +92,15 @@ def _ask_float(prompt):
 
 SERIES = {"d": "depth", "s": "spread", "t": "target"}
 
-# Spelt out at every shot rather than once at the top, because the two ways of
-# holding a tape differ by a few millimetres over a 350 mm reading and the
-# whole baseline question is 0.6%. The analysis compares DIFFERENCES of these
-# against differences of triangulated Z, which is a perpendicular distance
-# from the camera - so a perpendicular reading is the one that matches.
-TAPE_PROMPT = ("  tape distance in mm, measured PERPENDICULAR to the unit's\n"
-               "  front face (not straight-line from a mark): ")
+# Spelt out at every shot rather than once at the top, because two ways of
+# reading a rule differ by a few millimetres and the whole baseline question
+# is 0.6%. The NEAR EDGE rather than the ball's centre because an edge is a
+# sharp thing to sight and a centre is a judgement, and the resulting
+# constant offset of one ball radius lands in the fit's intercept, where it
+# costs nothing. What must not vary is WHICH edge: always the one facing the
+# unit, at every position, for the whole series.
+TAPE_PROMPT = ("  reading on the rule at the ball's NEAR edge (the side\n"
+               "  facing the unit), mm: ")
 
 
 def _ask_series():
