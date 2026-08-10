@@ -96,38 +96,74 @@ class FindBoardTest(unittest.TestCase):
         np.testing.assert_allclose(corners_colour, corners_gray, atol=1e-6)
 
 
-class FindBallTest(unittest.TestCase):
-    """One ball, found the same way in both images of a pair."""
-
-    def _frame_with_ball(self, cx, cy, r):
-        # Dark background, bright disc - the IR-lit case the detector meets.
-        frame = np.zeros((800, 1280), dtype=np.uint8)
+def _frame_with_discs(*discs):
+    """A dark frame with bright discs at (cx, cy, r)."""
+    frame = np.zeros((800, 1280), dtype=np.uint8)
+    for cx, cy, r in discs:
         cv2.circle(frame, (cx, cy), r, 255, -1)
-        return cv2.GaussianBlur(frame, (5, 5), 0)
+    return cv2.GaussianBlur(frame, (5, 5), 0)
 
-    def test_finds_a_ball_near_its_true_centre(self):
-        found, circle = frame_analysis.find_ball(self._frame_with_ball(700, 520, 38))
-        self.assertTrue(found)
-        u, v, r = circle
-        self.assertAlmostEqual(u, 700, delta=3)
-        self.assertAlmostEqual(v, 520, delta=3)
-        self.assertAlmostEqual(r, 38, delta=5)
 
-    def test_reports_absence_rather_than_guessing(self):
-        found, circle = frame_analysis.find_ball(np.zeros((800, 1280), dtype=np.uint8))
-        self.assertFalse(found)
-        self.assertIsNone(circle)
+class BallCandidatesTest(unittest.TestCase):
+    """Every circle in the frame, not the strongest one.
+
+    Returning a single circle put the whole decision inside one image, where
+    nothing distinguishes a golf ball from a loudspeaker cone. It cost a
+    24-shot run: in 17 of those the detector returned the same pixel in
+    every frame, because a bright object in the background outscored the
+    ball and never moved.
+
+    The division of labour is deliberate. This function is permissive - it
+    is allowed to hand back a loudspeaker, a lamp and a plant pot - and the
+    stereo pair selection is where precision comes from, because that is
+    where the geometry lives.
+    """
+
+    def test_returns_a_lone_circle_near_its_true_centre(self):
+        found = frame_analysis.ball_candidates(_frame_with_discs((700, 520, 38)))
+        self.assertGreaterEqual(len(found), 1)
+        u, v, r = found[0]
+        self.assertAlmostEqual(u, 700, delta=4)
+        self.assertAlmostEqual(v, 520, delta=4)
+        self.assertAlmostEqual(r, 38, delta=6)
+
+    def test_returns_every_circle_not_only_the_strongest(self):
+        # The property the single-circle version could not have. A big
+        # bright disc and a smaller one: both must come back, so that
+        # something downstream can decide which is the ball.
+        found = frame_analysis.ball_candidates(
+            _frame_with_discs((300, 250, 62), (900, 600, 30)))
+        self.assertGreaterEqual(len(found), 2)
+        for want in ((300, 250), (900, 600)):
+            self.assertTrue(
+                any(abs(u - want[0]) < 12 and abs(v - want[1]) < 12
+                    for u, v, _ in found),
+                "no candidate near {}, got {}".format(want, found))
+
+    def test_returns_an_empty_list_when_there_is_nothing(self):
+        self.assertEqual(
+            frame_analysis.ball_candidates(np.zeros((800, 1280), dtype=np.uint8)),
+            [])
 
     def test_accepts_colour_frames_like_find_board(self):
-        gray = self._frame_with_ball(640, 400, 30)
+        gray = _frame_with_discs((640, 400, 30))
         colour = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        self.assertTrue(frame_analysis.find_ball(colour)[0])
+        self.assertGreaterEqual(len(frame_analysis.ball_candidates(colour)), 1)
 
     def test_radius_bounds_are_honoured(self):
-        # A 38 px ball must not be reported when only 50-70 px is allowed.
-        found, _ = frame_analysis.find_ball(
-            self._frame_with_ball(700, 520, 38), min_radius=50, max_radius=70)
-        self.assertFalse(found)
+        found = frame_analysis.ball_candidates(
+            _frame_with_discs((700, 520, 38)), min_radius=50, max_radius=70)
+        self.assertEqual(found, [])
+
+    def test_every_candidate_is_a_plain_tuple_of_floats(self):
+        # The pair selector indexes these and puts them into numpy; numpy
+        # scalars leaking through print as "np.float32(700.5)" in the
+        # operator's failure messages.
+        for candidate in frame_analysis.ball_candidates(
+                _frame_with_discs((700, 520, 38))):
+            self.assertEqual(len(candidate), 3)
+            for value in candidate:
+                self.assertIsInstance(value, float)
 
 
 if __name__ == "__main__":

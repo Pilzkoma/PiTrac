@@ -85,34 +85,60 @@ def find_board(frame, refine=True):
 BALL_MIN_RADIUS_PX = 20
 BALL_MAX_RADIUS_PX = 70
 
-# One ball is in frame, so any second detection is a false positive rather
-# than a competing candidate. minDist is set wide enough that Hough cannot
-# return two circles for the same ball.
-BALL_MIN_SEPARATION_PX = 200
+# The constant that used to sit here, BALL_MIN_SEPARATION_PX = 200, went with
+# find_ball, and so did its reasoning: "one ball is in frame, so any second
+# detection is a false positive rather than a competing candidate." That
+# sentence was the whole bug. A second detection is a competing candidate,
+# the room is full of them, and separating candidates by 200 px did not
+# suppress false positives - it suppressed the ball whenever something
+# stronger stood within 200 px of it.
 
 
-def find_ball(frame, min_radius=BALL_MIN_RADIUS_PX, max_radius=BALL_MAX_RADIUS_PX):
-    """Locate the ball, returning (found, (u, v, r)) in pixels.
+# How far apart two candidates must be before Hough treats them as separate.
+# Small on purpose: the point here is to MISS NOTHING, and a wide separation
+# lets a strong neighbour delete the ball outright. In the 2026-08-10 run
+# that is exactly what happened - at 40 px the ball in gs_03 was suppressed
+# by a stronger circle beside it and never reached the pair selection.
+CANDIDATE_MIN_SEPARATION_PX = 20
+
+# Accumulator threshold. Lower admits more junk, which is the intended
+# trade: junk is cheap to reject downstream with the rig, and a missed ball
+# cannot be recovered at all. At 30 the ball was absent from camera 2 in
+# gs_03; at 22 it is present in both.
+CANDIDATE_ACCUMULATOR_THRESHOLD = 22
+
+
+def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,
+                    max_radius=BALL_MAX_RADIUS_PX):
+    """Every circular candidate in the frame, as a list of (u, v, r) floats.
+
+    Deliberately permissive, and deliberately undecided. A single image
+    cannot tell a golf ball from a loudspeaker cone: both are bright discs,
+    and on 2026-08-10 the loudspeaker won 17 frames out of 24 because it was
+    the stronger circle. Nothing in one image would ever have said so - the
+    detector returned the same pixel in every frame while the ball moved
+    across the table.
+
+    What CAN tell them apart is the stereo pair: a golf ball is 42.67 mm
+    across, so its apparent radius has to match the range that its own
+    disparity implies, and it has to sit inside the measurement volume.
+    That decision belongs in ball_pair.find_ball_pair, which is why this
+    function makes none of it and hands back everything it saw.
 
     Both images of a pair must be measured by this same function with the
-    same parameters. The centre of a sphere's silhouette is not exactly the
-    projection of its centre - it migrates outward with off-axis angle, by
-    around 0.3 px at our geometry - but that bias is common to both cameras
-    and largely cancels in disparity. A *difference* in how the two images
-    are measured does not cancel, and is far larger. Hence one function.
-
-    Returns (False, None) rather than a best guess when nothing is found:
-    a wrong centre produces a confident, wrong 3D point, and only the
-    reprojection residual would catch it.
+    same parameters. A silhouette centre is not exactly the projection of a
+    sphere's centre - it migrates outward with off-axis angle, about 0.3 px
+    at our geometry - but that bias is common to both cameras and largely
+    cancels in disparity. A *difference* in how the two images are measured
+    does not cancel.
     """
-    gray = _as_gray(frame)
-    gray = cv2.medianBlur(gray, 5)
+    gray = cv2.medianBlur(_as_gray(frame), 5)
     circles = cv2.HoughCircles(
-        gray, cv2.HOUGH_GRADIENT, dp=1.0, minDist=BALL_MIN_SEPARATION_PX,
-        param1=100, param2=30, minRadius=int(min_radius), maxRadius=int(max_radius),
+        gray, cv2.HOUGH_GRADIENT, dp=1.0,
+        minDist=CANDIDATE_MIN_SEPARATION_PX, param1=100,
+        param2=CANDIDATE_ACCUMULATOR_THRESHOLD,
+        minRadius=int(min_radius), maxRadius=int(max_radius),
     )
     if circles is None:
-        return False, None
-    # OpenCV returns candidates strongest-accumulator first.
-    u, v, r = circles[0][0]
-    return True, (float(u), float(v), float(r))
+        return []
+    return [(float(u), float(v), float(r)) for u, v, r in circles[0]]

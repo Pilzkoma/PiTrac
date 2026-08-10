@@ -13,9 +13,9 @@ from unittest import mock
 import cv2
 import numpy as np
 
-from sp1_vision import ground_plane, stereo_geometry
+from sp1_vision import ball_pair, ground_plane, stereo_geometry
+from sp1_vision.ball_pair import MAX_REPROJECTION_PX
 from sp1_vision.cli_triangulate import (
-    MAX_REPROJECTION_PX,
     _find_max_shot_number,
     _load_manifest,
     _measure_shot,
@@ -26,6 +26,7 @@ from sp1_vision.cli_triangulate import (
     main,
     run_analysis,
 )
+from sp1_vision.tests.test_ball_pair import ball_discs, frame_with_disc
 from sp1_vision.tests.test_triangulate import make_rig, project
 
 # Camera 1 sits this far above the floor on the real unit, per the spec. The
@@ -419,70 +420,114 @@ class TestResumeStartNumber(unittest.TestCase):
             shutil.rmtree(test_dir)
 
 
-def _frame_with_ball(uv, r=30):
-    frame = np.zeros((800, 1280), dtype=np.uint8)
-    cv2.circle(frame, (int(round(uv[0])), int(round(uv[1]))), r, 255, -1)
-    return cv2.GaussianBlur(frame, (5, 5), 0)
+# One renderer for the whole suite, in test_ball_pair. Drawing a disc twice
+# in two files is two chances to round the centre to whole pixels, and that
+# rounding put a systematic +1.45 mm into every synthetic depth - a bias
+# that reads as a scale error, which is exactly what these tests measure.
+_frame_with_disc = frame_with_disc
+
+
+def ball_frames(rig, xyz):
+    """A stereo pair showing the ball at its true position AND true size.
+
+    The size is not decoration. Every fixture here used to draw a 30 px disc
+    whatever the distance, which is a ball of a different diameter at every
+    depth - and the selector now checks apparent size against the range its
+    own disparity implies, exactly so that a background object cannot pass.
+    A fixture that lies about size cannot exercise that check, and would
+    quietly stop testing it.
+
+    ball_discs comes from test_ball_pair rather than being written again
+    here: two copies of the projection-and-size model would be two chances
+    to get it wrong, and a fixture bug is invisible in a green suite.
+    """
+    d1, d2 = ball_discs(rig, xyz)
+    return _frame_with_disc(*d1), _frame_with_disc(*d2)
 
 
 class TestMeasureShot(unittest.TestCase):
-    """_measure_shot's accept/reject logic - the depth-sign guard especially.
+    """_measure_shot's accept/reject logic, now that the choice is a PAIR.
 
-    The reprojection residual alone does not reliably catch a left/right
-    camera swap: on a rig with R = I it is exactly zero for a swapped pair
-    (worked through in triangulate.py's module docstring), so _measure_shot
-    must also reject on the sign of the triangulated depth, independently
-    of the residual check.
+    The detection decision moved into ball_pair, where the rig is, because a
+    single image cannot tell a golf ball from a loudspeaker cone - it cost a
+    whole 24-shot run to establish that. What stays here is what belongs to
+    the file layer: reading the two frames, refusing a frame at the wrong
+    resolution, and turning whatever ball_pair says into one table row
+    rather than a traceback that takes the other rows with it.
     """
 
-    def _write_shot(self, run_dir, name, uv1, uv2, series="depth", tape_mm=500.0):
-        for n, uv in ((1, uv1), (2, uv2)):
+    def _write_frames(self, run_dir, name, frame1, frame2,
+                      series="depth", tape_mm=500.0):
+        for n, frame in ((1, frame1), (2, frame2)):
             cam_dir = os.path.join(run_dir, "cam{}".format(n))
             os.makedirs(cam_dir, exist_ok=True)
-            cv2.imwrite(os.path.join(cam_dir, name), _frame_with_ball(uv))
+            cv2.imwrite(os.path.join(cam_dir, name), frame)
         return {"name": name, "tape_mm": tape_mm, "series": series}
+
+    def _write_ball(self, run_dir, name, rig, xyz, **kw):
+        return self._write_frames(run_dir, name, *ball_frames(rig, xyz), **kw)
 
     def test_accepts_a_consistent_shot(self):
         rig = make_rig(pitch_deg=-0.94)
         truth = np.array([0.02, 0.09, 0.5])
-        uv1, uv2 = project(rig, truth)
         run_dir = tempfile.mkdtemp()
         try:
-            shot = self._write_shot(run_dir, "gs_01.png", uv1, uv2)
+            shot = self._write_ball(run_dir, "gs_01.png", rig, truth)
             xyz, info = _measure_shot(rig, run_dir, shot)
-            self.assertIsNotNone(xyz)
+            self.assertIsNotNone(xyz, info)
             np.testing.assert_allclose(xyz, truth, atol=0.005)
             self.assertLessEqual(info, MAX_REPROJECTION_PX)
         finally:
             shutil.rmtree(run_dir)
 
-    def test_rejects_a_swap_via_depth_sign_when_residual_is_silent(self):
-        # R = I rig: a swapped pair reprojects with exactly zero residual,
-        # so only the depth-sign check can catch it here.
+    def test_rejects_a_swap_even_when_the_residual_is_silent(self):
+        # R = I rig: a swapped pair reprojects with exactly zero residual, so
+        # the residual cannot catch it. The measurement volume is stated in
+        # positive metres, which makes the rejection structural rather than a
+        # threshold that could be tuned away.
         rig = make_rig(pitch_deg=0.0)
         truth = np.array([0.02, 0.09, 0.5])
-        uv1, uv2 = project(rig, truth)
+        frame1, frame2 = ball_frames(rig, truth)
         run_dir = tempfile.mkdtemp()
         try:
-            shot = self._write_shot(run_dir, "gs_swap.png", uv2, uv1)  # swapped
+            shot = self._write_frames(run_dir, "gs_swap.png", frame2, frame1)
             xyz, reason = _measure_shot(rig, run_dir, shot)
-            self.assertIsNone(xyz)
-            self.assertIn("behind camera 1", reason)
+            self.assertIsNone(xyz, "swapped pair accepted as {}".format(xyz))
+            self.assertIsInstance(reason, str)
         finally:
             shutil.rmtree(run_dir)
 
-    def test_rejects_a_high_residual_shot(self):
+    def test_rejects_an_unrelated_correspondence(self):
         rig = make_rig(pitch_deg=-0.94)
-        # cam1 sees one point, cam2 sees an unrelated one - a wrong
-        # correspondence, not merely a slightly-off detection.
-        uv1, _ = project(rig, np.array([0.02, 0.09, 0.5]))
-        _, uv2 = project(rig, np.array([-0.20, -0.05, 1.5]))
+        # cam1 sees a ball at one place, cam2 a ball somewhere else entirely.
+        near, _ = ball_frames(rig, np.array([0.02, 0.09, 0.5]))
+        _, far = ball_frames(rig, np.array([-0.20, -0.05, 0.9]))
         run_dir = tempfile.mkdtemp()
         try:
-            shot = self._write_shot(run_dir, "gs_bad.png", uv1, uv2)
+            shot = self._write_frames(run_dir, "gs_bad.png", near, far)
             xyz, reason = _measure_shot(rig, run_dir, shot)
             self.assertIsNone(xyz)
-            self.assertIn("reproj", reason)
+            self.assertIsInstance(reason, str)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_rejects_an_object_of_the_wrong_size_for_its_distance(self):
+        # The gate the old per-image detector could not have: a disc pair
+        # whose disparity is perfectly consistent and puts it inside the
+        # measurement volume, but which is a quarter too large to be a
+        # 42.67 mm ball there. Two background objects in the 2026-08-10 run
+        # cleared every other check and failed only on this.
+        rig = make_rig(pitch_deg=-0.94)
+        (u1, v1, r1), (u2, v2, r2) = ball_discs(rig, np.array([0.0, 0.09, 0.5]))
+        run_dir = tempfile.mkdtemp()
+        try:
+            shot = self._write_frames(
+                run_dir, "gs_big.png",
+                _frame_with_disc(u1, v1, r1 * 1.25),
+                _frame_with_disc(u2, v2, r2 * 1.25))
+            xyz, reason = _measure_shot(rig, run_dir, shot)
+            self.assertIsNone(xyz)
+            self.assertIn("size", reason.lower())
         finally:
             shutil.rmtree(run_dir)
 
@@ -501,18 +546,19 @@ class TestMeasureShot(unittest.TestCase):
             shutil.rmtree(run_dir)
 
     def test_degenerate_rays_are_a_reason_not_a_traceback(self):
-        # The same pixel in both cameras on an R = I rig gives two parallel
-        # rays that never meet - triangulate_point raises. Uncaught, that
-        # takes the whole table down, including the rows already measured;
-        # as a reason it costs one row.
+        # The same disc at the same pixel in both cameras on an R = I rig
+        # gives two parallel rays that never meet - which is also what a
+        # distant background object looks like. Uncaught, the raise takes
+        # the whole table down including the rows already measured; handled,
+        # it costs one row.
         rig = make_rig(pitch_deg=0.0)
         run_dir = tempfile.mkdtemp()
         try:
-            uv = np.array([700.0, 450.0])
-            shot = self._write_shot(run_dir, "gs_par.png", uv, uv)
+            same = _frame_with_disc(700.0, 450.0, 38.0)
+            shot = self._write_frames(run_dir, "gs_par.png", same, same.copy())
             xyz, reason = _measure_shot(rig, run_dir, shot)
             self.assertIsNone(xyz)
-            self.assertIn("degenerate", reason)
+            self.assertIsInstance(reason, str)
         finally:
             shutil.rmtree(run_dir)
 
@@ -565,11 +611,18 @@ class RunAnalysisTest(unittest.TestCase):
     (image files, run.json, the printed output) is exercised for real.
     """
 
-    def _write(self, run_dir, name, uv1, uv2):
-        for n, uv in ((1, uv1), (2, uv2)):
+    def _write(self, run_dir, name, disc1, disc2):
+        """Write one stereo pair, each disc at its own true apparent size.
+
+        Takes (u, v, r) rather than (u, v): the selector checks apparent
+        size against the range the disparity implies, so a fixture that
+        draws every ball 30 px wide would stop exercising that check
+        without any test going red.
+        """
+        for n, disc in ((1, disc1), (2, disc2)):
             cam_dir = os.path.join(run_dir, "cam{}".format(n))
             os.makedirs(cam_dir, exist_ok=True)
-            cv2.imwrite(os.path.join(cam_dir, name), _frame_with_ball(uv))
+            cv2.imwrite(os.path.join(cam_dir, name), _frame_with_disc(*disc))
 
     def test_routing_all_four_rejections_and_config_block(self):
         # R = I: the swap shot below is residual-silent here, so its
@@ -591,7 +644,7 @@ class RunAnalysisTest(unittest.TestCase):
             ]
             for i, (xyz, tape) in enumerate(depth_truth, start=1):
                 name = "gs_depth_{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": tape, "series": "depth"})
 
             # (a) One accepted spread shot, tagged with a tape_mm that would
@@ -599,7 +652,7 @@ class RunAnalysisTest(unittest.TestCase):
             # bucket: a huge, unrelated "gap". buckets["spread"] must never
             # reach the scale fit for this to stay near 1.0 below.
             spread_xyz = np.array([-0.20, 0.09, 0.40])
-            self._write(run_dir, "gs_spread.png", *project(rig, spread_xyz))
+            self._write(run_dir, "gs_spread.png", *ball_discs(rig, spread_xyz))
             shots.append({"name": "gs_spread.png", "tape_mm": 9999.0,
                          "series": "spread"})
 
@@ -610,7 +663,7 @@ class RunAnalysisTest(unittest.TestCase):
             ]
             for i, (xyz, tape) in enumerate(target_truth, start=1):
                 name = "gs_target_{}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": tape, "series": "target"})
 
             # (b) Rejection 1: missing file - no image ever written for this name.
@@ -628,15 +681,15 @@ class RunAnalysisTest(unittest.TestCase):
 
             # (b) Rejection 3: high residual - an unrelated correspondence,
             # not a swap of a real point.
-            bad_uv1, _ = project(rig, np.array([0.02, 0.09, 0.5]))
-            _, bad_uv2 = project(rig, np.array([-0.20, -0.05, 1.5]))
-            self._write(run_dir, "gs_bad.png", bad_uv1, bad_uv2)
+            bad_disc1, _ = ball_discs(rig, np.array([0.02, 0.09, 0.5]))
+            _, bad_disc2 = ball_discs(rig, np.array([-0.20, -0.05, 0.9]))
+            self._write(run_dir, "gs_bad.png", bad_disc1, bad_disc2)
             shots.append({"name": "gs_bad.png", "tape_mm": 1.0, "series": "depth"})
 
             # (b) Rejection 4: swapped correspondence of a REAL point, on
             # this R = I rig - zero residual, negative depth.
-            suv1, suv2 = project(rig, np.array([0.02, 0.09, 0.5]))
-            self._write(run_dir, "gs_swap.png", suv2, suv1)  # swapped
+            sdisc1, sdisc2 = ball_discs(rig, np.array([0.02, 0.09, 0.5]))
+            self._write(run_dir, "gs_swap.png", sdisc2, sdisc1)  # swapped
             shots.append({"name": "gs_swap.png", "tape_mm": 1.0, "series": "depth"})
 
             with open(os.path.join(run_dir, "run.json"), "w") as fh:
@@ -662,11 +715,16 @@ class RunAnalysisTest(unittest.TestCase):
             scale_value = float(scale_line.split(":")[1].split()[0])
             self.assertAlmostEqual(scale_value, 1.0, delta=0.05)
 
-            # (b) all four rejection reasons appear, distinguishably.
+            # (b) every rejection reason appears, and they stay
+            # distinguishable. The wording moved when the decision became a
+            # PAIR decision, but the property did not: an operator reading
+            # this table has to be able to tell a missing file from an empty
+            # frame from a swap, because the three call for entirely
+            # different responses.
             self.assertIn("missing", output)
-            self.assertIn("no ball in cam", output)
-            self.assertIn("reproj", output)
-            self.assertIn("behind camera 1", output)
+            self.assertIn("no circle at all", output)
+            self.assertIn("no ball-consistent pair", output)
+            self.assertIn("swap", output)
 
             # (c) the measurement is reported as a result in its own right,
             # separate from and before any PiTrac mapping.
@@ -747,7 +805,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = []
             for i, xyz in enumerate(points, start=1):
                 name = "gs_{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": 350.0 + 40.0 * i,
                               "series": "depth" if i % 3 == 0 else "spread",
                               "found": True})
@@ -797,7 +855,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = []
             for i, xyz in enumerate(points, start=1):
                 name = "gs_{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": 350.0 + 40.0 * i,
                               "series": "depth" if i % 3 == 0 else "spread",
                               "found": True})
@@ -821,14 +879,14 @@ class RunAnalysisTest(unittest.TestCase):
         for i, tape in enumerate([350.0, 420.0, 490.0, 560.0, 630.0]):
             x = 0.0 if i % 2 == 0 else lateral_mm / 1000.0
             name = "gs_d{:02d}.png".format(i)
-            self._write(run_dir, name, *project(
+            self._write(run_dir, name, *ball_discs(
                 rig, np.array([x, 0.0937, tape / 1000.0])))
             shots.append({"name": name, "tape_mm": tape, "series": "depth",
                           "found": True})
         # Two spread positions, so the plane is determined.
         for i, (x, z) in enumerate(((-0.22, 0.40), (0.22, 0.60))):
             name = "gs_s{}.png".format(i)
-            self._write(run_dir, name, *project(rig, np.array([x, 0.0937, z])))
+            self._write(run_dir, name, *ball_discs(rig, np.array([x, 0.0937, z])))
             shots.append({"name": name, "tape_mm": z * 1000.0,
                           "series": "spread", "found": True})
         return shots
@@ -898,7 +956,7 @@ class RunAnalysisTest(unittest.TestCase):
         """Two lateral positions, so the floor plane is determined."""
         for i, (x, z) in enumerate(((-0.22, 0.40), (0.22, 0.60))):
             name = "gs_s{}.png".format(i)
-            self._write(run_dir, name, *project(rig, np.array([x, 0.0937, z])))
+            self._write(run_dir, name, *ball_discs(rig, np.array([x, 0.0937, z])))
             shots.append({"name": name, "tape_mm": z * 1000.0,
                           "series": "spread", "found": True})
 
@@ -939,7 +997,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = []
             for i, tape in enumerate([350.0, 420.0, 490.0, 560.0, 630.0]):
                 name = "gs_o{:02d}.png".format(i)
-                self._write(run_dir, name, *project(
+                self._write(run_dir, name, *ball_discs(
                     rig, np.array([0.0, 0.0937, tape / 1000.0 + 0.050])))
                 shots.append({"name": name, "tape_mm": tape,
                               "series": "depth", "found": True})
@@ -969,7 +1027,7 @@ class RunAnalysisTest(unittest.TestCase):
             for i, tape in enumerate([380.0, 500.0, 620.0]):
                 for repeat in (1, 2):
                     name = "gs_r{}{}.png".format(i, repeat)
-                    self._write(run_dir, name, *project(
+                    self._write(run_dir, name, *ball_discs(
                         rig, np.array([0.0, 0.0937, tape / 1000.0])))
                     shots.append({"name": name, "tape_mm": tape,
                                   "series": "depth", "found": True})
@@ -1000,7 +1058,7 @@ class RunAnalysisTest(unittest.TestCase):
                 xyz = np.array([along_m * np.sin(psi), 0.0937,
                                 0.360 + along_m * np.cos(psi)])
                 name = "gs_q{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": 360.0 + along_m * 1000.0,
                               "series": "depth", "found": True})
             self._spread_pair(rig, run_dir, shots)
@@ -1030,7 +1088,7 @@ class RunAnalysisTest(unittest.TestCase):
             for i, tape in enumerate([380.0, 500.0, 620.0]):
                 for repeat in (1, 2):
                     name = "gs_c{}{}.png".format(i, repeat)
-                    self._write(run_dir, name, *project(
+                    self._write(run_dir, name, *ball_discs(
                         rig, np.array([0.0, 0.0937, tape / 1000.0])))
                     shots.append({"name": name, "tape_mm": tape,
                                   "series": "depth", "found": True})
@@ -1058,7 +1116,7 @@ class RunAnalysisTest(unittest.TestCase):
                                            (500.0, 0.510),
                                            (620.0, 0.620)]):
                 name = "gs_p{:02d}.png".format(i)
-                self._write(run_dir, name, *project(
+                self._write(run_dir, name, *ball_discs(
                     rig, np.array([0.0, 0.0937, z])))
                 shots.append({"name": name, "tape_mm": tape,
                               "series": "depth", "found": True})
@@ -1098,7 +1156,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = self._wandering_depth_series(rig, run_dir, lateral_mm=0.0)
             for i, (x, z) in enumerate(((0.0, 0.40), (0.10, 0.68))):
                 name = "gs_tl{}.png".format(i)
-                self._write(run_dir, name, *project(rig, np.array([x, 0.0937, z])))
+                self._write(run_dir, name, *ball_discs(rig, np.array([x, 0.0937, z])))
                 shots.append({"name": name, "tape_mm": z * 1000.0,
                               "series": "target", "found": True})
 
@@ -1134,7 +1192,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = []
             for i, xyz in enumerate(points, start=1):
                 name = "gs_{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": 350.0 + 40.0 * i,
                               "series": "spread", "found": True})
             rc, output = self._run_analysis(run_dir, rig, shots)
@@ -1187,7 +1245,7 @@ class RunAnalysisTest(unittest.TestCase):
             shots = []
             for i, xyz in enumerate(floor_truth, start=1):
                 name = "gs_{:02d}.png".format(i)
-                self._write(run_dir, name, *project(rig, xyz))
+                self._write(run_dir, name, *ball_discs(rig, xyz))
                 shots.append({"name": name, "tape_mm": 400.0 + i,
                              "series": "depth" if i == 1 else "spread"})
             with open(os.path.join(run_dir, "run.json"), "w") as fh:

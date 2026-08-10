@@ -75,7 +75,7 @@ import tempfile
 import cv2
 import numpy as np
 
-from sp1_vision import (calibration_capture, frame_analysis, ground_plane,
+from sp1_vision import (ball_pair, calibration_capture, ground_plane,
                         stereo_geometry, triangulate)
 
 RUN_MANIFEST = "run.json"
@@ -254,7 +254,21 @@ def _resume_start_number(dirs, shots):
     return max(max_on_disk, max_in_manifest) + 1
 
 
-def run_shots(count, out_dir, exposure_units):
+def run_shots(count, out_dir, exposure_units,
+              extrinsics_path=stereo_geometry.DEFAULT_EXTRINSICS_PATH,
+              config_path=stereo_geometry.DEFAULT_CONFIG_PATH):
+    # Capture needs the rig now, because verifying that the thing in frame
+    # is a BALL and not a loudspeaker is a stereo question - it takes the
+    # baseline to turn two circles into a distance and a size. Loading it
+    # here means a bad rig stops the session before the first shot instead
+    # of after the twenty-fourth.
+    try:
+        rig = stereo_geometry.load_rig(extrinsics_path, config_path)
+        stereo_geometry.validate_rig(rig)
+    except stereo_geometry.StereoRigError as e:
+        print("ERROR: {}".format(e))
+        return 1
+
     dirs = {n: os.path.join(out_dir, "cam{}".format(n)) for n in (1, 2)}
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -276,17 +290,30 @@ def run_shots(count, out_dir, exposure_units):
             input("  place the ball, stand clear, press Enter: ")
 
             frames, skew = pair.grab_with_skew()
-            found = {}
             for n, frame in frames.items():
-                found[n], _ = frame_analysis.find_ball(frame)
                 cv2.imwrite(os.path.join(dirs[n], name), frame)
 
-            both = bool(found[1] and found[2])
-            print("  cam1 {}  cam2 {}  skew {:.1f} ms  -> {}".format(
-                "ball" if found[1] else " --  ",
-                "ball" if found[2] else " --  ",
-                skew * 1000.0,
-                "keep" if both else "MOVE THE BALL AND RETAKE"))
+            # The check that used to live here reported "ball" whenever a
+            # circle was found in each image separately. It validated
+            # nothing: on 2026-08-10 it said ball / ball / keep for 24
+            # consecutive shots while both cameras measured a loudspeaker,
+            # and the run was only discovered to be worthless at analysis
+            # time, with the tape measure long since put away. What follows
+            # is the SAME decision the analysis makes, made now, so that a
+            # shot that will be rejected is rejected while the operator is
+            # still standing there.
+            ball, reason = ball_pair.find_ball_pair(rig, frames[1], frames[2])
+            both = ball is not None
+            if both:
+                print("  BALL at Z {:.0f} mm  (X {:+.0f}, Y {:+.0f}; reproj "
+                      "{:.2f} px, size {:+.0f}%)  skew {:.1f} ms".format(
+                          ball.depth_mm, ball.xyz_m[0] * 1000.0,
+                          ball.xyz_m[1] * 1000.0, ball.reprojection_px,
+                          ball.radius_error * 100.0, skew * 1000.0))
+            else:
+                print("  NO BALL - {}".format(reason))
+                print("  skew {:.1f} ms  -> MOVE THE BALL AND RETAKE".format(
+                    skew * 1000.0))
 
             # "found" is recorded, not just printed. Without it the
             # completeness gate below counts shots that have no ball in them
@@ -350,11 +377,6 @@ def _report_completeness(shots):
     return 1 if short else 0
 
 
-# A residual above this means the two rays did not really meet, so the point
-# is not evidence about anything. Half a pixel is detection noise; two
-# pixels is a mis-detection or a wrong correspondence.
-MAX_REPROJECTION_PX = 2.0
-
 # The distance the depth tolerance in the rig header is quoted at. The series
 # spans roughly 350-700 mm, and the sensitivity goes as Z^2, so no single
 # number covers it; 500 mm is the decided working distance and the midpoint of
@@ -365,28 +387,18 @@ NOMINAL_WORKING_DISTANCE_M = 0.50
 def _measure_shot(rig, run_dir, shot):
     """Return (xyz_m, worst_reprojection_px) or (None, reason).
 
-    The reasons are all distinguishable in the printed table: a missing
-    file, a frame at the wrong resolution, a missed detection, a degenerate
-    ray pair, a residual over threshold, and a negative-depth (swap)
-    rejection.
+    What belongs here is the file layer: read both frames, refuse a frame at
+    the wrong resolution, and turn whatever ball_pair says into one row of
+    the table rather than a traceback that takes the rows already computed
+    down with it.
 
-    A shot is accepted only when BOTH hold:
-      - the worse of the two reprojection residuals is within
-        MAX_REPROJECTION_PX;
-      - the triangulated point is in front of camera 1 (xyz[2] > 0).
-
-    The residual by itself is not a sufficient guard against a left/right
-    camera swap. On a rig that happened to be exactly rectified, a swapped
-    correspondence solves in closed form to Z' = -Z - a real ray
-    intersection, just behind the camera - with a reprojection residual of
-    EXACTLY ZERO (worked through in triangulate.py's module docstring). This
-    rig is not exactly rectified - it carries 0.92 deg of pitch - so the
-    residual happens to also catch a swap here, but that is a property of
-    THIS mount, not of the check: the residual's swap sensitivity is
-    roughly 2*f*theta px, which goes to zero as the mount is ever shimmed
-    flatter. The sign of Z is the guard that holds regardless, so it stays
-    even though it looks redundant with the residual check on this
-    particular rig. Do not remove it as redundant.
+    Choosing WHICH circle is the ball is not this function's job and never
+    should have been. It needs the rig - a golf ball is 42.67 mm, so only
+    the range its own disparity implies can say whether a circle is the
+    right size to be one - and it lives in ball_pair, where the capture
+    path calls exactly the same code. That is the point: a shot rejected
+    here would have been rejected at the device, while the operator could
+    still do something about it.
     """
     frames = {}
     for n in (1, 2):
@@ -405,32 +417,10 @@ def _measure_shot(rig, run_dir, shot):
                 n, size[0], size[1], rig.image_size[0], rig.image_size[1])
         frames[n] = frame
 
-    circles = {}
-    for n, frame in frames.items():
-        found, circle = frame_analysis.find_ball(frame)
-        if not found:
-            return None, "no ball in cam{}".format(n)
-        circles[n] = circle
-
-    uv1 = circles[1][:2]
-    uv2 = circles[2][:2]
-    try:
-        xyz = triangulate.triangulate_point(rig, uv1, uv2)
-    except triangulate.TriangulationError as e:
-        # The fifth rejection reason. This function is built around handing
-        # back a reason per shot so one bad pair costs one row; letting a
-        # degenerate pair escape as a traceback would cost the whole table,
-        # including the rows already computed but not yet printed.
-        return None, "degenerate: {}".format(e)
-    e1, e2 = triangulate.reprojection_error(rig, xyz, uv1, uv2)
-    worst = max(e1, e2)
-
-    if worst > MAX_REPROJECTION_PX:
-        return None, "reproj {:.2f} px > {:.1f} px".format(worst, MAX_REPROJECTION_PX)
-    if xyz[2] <= 0.0:
-        return None, ("behind camera 1 (Z {:.1f} mm) - check for a "
-                      "left/right camera swap".format(xyz[2] * 1000.0))
-    return xyz, worst
+    ball, reason = ball_pair.find_ball_pair(rig, frames[1], frames[2])
+    if ball is None:
+        return None, reason
+    return ball.xyz_m, ball.reprojection_px
 
 
 def run_analysis(run_dir, extrinsics_path, config_path):
@@ -774,7 +764,8 @@ def main(argv=None):
     if args.analyse and args.shots:
         parser.error("--analyse and --shots do different things; pick one")
     if args.shots:
-        return run_shots(args.shots, args.out, args.exposure)
+        return run_shots(args.shots, args.out, args.exposure,
+                         args.extrinsics, args.config)
     if args.analyse:
         return run_analysis(args.analyse, args.extrinsics, args.config)
     parser.error("give either --shots N or --analyse RUNDIR")
