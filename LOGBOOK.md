@@ -517,7 +517,9 @@ PiTrac's key techniques:
 * ☐ **Working distance: 50 cm decided, not yet built into the geometry config.** With the 2026-08-08 optics: ball radius at 50 cm is 38 px, disparity 141 px, and depth resolution 3.55 mm per pixel of disparity error — so ~1.8 mm at half-pixel matching. Three live constants still hold PiTrac's numbers: `kCameraNPositionsFromExpectedBallMeters` (**not** `...FromOriginMeters`, which exists only in PiTrac's docs — the origin is the expected ball, and only the vector's *magnitude* is ever read, at `gs_camera.cpp:455/458`; the trace's `distance: 0.621575` is exactly cam1's vector length, 24 % beyond the intended 50 cm); `kCameraNAngles`, which feed `AdjustXYZDistancesForCameraAngles` and become HLA/VLA, so they are the ones that matter; and `kCamera2OffsetFromCamera1OriginMeters` = `[0.00, -0.19, 0.0]`, PiTrac's **vertical** 19 cm camera stacking, applied at `gs_camera.cpp:700-703` and `lm_main.cpp:865` — ours are side by side at 78.28 mm, so the delta path currently carries a 19 cm offset that does not exist.
 * ☐ `WaitForCam2Trigger` still a JETSON_STUB returning false. UVC exposes no trigger pin (confirmed: no such control in `v4l2-ctl --list-ctrls`), so this needs a different mechanism, not a translation. `exposure_absolute` reaches 500 ms, which makes "open a long exposure and fire the strobe into it" the obvious candidate.
 * ☑ **Triangulation Block 1 built and merged (2026-08-10).** Python only, nothing in the C++ runtime path yet: `stereo_geometry.py` (the sole frame/unit conversion point, and the rig validation that refuses a mismatched intrinsics/extrinsics pairing), `triangulate.py`, `ground_plane.py`, `cli_triangulate.py`. 147 tests on the Jetson. The extrinsics are consumed for the first time.
-* ☐ **Measurement run at the device — the only step left in Block 1.** 24 shots, protocol in `sp1_vision/triangulation_run/PROTOCOL.md`. Settles: whether the shipped scale holds and to what stated precision, the unit's attitude against the floor (which nothing has ever measured — the calibration measures camera against camera), the mounting height against the assumed 115 mm, and the sign of `yaw_from_target_line`.
+* ☑ **Ball detection rebuilt as a stereo-pair decision (2026-08-10).** `find_ball` returned the strongest Hough circle per image, which in a cluttered room is the loudspeaker — 17 of 24 frames in run 1 returned the same pixel while the ball moved. `ball_pair.find_ball_pair` now chooses the candidate PAIR on three constraints declared in advance: apparent radius matching the range that image's own disparity implies (42.67 mm ball — the check no single image can make), the declared measurement volume, and the rays meeting. The same function runs at capture, so a shot the analysis would reject is rejected while the operator is still standing there.
+* ☐ **Measurement run at the device — the only step left in Block 1. Run 1 failed on 2026-08-10 and must be repeated.** Same 24 shots, protocol in `sp1_vision/triangulation_run/PROTOCOL.md`; what changes is the room — unit facing a bare wall, dark matt cloth over everything behind the measuring field. Run 1's pairs are archived at `sp1_vision/2026-08-10_cluttered/` (untracked) as the only real cluttered-background dataset there is. Settles: whether the shipped scale holds and to what stated precision, the unit's attitude against the surface it stands on (which nothing has ever measured — the calibration measures camera against camera), the mounting height against the assumed 115 mm, and the sign of `yaw_from_target_line`.
+* ☐ **A small residual is not evidence of a correct detection — confirmed on real data.** Run 1's `gs_03` passed the 2 px reprojection gate at 1.96 px with both cameras locked onto the same loudspeaker at 1295 mm. Keep this in mind for Block 2: the guard against a wrong correspondence is physical (size, volume, depth sign), not the residual.
 * ☐ **The baseline figure needs correcting, independently of that run.** 78.28 mm is from the springs-against-bolted comparison table in `calibration_images/README.md`, a different solve from the shipped one — it reports pitch −0.923° where `stereo_extrinsics.json` says −0.9423°. The file the code actually reads says **78.749 mm**, and `CALIB_FIX_INTRINSIC` means 78.28 cannot be substituted into its R/T without re-solving. Every "78.28" in this logbook and in CLAUDE.md is quoting the comparison table, not the shipped geometry. Depth resolution follows: 3.53 mm/px at 0.500 m with the shipped baseline, not 3.55.
 * ☐ Nothing consumes the extrinsics inside `pitrac_lm` yet — the ball-position path there is still PiTrac's monocular radius method, roughly an order of magnitude worse at these distances. That is Block 2, and for the flying ball it waits on `WaitForCam2Trigger`.
 * ☐ First end-to-end ball detection + speed/angles output to console (motion-detect → CheckForBall → strobe-lit shot capture → shot data → SP4 GSPro JSON)
@@ -1438,6 +1440,91 @@ PiTrac's key techniques:
 > **Stand:** `main` bei `aa209e1`, 147 Tests grün im echten Jetson-Checkout.
 > Der Messlauf am Gerät steht aus; die Anleitung mit allen 24 Aufnahmen
 > einzeln liegt in `sp1_vision/triangulation_run/PROTOCOL.md`.
+
+**2026-08-10, später — Der Messlauf hat einen Lautsprecher vermessen.**
+
+> 24 Bildpaare aufgenommen, alle mit `cam1 ball  cam2 ball  -> keep`
+> quittiert. Die Auswertung hat 21 davon verworfen, und die drei Überlebenden
+> waren Unsinn: `Y = −27 mm`, also **über** der optischen Achse, wo ein Ball
+> auf einer Fläche bei etwa +85 mm liegt, und `Z = 1295 mm` bei 400 mm
+> Zollstock.
+>
+> **Die Ursache stand in den Erkennungen, nicht in einer Vermutung.** Der Lauf
+> entstand auf einem Schreibtisch mit Blick quer durchs Zimmer — Lautsprecher
+> mit Tief- und Hochtöner, eine Kugel obendrauf, Bilderrahmen, Pflanzen. In
+> **17 von 24 Aufnahmen lag die Erkennung in cam1 bei (748, 407) und in cam2
+> bei (871, 388)**: identisch, Bild für Bild, während der Ball über den Tisch
+> bewegt wurde. Ein Ball, der sich nicht bewegt, ist keiner. `find_ball` nahm
+> den stärksten Hough-Kandidaten je Bild, und der stärkste Kreis im Bild war
+> der Lautsprecher.
+>
+> **`gs_03` ist die Aufnahme, die man sich merkt.** Sie kam mit 1,96 px durch
+> die 2-px-Schwelle. Beide Kameras hatten dasselbe falsche Objekt gefunden,
+> also trafen sich die Strahlen tadellos — bei 1295 mm. Das ist die erste
+> Bestätigung an echten Daten für das, was im Docstring von `triangulate.py`
+> steht: **ein kleines Residuum heißt, dass die Kameras einander zustimmen,
+> nicht dass sie einen Ball ansehen.**
+>
+> **Der ärgerlichere Teil war mein eigener.** Die Anleitung sagte „du willst
+> `cam1 ball  cam2 ball` sehen" und verkaufte das als Prüfung. Es prüfte
+> nichts — `find_ball` meldete `True` für jeden Kreis. Deshalb bestand auch
+> der Probeschuss, während ein Lautsprecher vermessen wurde, und deshalb
+> entstanden 24 Aufnahmen, bevor es irgendetwas merken konnte. Nicht der
+> Detektor war der teure Fehler, sondern die Kontrolle, die keine war.
+>
+> **Die Entscheidung gehört ins Stereopaar, nicht ins Einzelbild.** Ein
+> Golfball und eine Lautsprechermembran sind beide helle Scheiben; kein
+> Einzelbild kann sie unterscheiden. Das Paar kann es, an drei Bedingungen,
+> die alle vorher feststehen und von denen keine sagt, wo das Ergebnis bequem
+> läge: der Ball ist 42,67 mm groß, muss also **in jedem Bild so groß
+> erscheinen, wie es die Entfernung aus seiner eigenen Disparität verlangt**;
+> er muss im deklarierten Messvolumen liegen; und die beiden Strahlen müssen
+> sich treffen. Die Größenbedingung ist die, die ein Einzelbild prinzipiell
+> nicht hat, und sie ist es, die den Lautsprecher hinauswirft.
+>
+> `frame_analysis.ball_candidates` gibt jetzt **alles** zurück und entscheidet
+> nichts — Trefferquote gehört zu den Pixeln, Genauigkeit zur Geometrie. Sein
+> altes `minDist = 200` unterdrückte keine Falschtreffer, sondern den Ball,
+> sobald etwas Stärkeres innerhalb von 200 px stand; in `gs_03` genau so
+> geschehen. Und dieselbe Auswahl läuft jetzt **bei der Aufnahme**:
+> `BALL at Z 474 mm (reproj 0.71 px, size +6%)` oder ein Grund, mit dem sich
+> etwas anfangen lässt. Was die Auswertung später verwirft, wird verworfen,
+> solange der Bediener noch danebensteht.
+>
+> **Drei Fehler haben Tests gefunden, kein Review.** Der Mehrdeutigkeitsschutz
+> verlangte anfangs, dass ein Rivale im Punktwert nahe am Besten liegt — bei
+> zwei sauberen Lösungen mit 0,05 und 0,30 ist das Faktor sechs, und der
+> Schutz verschwand genau dann, wenn beide gut waren. Der
+> Vertauschungshinweis, den ich eingebaut hatte, zählte Paare, die hinter den
+> Kameras auflösen; das tut rund die Hälfte aller Zufallspaarungen, also
+> feuerte er auf echten Bildern bei 1391 von 2450 in einer Szene ganz ohne
+> Vertauschung — jetzt ein Anteil, 90 %. Und sämtliche Testvorrichtungen
+> zeichneten einen 30-px-Ball in jeder Entfernung, also physikalisch einen
+> anderen Ball pro Tiefe, womit sich eine Größenprüfung überhaupt nicht prüfen
+> lässt. Beim Korrigieren kam heraus, dass **ganzzahlige Pixelmittelpunkte
+> +1,45 mm systematisch in jede synthetische Tiefe legen** — und ein Versatz,
+> der mit der Tiefe wächst, ist ein Maßstabsfehler unter anderem Namen. Mit
+> Subpixel-Zeichnung: −0,4 mm Mittelwert, 1,8 mm RMS, und zwei zuvor rote
+> Maßstabstests wurden grün, ohne dass eine Toleranz angefasst wurde.
+>
+> **Was die alten Bilder jetzt hergeben: 11 von 24.** Die elf sind kohärent —
+> X konstant −37…−45 mm, Y 78…86 mm, Z folgt dem Zollstock mit ~−20 mm
+> Versatz, Radiusabweichung +3…+7 % — und der Lautsprecher kommt nirgends mehr
+> vor. Neun Aufnahmen sind aber **echt mehrdeutig**: es liegen zwei
+> ballförmige Dinge im Messvolumen, und das Werkzeug weigert sich zu raten.
+> Bleiben 9 Tiefenpositionen, 1 seitliche, **0 auf der Ziellinie** — ohne
+> Ziellinienpaar kein Gieren, mit einer seitlichen Position keine bestimmte
+> Ebene. Der Lauf ist nicht zu retten.
+>
+> **Nicht weiter nachjustiert, mit Absicht.** Schwellen, die diese Bilder
+> retten, wären an diese eine Szene angepasst — bei einer Frage, deren ganzes
+> Signal 0,6 % beträgt. Der zweite Lauf ist derselbe Lauf gegen freien
+> Hintergrund: Gerät auf eine leere Wand, dunkles mattes Tuch über alles
+> dahinter, altes Verzeichnis wegschieben. Die 24 Bildpaare bleiben liegen —
+> es ist der einzige echte Datensatz mit störendem Hintergrund und damit der
+> beste Test, den der Detektor je bekommt.
+>
+> **Stand:** `main` bei `61729f0`, 165 Tests grün im echten Jetson-Checkout.
 
 \---
 
