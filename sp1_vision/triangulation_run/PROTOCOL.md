@@ -47,10 +47,31 @@ Zeitbedarf: etwa 30–40 Minuten für 24 Aufnahmen.
    Bildbereich — eine helle Spiegelung kann den Ball im Hough-Detektor schlagen.
    Wenn die Sonne wandert: Vorhang zu.
 
-4. **Bildfeld frei räumen.** Nichts anderes Rundes und Helles vor dem Gerät:
-   keine zweite Kugel, keine Flaschendeckel, keine glänzenden Schraubenköpfe.
-   Der Detektor nimmt den stärksten Kandidaten und prüft nicht, ob es einen
-   zweiten gibt.
+4. **Hintergrund freiräumen — das ist der Punkt, an dem der erste Lauf
+   gescheitert ist.**
+
+   > Am 2026-08-10 stand das Gerät auf einem Schreibtisch und schaute quer
+   > durchs Zimmer. Im Bild: ein Lautsprecher mit Tief- und Hochtöner, eine
+   > Kugel obendrauf, Bilderrahmen, Pflanzen. **In 17 von 24 Aufnahmen hat
+   > der Detektor den Lautsprecher vermessen** — erkennbar daran, dass die
+   > Erkennung in cam1 immer bei (748, 407) lag, während der Ball bewegt
+   > wurde. Ein Ball, der sich nicht bewegt, ist keiner.
+
+   Das Werkzeug erkennt so etwas jetzt und weigert sich, aber **erkennen
+   ersetzt nicht wegräumen**: liegen zwei ballförmige Dinge im Messvolumen,
+   meldet es „ambiguous" und verwirft die Aufnahme. Neun Aufnahmen des ersten
+   Laufs sind genau daran gescheitert.
+
+   Was hilft, in dieser Reihenfolge:
+
+   * Gerät auf eine **leere Wand** ausrichten statt quer durch den Raum;
+   * ein **dunkles, mattes Tuch** über alles, was hinter dem Messfeld steht;
+   * alles Runde und Helle aus dem Bild: zweite Bälle, Flaschendeckel,
+     Lampen, Lautsprecher, glänzende Schraubenköpfe.
+
+   Der Ball soll das einzige helle runde Ding im Bild sein. Alles andere ist
+   Arbeit, die das Werkzeug für dich erledigen muss, und manchmal kann es das
+   nicht.
 
 ---
 
@@ -67,17 +88,39 @@ Serie `d`, Enter.
 Du willst diese Zeile sehen:
 
 ```
-  cam1 ball  cam2 ball  skew 3.1 ms  -> keep
+  BALL at Z 498 mm  (X -38, Y +84; reproj 0.71 px, size +6%)  skew 3.1 ms
 ```
+
+**Diese Zeile ist eine echte Prüfung**, anders als die frühere Meldung
+`cam1 ball cam2 ball -> keep`, die nur sagte, dass irgendein Kreis gefunden
+wurde — und die den ganzen ersten Lauf hindurch fröhlich gemeldet hat,
+während beide Kameras einen Lautsprecher vermaßen. Jetzt muss das Ding
+
+* im Messvolumen liegen,
+* in beiden Bildern so groß erscheinen, wie es ein 42,67-mm-Ball in genau
+  dieser Entfernung täte, und
+* aus zwei Strahlen bestehen, die sich wirklich treffen.
+
+**Prüfe die Zahlen gegen die Wirklichkeit**, nicht nur, dass eine Zeile
+erscheint: `Z` muss ungefähr deinem Abstand entsprechen, `Y` ist positiv
+(der Ball liegt unter der optischen Achse) und `size` sollte unter etwa 10 %
+bleiben.
 
 | Was du siehst | Was zu tun ist |
 |---|---|
-| beide `ball` | weiter zu Abschnitt 4 |
-| einer oder beide `--` | Boden zu hell oder zu dunkel. Erst `--exposure 200` probieren (Einheit 100 µs, also 20 ms), dann `--exposure 100` / `--exposure 400`. |
-| weiterhin `--` | Dünne, **matte dunkle Unterlage** — aber dann unter **allen** Positionen, auch den seitlichen und den Ziellinien-Positionen. Ungleiche Unterlage verkippt die Ebene. |
+| `BALL at Z …` mit plausiblen Zahlen | weiter zu Abschnitt 4 |
+| `no circle at all in cam1 …` | Boden zu hell oder zu dunkel. Erst `--exposure 200` (Einheit 100 µs, also 20 ms), dann `100` oder `400`. |
+| `ambiguous: two ball-shaped objects …` | Es liegt noch etwas Ballförmiges im Bild. Zurück zu Abschnitt 2 Punkt 4 und aufräumen. |
+| `no ball-consistent pair among N x M circles` | Der Ball ist nicht sauber zu sehen — Belichtung, Kontrast zum Untergrund, oder er liegt außerhalb 250–950 mm. |
+| `… solved BEHIND the cameras … check which device is cam1` | Die Kameras sind vertauscht. `camera_paths.py` prüfen, nicht weitermessen. |
+| `NO BALL` trotz sauberem Bild | Dünne, **matte dunkle Unterlage** — aber unter **allen** Positionen, auch den seitlichen und den Ziellinien-Positionen. Ungleiche Unterlage verkippt die Ebene. |
 
 Findet der Probeschuss den Ball, `/tmp/testshot` löschen und weiter. Die
 Belichtungsoption, die funktioniert hat, merkst du dir für den echten Lauf.
+
+> Die Aufnahme lädt jetzt die Kalibrierung, bevor der erste Schuss fällt —
+> ohne Rig lässt sich nicht prüfen, ob ein Kreis ein Ball ist. Eine kaputte
+> Kalibrierung stoppt die Sitzung damit vor Aufnahme 1 statt nach Aufnahme 24.
 
 ---
 
@@ -105,9 +148,16 @@ Beim Ablesen **senkrecht von oben schauen**, nicht schräg. Schräg kostet dich
 leicht 3 mm, und 3 mm auf einer 340-mm-Spanne sind 0,9 % — das Anderthalbfache
 des gesuchten Signals.
 
-Tippe ein, **was du tatsächlich abliest**, nicht die runde Sollzahl. `487.5`
-ist besser als `490`. Die Anpassung nimmt jeden Wert; runde Zahlen sind nur
-Zielmarken beim Hinlegen.
+**Mit einem Zollstock ist die Marke genauer als die Ablesung.** Ein Zollstock
+lässt sich nicht auf einen halben Millimeter ablesen, ein Ball aber recht gut
+an eine angezeichnete Kante legen. Also: sorgfältig an die Sollmarke legen und
+die **runde Zahl eintippen**. Der Platzierungsfehler landet dann im Residuum
+statt in der x-Achse, und der Standardfehler der Anpassung weist ihn aus,
+statt ihn zu verstecken.
+
+(Hättest du ein Maß, das sich auf einen halben Millimeter ablesen lässt, wäre
+das Umgekehrte besser — Ball hinlegen, ablesen, den tatsächlichen Wert
+eintippen. Beides ist zulässig; nur nicht mitten in der Serie wechseln.)
 
 ---
 
@@ -135,11 +185,17 @@ So sieht eine Aufnahme aus:
 ```
 --- shot 3 ---
   reading on the rule at the ball's NEAR edge (the side
-  facing the unit), mm: 402.5          <- du tippst, Enter
+  facing the unit), mm: 400            <- du tippst, Enter
   series - [d]epth line / [s]pread / [t]arget line: d   <- du tippst, Enter
   place the ball, stand clear, press Enter:              <- nur Enter
-  cam1 ball  cam2 ball  skew 3.1 ms  -> keep
+  BALL at Z 380 mm  (X -37, Y +85; reproj 1.62 px, size +4%)  skew 3.1 ms
 ```
+
+**Lies die Rückmeldung, sie kostet zwei Sekunden.** Sie ist dieselbe Prüfung,
+die die Auswertung später anlegt — was hier durchfällt, fällt dort auch durch,
+nur stehst du jetzt noch daneben. `Z` muss zur Sollmarke passen, `Y` positiv
+sein, `size` klein. Steht dort stattdessen `NO BALL - …`, folgt eine Zeile
+mit dem Grund; die Tabelle in Abschnitt 3 sagt, was zu tun ist.
 
 Die praktische Reihenfolge am Boden ist deshalb:
 
@@ -157,11 +213,11 @@ bewegt sich.**
 > Blickfelds der Kameras. Sonst stehst du bei jedem Enter im Bild und musst für
 > jede der 24 Aufnahmen einmal hin und her laufen.
 
-Steht in der Rückmeldezeile `MOVE THE BALL AND RETAKE`, hat eine der beiden
-Kameras keinen Ball gefunden. Die Aufnahme ist trotzdem gespeichert und wird
-später verworfen — leg den Ball ein paar Zentimeter anders hin und nimm die
-Position mit demselben Ablesewert noch einmal auf. Das kostet nur eine
-Aufnahmenummer.
+Steht dort `MOVE THE BALL AND RETAKE`, ist die Aufnahme trotzdem gespeichert
+und wird später verworfen — leg den Ball ein paar Zentimeter anders hin und
+nimm die Position mit demselben Ablesewert noch einmal auf. Das kostet nur
+eine Aufnahmenummer. Häufen sich die Fehlschläge, liegt es nicht am Ball:
+dann zurück zu Abschnitt 2 Punkt 4.
 
 ### 5.1 Tiefenreihe, erster Durchgang — Aufnahmen 1 bis 8
 
