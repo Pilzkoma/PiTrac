@@ -1,7 +1,18 @@
 # Messlauf Triangulation — Anleitung für das Gerät
 
-Stand 2026-08-10. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `aa209e1`.
+Stand 2026-08-10. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `c6673b7`.
 Das Ergebnis dieses Laufs wird in `README.md` daneben festgehalten.
+
+> **Der erste Lauf am 2026-08-10 ist gescheitert** — der Detektor hat einen
+> Lautsprecher vermessen, siehe Abschnitt 2 Punkt 4. Seine 24 Bildpaare liegen
+> noch in diesem Verzeichnis. **Vor dem zweiten Lauf wegschieben**, sonst zählt
+> das Werkzeug hinter sie weiter:
+>
+> ```bash
+> cd ~/JetsonLM/sp1_vision
+> mv triangulation_run/cam1 triangulation_run/cam2 triangulation_run/run.json \
+>    2026-08-10_cluttered/    # nach mkdir
+> ```
 
 **Was der Lauf beantworten soll**
 
