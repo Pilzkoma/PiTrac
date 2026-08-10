@@ -123,16 +123,45 @@ python3 -m sp1_vision.cli_triangulate --shots 24 --out sp1_vision/triangulation_
 Bricht etwas ab: einfach neu aufrufen. Er zählt hinter das Vorhandene weiter
 und schreibt `run.json` nach jeder Aufnahme.
 
-Pro Aufnahme fragt er drei Dinge:
+### Wie eine einzelne Aufnahme abläuft
+
+**Es ist ein reines Terminalprogramm, keine Oberfläche, und es löst nichts von
+selbst aus.** Kein Timer, keine Serie im Hintergrund. Jede der 24 Aufnahmen
+löst du selbst aus, und zwar mit einem Enter — dieses eine Enter greift
+**beide Kameras zusammen** ab. Du triggerst nicht zwei Kameras einzeln.
+
+So sieht eine Aufnahme aus:
 
 ```
-  reading on the rule at the ball's NEAR edge (the side facing the unit), mm:
-  series - [d]epth line / [s]pread / [t]arget line:
-  place the ball, stand clear, press Enter:
+--- shot 3 ---
+  reading on the rule at the ball's NEAR edge (the side
+  facing the unit), mm: 402.5          <- du tippst, Enter
+  series - [d]epth line / [s]pread / [t]arget line: d   <- du tippst, Enter
+  place the ball, stand clear, press Enter:              <- nur Enter
+  cam1 ball  cam2 ball  skew 3.1 ms  -> keep
 ```
 
-Beim dritten: **Ball muss liegen und ruhig sein, du musst aus dem Bild sein.**
-Dann Enter.
+Die praktische Reihenfolge am Boden ist deshalb:
+
+1. Ball hinlegen
+2. ablesen, Zahl merken
+3. zur Tastatur, Zahl tippen, Serienbuchstabe tippen
+4. **prüfen, dass du nicht im Bildfeld stehst**, dann Enter
+5. die Rückmeldezeile lesen
+
+Der dritte Prompt heißt zwar „place the ball" — zu dem Zeitpunkt liegt er
+längst. Was er wirklich meint: **jetzt ist niemand mehr im Bild und nichts
+bewegt sich.**
+
+> **Stell Laptop oder Tastatur seitlich oder hinter das Gerät**, außerhalb des
+> Blickfelds der Kameras. Sonst stehst du bei jedem Enter im Bild und musst für
+> jede der 24 Aufnahmen einmal hin und her laufen.
+
+Steht in der Rückmeldezeile `MOVE THE BALL AND RETAKE`, hat eine der beiden
+Kameras keinen Ball gefunden. Die Aufnahme ist trotzdem gespeichert und wird
+später verworfen — leg den Ball ein paar Zentimeter anders hin und nimm die
+Position mit demselben Ablesewert noch einmal auf. Das kostet nur eine
+Aufnahmenummer.
 
 ### 5.1 Tiefenreihe, erster Durchgang — Aufnahmen 1 bis 8
 
