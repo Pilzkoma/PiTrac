@@ -114,6 +114,118 @@ CANDIDATE_MIN_SEPARATION_PX = 20
 CANDIDATE_ACCUMULATOR_THRESHOLD = 18
 
 
+# How far out from the seed radius outline pixels are collected, as a
+# fraction. Wide enough to hold a seed that is several pixels off, narrow
+# enough to exclude a neighbouring object's edge.
+REFINE_RADIAL_BAND = 0.45
+
+# A circle has three parameters; fitting one to a handful of points fits the
+# noise. Below this the outline is too broken to trust.
+REFINE_MIN_EDGE_POINTS = 24
+
+# How far the fit may travel from its seed before it is a different object
+# rather than a correction, as a fraction of the seed radius.
+REFINE_MAX_DRIFT = 0.8
+
+REFINE_ITERATIONS = 3
+
+
+def _fit_circle(xs, ys):
+    """Algebraic circle fit through edge points; returns (u, v, r).
+
+    Minimises the residual of x^2 + y^2 = 2ax + 2by + c, which is linear in
+    (a, b, c) and so has a closed form. Every outline pixel counts the same
+    regardless of which side of the ball it came from and regardless of
+    whether it is a bright-to-dark or a dark-to-bright edge - that
+    indifference is the entire point.
+    """
+    a_matrix = np.column_stack([xs, ys, np.ones(xs.size)])
+    rhs = xs ** 2 + ys ** 2
+    (two_a, two_b, c), _, _, _ = np.linalg.lstsq(a_matrix, rhs, rcond=None)
+    u, v = two_a / 2.0, two_b / 2.0
+    radius_sq = c + u * u + v * v
+    if not np.isfinite(radius_sq) or radius_sq <= 0.0:
+        return None
+    return float(u), float(v), float(np.sqrt(radius_sq))
+
+
+def refine_ball(frame, u, v, r):
+    """Refit a candidate to the ball's OUTLINE. Returns (u, v, r) or None.
+
+    HoughCircles votes along the image gradient, and the direction of that
+    gradient flips where the ball is darker than what is behind it. A ball
+    lit from one side has exactly that: one flank brighter than the surface,
+    the other darker. The reversed flank votes AWAY from the true centre, so
+    Hough settles on the bright arc - and settles differently in the two
+    cameras, which see the shading from different angles. On real frames
+    that showed up as 2.71 px of reprojection error with the ball plainly
+    visible in both images, which is 10 mm of depth where the whole budget
+    is 1.8 mm.
+
+    So this throws the polarity away. It collects outline pixels around the
+    seed, keeps those at a plausible radius, and fits a circle to their
+    geometry alone. A dark-to-bright edge and a bright-to-dark edge are the
+    same evidence about where the ball ends.
+
+    Returns None rather than a guess when the outline is too broken to fit,
+    or when the fit walks far enough from its seed to be a different object.
+
+    NOT ON THE MEASURING PATH YET, and the reason is measured rather than
+    suspected. On synthetic discs it is a clear win - 1.58 px down to
+    0.26 px under a hard one-sided light, and 0.71 px (Hough's accumulator
+    quantisation) down to under 0.05 px on an evenly lit one. On the real
+    2026-08-11 frames, wiring it into ball_candidates made things worse:
+    the cluttered 24-frame set dropped from 11 finds to 9 and its
+    "no consistent pair" rejections rose from 4 to 9.
+
+    The likely cause, to be confirmed with real frames rather than assumed:
+    a real ball carries dimples and a printed logo, and the desk carries
+    wood grain, so Canny returns plenty of edges INSIDE the radial band that
+    have nothing to do with the silhouette. The fit weights them equally.
+    What it probably needs is to keep only the outermost edge along each
+    radial direction, and to reject outliers rather than least-squares
+    everything it is handed.
+    """
+    gray = _as_gray(frame)
+    height, width = gray.shape[:2]
+    half = int(round(r * (1.0 + REFINE_RADIAL_BAND))) + 4
+    x0, y0 = max(0, int(u) - half), max(0, int(v) - half)
+    x1, y1 = min(width, int(u) + half + 1), min(height, int(v) + half + 1)
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0 or min(roi.shape[:2]) < 8:
+        return None
+
+    # Thresholds from the ROI's own brightness, so the same code works on a
+    # sunlit desk and a dim room. A fixed pair would be a lighting
+    # assumption, and lighting is what this function exists to survive.
+    median = float(np.median(roi))
+    edges = cv2.Canny(cv2.GaussianBlur(roi, (5, 5), 0),
+                      max(5.0, 0.66 * median), max(15.0, 1.33 * median))
+    ys, xs = np.nonzero(edges)
+    if xs.size < REFINE_MIN_EDGE_POINTS:
+        return None
+    xs = xs.astype(np.float64) + x0
+    ys = ys.astype(np.float64) + y0
+
+    centre_u, centre_v, radius = float(u), float(v), float(r)
+    for _ in range(REFINE_ITERATIONS):
+        distance = np.hypot(xs - centre_u, ys - centre_v)
+        keep = (distance > radius * (1.0 - REFINE_RADIAL_BAND)) & \
+               (distance < radius * (1.0 + REFINE_RADIAL_BAND))
+        if int(keep.sum()) < REFINE_MIN_EDGE_POINTS:
+            return None
+        fit = _fit_circle(xs[keep], ys[keep])
+        if fit is None:
+            return None
+        centre_u, centre_v, radius = fit
+
+    if np.hypot(centre_u - u, centre_v - v) > REFINE_MAX_DRIFT * r:
+        return None
+    if not (0.5 * r <= radius <= 1.8 * r):
+        return None
+    return centre_u, centre_v, radius
+
+
 def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,
                     max_radius=BALL_MAX_RADIUS_PX):
     """Every circular candidate in the frame, as a list of (u, v, r) floats.
@@ -147,4 +259,10 @@ def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,
     )
     if circles is None:
         return []
+
+    # NOT refined here, deliberately - see refine_ball's own note. Wiring it
+    # in was tried on 2026-08-11 and made real frames WORSE: the cluttered
+    # set went from 11 finds to 9 and its "nothing consistent" rejections
+    # from 4 to 9. It passes on synthetic discs and fails on real balls,
+    # which is exactly the gap a synthetic fixture cannot show.
     return [(float(u), float(v), float(r)) for u, v, r in circles[0]]
