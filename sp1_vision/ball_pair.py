@@ -142,6 +142,35 @@ def apparent_radius_px(focal_px, range_m):
         range_m ** 2 - GOLF_BALL_RADIUS_M ** 2)
 
 
+# How far outside the volume's own radius range the detector should still
+# look. Hough's radius estimate carries several percent of its own error,
+# and a ball at the very edge of the volume must still be FOUND before
+# anything can decide whether to keep it.
+RADIUS_WINDOW_MARGIN = 0.25
+
+
+def radius_bounds_px(rig):
+    """The apparent-radius window the declared measurement volume implies.
+
+    Derived rather than typed, because the two were typed independently once
+    and drifted apart: the volume said 0.25 m while the detector's window
+    stopped at 70 px, which is a ball at 0.26 m. Anything nearer was
+    invisible to a tool that claimed to be looking for it, and nothing
+    compared the two numbers.
+
+    The ball's apparent size follows its RANGE, not its depth, and a ball on
+    the surface sits a hand's breadth below the axis - so the range at a
+    given depth is a little longer and the radius a little smaller than a
+    depth-only reading suggests. Ignoring that is what made the first
+    estimate of this bound 77 px when the truth was 72.
+    """
+    focal = max(float(rig.k1[0, 0]), float(rig.k2[0, 0]))
+    largest = apparent_radius_px(focal, MIN_DEPTH_M)
+    smallest = apparent_radius_px(focal, MAX_DEPTH_M)
+    return (smallest * (1.0 - RADIUS_WINDOW_MARGIN),
+            largest * (1.0 + RADIUS_WINDOW_MARGIN))
+
+
 def _radius_error(rig, xyz, radius1_px, radius2_px):
     """Worst relative disagreement between apparent size and range."""
     range1 = float(np.linalg.norm(xyz))
@@ -171,8 +200,9 @@ def find_ball_pair(rig, frame1, frame2):
     none of them ball-shaped at a plausible distance" call for opposite
     responses, and the old message could not tell them apart.
     """
-    candidates1 = frame_analysis.ball_candidates(frame1)
-    candidates2 = frame_analysis.ball_candidates(frame2)
+    low, high = radius_bounds_px(rig)
+    candidates1 = frame_analysis.ball_candidates(frame1, low, high)
+    candidates2 = frame_analysis.ball_candidates(frame2, low, high)
     if not candidates1 or not candidates2:
         empty = " and ".join(
             name for name, found in (("cam1", candidates1), ("cam2", candidates2))

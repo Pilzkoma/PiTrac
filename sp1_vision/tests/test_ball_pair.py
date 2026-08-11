@@ -112,6 +112,30 @@ class FindBallPairTest(unittest.TestCase):
         self.assertIsNotNone(pair, reason)
         np.testing.assert_allclose(pair.xyz_m, truth, atol=0.004)
 
+    def test_the_radius_window_covers_the_whole_declared_volume(self):
+        # The bug this exists for: the volume said 0.25 m and the detector's
+        # radius window stopped at 70 px, which is a ball at 0.276 m. Any
+        # ball nearer than that was invisible to a tool that claimed to be
+        # looking for it, and the two numbers lived in different modules
+        # with nothing comparing them.
+        low, high = ball_pair.radius_bounds_px(self.rig)
+        for depth, focal in ((ball_pair.MIN_DEPTH_M, self.rig.k1[0, 0]),
+                             (ball_pair.MAX_DEPTH_M, self.rig.k2[0, 0])):
+            radius = ball_pair.apparent_radius_px(focal, depth)
+            self.assertGreater(radius, low,
+                               "a ball at {} m is smaller than the window".format(depth))
+            self.assertLess(radius, high,
+                            "a ball at {} m is larger than the window".format(depth))
+
+    def test_finds_a_ball_at_the_near_edge_of_the_volume(self):
+        # 0.26 m shows a 74 px radius - beyond the old 70 px bound, and the
+        # first position of a real run landed there.
+        truth = np.array([0.0, 0.0937, 0.260])
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNotNone(pair, reason)
+        self.assertAlmostEqual(pair.xyz_m[2], 0.260, delta=0.006)
+
     def test_finds_the_ball_at_both_ends_of_the_working_range(self):
         for depth in (0.350, 0.700):
             truth = np.array([0.0, 0.0937, depth])
