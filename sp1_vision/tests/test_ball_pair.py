@@ -14,6 +14,7 @@ A small residual means the cameras agree, not that they are looking at a ball.
 """
 
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -314,6 +315,89 @@ class FindBallPairTest(unittest.TestCase):
             self.rig, _blur(f1), _blur(f2))
         self.assertIsNone(pair)
         self.assertNotIn("swap", reason.lower())
+
+    def _truth_refiner(self, *truths):
+        """A stand-in refine_ball that returns the exact rendered circle.
+
+        find_ball_pair calls refine_ball once per camera; the stand-in
+        answers with whichever camera's true disc lies nearest the seed it
+        was handed, which distinguishes the two views by their disparity.
+        """
+        discs = [d for t in truths for d in ball_discs(self.rig, t)]
+
+        def fake(frame, u, v, r):
+            nearest = min(discs, key=lambda d: abs(d[0] - u))
+            return (float(nearest[0]), float(nearest[1]), float(nearest[2]))
+
+        return fake
+
+    def test_a_refinement_that_improves_the_pair_is_adopted(self):
+        # The precision half of the two-phase wiring: once the selection has
+        # decided WHICH circles are the ball, the outline refinement gets to
+        # improve WHERE they are - and its answer must actually be the one
+        # returned, or the wiring is decoration.
+        truth = np.array([0.03, 0.0937, 0.500])
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        d1, d2 = ball_discs(self.rig, truth)
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               side_effect=self._truth_refiner(truth)) as spy:
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNotNone(pair, reason)
+        self.assertTrue(spy.called)
+        np.testing.assert_allclose(pair.uv1, d1[:2], atol=1e-9,
+                                   err_msg="the adopted centre is not the "
+                                           "refined one")
+        np.testing.assert_allclose(pair.uv2, d2[:2], atol=1e-9)
+        np.testing.assert_allclose(pair.xyz_m, truth, atol=0.002)
+
+    def test_a_refinement_that_degrades_the_pair_is_ignored(self):
+        # The fallback half: a refinement that pulls the two views apart -
+        # opposite vertical shifts violate the epipolar constraint - must
+        # lose to the raw selection, not replace it. This is the exact
+        # failure the 2026-08-11 wiring attempt shipped: refined circles
+        # were adopted unconditionally and ruined pairs Hough had right.
+        truth = np.array([0.03, 0.0937, 0.500])
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        # The comparison baseline is the SELECTION's answer, so refinement
+        # is switched off entirely for it - the normal path would adopt a
+        # genuine (if small) improvement and the baseline would drift.
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               return_value=None):
+            raw_pair, _ = ball_pair.find_ball_pair(self.rig, f1, f2)
+        d1, _ = ball_discs(self.rig, truth)
+
+        def sabotage(frame, u, v, r):
+            up = abs(u - d1[0]) < 60.0  # cam1's seed sits near cam1's disc
+            return (float(u), float(v) + (3.0 if up else -3.0), float(r))
+
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               side_effect=sabotage) as spy:
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNotNone(pair, reason)
+        self.assertTrue(spy.called,
+                        "the precision step never ran, so this test "
+                        "exercised nothing")
+        np.testing.assert_allclose(pair.uv1, raw_pair.uv1, atol=1e-9,
+                                   err_msg="a pair-degrading refinement was "
+                                           "adopted")
+        np.testing.assert_allclose(pair.uv2, raw_pair.uv2, atol=1e-9)
+
+    def test_ambiguity_is_not_adjudicated_by_the_refinement(self):
+        # Constraint pin, green by construction before and after the wiring:
+        # when two ball-shaped objects are genuinely in frame, refinement
+        # precision must not be the thing that picks one. The refusal to
+        # guess is the protocol's, not the detector's, to give up.
+        balls = [np.array([-0.18, 0.0937, 0.45]),
+                 np.array([0.18, 0.0937, 0.62])]
+        f1, f2 = frames_with(self.rig, balls=balls)
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               side_effect=self._truth_refiner(*balls)) as spy:
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNone(pair)
+        self.assertIn("ambiguous", reason.lower())
+        self.assertFalse(spy.called,
+                         "refinement ran on an ambiguous scene - it must "
+                         "neither adjudicate nor waste the time")
 
     def test_a_swap_is_named_rather_than_lumped_in_with_every_other_miss(self):
         # A swapped pair of cables rejects EVERY shot, and it rejects them

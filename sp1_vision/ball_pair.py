@@ -192,24 +192,12 @@ def _in_measurement_volume(xyz):
     return MIN_BALL_HEIGHT_M <= float(xyz[1]) <= MAX_BALL_HEIGHT_M
 
 
-def find_ball_pair(rig, frame1, frame2):
-    """Return (BallPair, None), or (None, reason) saying why not.
+def _consistent_pairs(rig, candidates1, candidates2):
+    """Every pairing that satisfies the three declared constraints.
 
-    The reason is written for whoever is standing at the device holding a
-    ball, because that is who has to act on it. "no ball" and "23 circles,
-    none of them ball-shaped at a plausible distance" call for opposite
-    responses, and the old message could not tell them apart.
+    Returns (survivors, rejected_on_size, solved_behind, solved_at_all).
+    Each survivor is (score, xyz, uv1, uv2, r1, r2, worst_reproj, size_err).
     """
-    low, high = radius_bounds_px(rig)
-    candidates1 = frame_analysis.ball_candidates(frame1, low, high)
-    candidates2 = frame_analysis.ball_candidates(frame2, low, high)
-    if not candidates1 or not candidates2:
-        empty = " and ".join(
-            name for name, found in (("cam1", candidates1), ("cam2", candidates2))
-            if not found)
-        return None, "no circle at all in {} ({} / {} candidates)".format(
-            empty, len(candidates1), len(candidates2))
-
     survivors = []
     rejected_on_size = 0
     solved_behind = 0
@@ -254,7 +242,12 @@ def find_ball_pair(rig, frame1, frame2):
                 continue
             survivors.append((worst + RADIUS_ERROR_WEIGHT_PX * error, xyz,
                               (u1, v1), (u2, v2), r1, r2, worst, error))
+    return survivors, rejected_on_size, solved_behind, solved_at_all
 
+
+def _verdict(survivors, rejected_on_size, solved_behind, solved_at_all,
+             n_candidates1, n_candidates2):
+    """Turn the survivor list into (best_survivor, None) or (None, reason)."""
     if not survivors:
         detail = ""
         if rejected_on_size:
@@ -265,7 +258,7 @@ def find_ball_pair(rig, frame1, frame2):
                        "what a left/right image swap looks like - check which "
                        "device is cam1".format(solved_behind, solved_at_all))
         return None, ("no ball-consistent pair among {} x {} circles{}".format(
-            len(candidates1), len(candidates2), detail))
+            n_candidates1, n_candidates2, detail))
 
     survivors.sort(key=lambda s: s[0])
     best = survivors[0]
@@ -280,8 +273,128 @@ def find_ball_pair(rig, frame1, frame2):
                 "Z {:.0f} mm and Z {:.0f} mm. The protocol asks for one ball "
                 "in frame".format(far * 1000.0, best[1][2] * 1000.0,
                                   rival[1][2] * 1000.0))
+    return best, None
 
-    _, xyz, uv1, uv2, r1, r2, worst, error = best
+
+def _outline_measured(frame, candidates):
+    """Every candidate re-measured on its outline, raw where that refuses.
+
+    The fallback to the raw circle is not a convenience: a candidate whose
+    refinement was refused (outline too broken, fit ran away) is still a
+    candidate - dropping it would trade a recall problem for a precision
+    problem, and recall lost here is unrecoverable downstream.
+    """
+    measured = []
+    for u, v, r in candidates:
+        fit = frame_analysis.refine_ball(frame, u, v, r)
+        measured.append((float(fit[0]), float(fit[1]), float(fit[2]))
+                        if fit is not None else (u, v, r))
+    return measured
+
+
+def _refined_pair(rig, frame1, frame2, best):
+    """The selected pair re-measured on its outlines, or None.
+
+    Both circles or neither: the two images must be measured by the same
+    method, or the method's own bias - common, and harmless while it is
+    common - turns into a cross-camera difference that lands in the
+    disparity. And the refined pair is adopted only if it passes every gate
+    the raw pair passed AND agrees more tightly than the raw pair did;
+    anything else keeps the raw measurement. The 2026-08-11 attempt adopted
+    refinements unconditionally, and ruined pairs Hough had right.
+    """
+    _, _, uv1, uv2, r1, r2, worst, _ = best
+    fit1 = frame_analysis.refine_ball(frame1, uv1[0], uv1[1], r1)
+    fit2 = frame_analysis.refine_ball(frame2, uv2[0], uv2[1], r2)
+    if fit1 is None or fit2 is None:
+        return None
+    try:
+        xyz = triangulate.triangulate_point(rig, fit1[:2], fit2[:2])
+    except triangulate.TriangulationError:
+        return None
+    if xyz[2] <= 0.0 or not _in_measurement_volume(xyz):
+        return None
+    e1, e2 = triangulate.reprojection_error(rig, xyz, fit1[:2], fit2[:2])
+    refined_worst = max(e1, e2)
+    if refined_worst >= worst:
+        return None
+    error = _radius_error(rig, xyz, fit1[2], fit2[2])
+    if abs(fit1[2] / fit2[2] - 1.0) > MAX_RADIUS_RATIO_ERROR:
+        return None
+    if error > MAX_RADIUS_ERROR:
+        return None
+    return (0.0, xyz, fit1[:2], fit2[:2], fit1[2], fit2[2], refined_worst,
+            error)
+
+
+def _to_ball_pair(survivor):
+    _, xyz, uv1, uv2, r1, r2, worst, error = survivor
     return BallPair(xyz_m=xyz, uv1=uv1, uv2=uv2, radius1_px=r1,
                     radius2_px=r2, reprojection_px=worst,
-                    radius_error=error), None
+                    radius_error=error)
+
+
+def find_ball_pair(rig, frame1, frame2):
+    """Return (BallPair, None), or (None, reason) saying why not.
+
+    The reason is written for whoever is standing at the device holding a
+    ball, because that is who has to act on it. "no ball" and "23 circles,
+    none of them ball-shaped at a plausible distance" call for opposite
+    responses, and the old message could not tell them apart.
+
+    Two-phase, and the phases have different loyalties:
+
+      SELECTION - which circles are the ball - runs on the raw Hough
+      candidates. Measured across 29 real pairs, that selection is right
+      whenever it finds anything at all, and re-measuring every candidate
+      before selecting was tried twice and both times handed wins to
+      polished junk (a positive-control fixture went from found to
+      "ambiguous"; one true ball lost outright to a background object).
+
+      PRECISION - where exactly the selected circles are - re-measures the
+      winning pair on its outlines, and keeps the result only if it beats
+      the raw pair on the very gates that selected it (_refined_pair).
+
+    When selection finds NOTHING consistent, and only then, the candidates
+    themselves are re-measured on their outlines and selection runs once
+    more. That is the recovery for the one failure Hough's arc bias causes:
+    a ball lit from one side settles on different arcs in the two cameras
+    (2.71 px of disagreement on the record frames, worth 10 mm of depth)
+    and no pairing survives. An AMBIGUOUS selection is deliberately NOT
+    rescued - refinement is precision, and precision must not adjudicate
+    which of two ball-shaped objects is the ball.
+    """
+    low, high = radius_bounds_px(rig)
+    candidates1 = frame_analysis.ball_candidates(frame1, low, high)
+    candidates2 = frame_analysis.ball_candidates(frame2, low, high)
+    if not candidates1 or not candidates2:
+        empty = " and ".join(
+            name for name, found in (("cam1", candidates1), ("cam2", candidates2))
+            if not found)
+        return None, "no circle at all in {} ({} / {} candidates)".format(
+            empty, len(candidates1), len(candidates2))
+
+    survivors, on_size, behind, at_all = _consistent_pairs(
+        rig, candidates1, candidates2)
+    best, reason = _verdict(survivors, on_size, behind, at_all,
+                            len(candidates1), len(candidates2))
+
+    if best is None and not survivors:
+        rescue1 = _outline_measured(frame1, candidates1)
+        rescue2 = _outline_measured(frame2, candidates2)
+        rescued, r_on_size, r_behind, r_at_all = _consistent_pairs(
+            rig, rescue1, rescue2)
+        rescue_best, _ = _verdict(rescued, r_on_size, r_behind, r_at_all,
+                                  len(candidates1), len(candidates2))
+        if rescue_best is not None:
+            return _to_ball_pair(rescue_best), None
+        # The raw reason stands: the rescue is an internal second attempt,
+        # and when it also fails, the first description of the scene is the
+        # one the operator should act on.
+        return None, reason
+
+    if best is None:
+        return None, reason
+
+    refined = _refined_pair(rig, frame1, frame2, best)
+    return _to_ball_pair(refined if refined is not None else best), None

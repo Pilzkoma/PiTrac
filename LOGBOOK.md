@@ -1528,6 +1528,92 @@ PiTrac's key techniques:
 
 \---
 
+**2026-08-11 — Der Detektor passt jetzt die Silhouette an, nicht den hellen Bogen. Das Ziel ist grün.**
+
+> `test_a_ball_lit_from_one_side_is_found` war als expectedFailure die
+> Definition von fertig. Er ist jetzt ein normaler, grüner Test: das
+> Zielpaar wird bei **0,45 px** Reprojektionsresiduum gefunden (vorher 2,71 px
+> und verworfen), Radiusverhältnis 1,015, Größenfehler +15,7 %.
+>
+> **Erst gemessen, dann gebaut — und zwei Mechanismen statt einem gefunden.**
+> Eine Kantenzählung am echten Zielpaar zeigte: die Silhouette existiert als
+> Canny-Kante nur auf einem Drittel des Umfangs (12/36 Winkelrichtungen in
+> cam1); im Radialband liegen 57 Kantenpixel von Dimples und Logo. Kleinste
+> Quadrate darüber kollabieren den Radius (42,7 → 25,5 px) — deshalb machte
+> das Verdrahten von `refine_ball` alles schlechter. Der Docstring-Verdacht
+> (äußerste Kante je Richtung plus Ausreißerverwerfung) stimmte, reichte aber
+> nicht: am **live aufgenommenen** Paar sprang die äußerste-Kante-Auswahl auf
+> den **Rand des Schlagschattens** (60,8 → 87,3 px) — der ist knackiger als
+> die Schattenflanke des Balls selbst. Die Silhouette liegt ZWISCHEN beiden
+> Störquellen.
+>
+> **`refine_ball` jetzt:** äußerste Canny-Kante je 5°-Richtung (vektorisiert),
+> MAD-getrimmter Kreisfit darüber, und zwei Leitplanken — Drift ≤ 0,8 r wie
+> gehabt, neu **Radius ± 25 % vom Seed** (`REFINE_MAX_RADIUS_CHANGE`): eine
+> Verfeinerung ist eine Korrektur, keine neue Erkennung.
+>
+> **Ein RANSAC-Konsensfit wurde gemessen und verworfen, und der Grund ist
+> aufschreibenswert:** er trifft den wahren Radius besser (44,2 statt ~38 auf
+> der synthetischen Vorrichtung), wählt aber in jeder Kamera eine leicht
+> andere Inlier-Schale — Zielpaar 1,22 px, Verhältnis 0,928. Der getrimmte
+> Fit liest den Radius 10–15 % zu klein, aber **in beiden Kameras gleich**
+> (Verhältnis 1,015), und Stereo braucht genau das: ein gemeinsamer Fehler
+> kürzt sich in der Disparität, ein Kameraunterschied nie. Konsistent-falsch
+> schlägt inkonsistent-richtig.
+>
+> **Verdrahtung zweiphasig** (`find_ball_pair`), weil Ersetzen aller
+> Kandidaten in beiden Probeläufen poliertem Müll Siege schenkte (die
+> Positivkontrolle `cluttered_ball` wurde „ambiguous", in gs_19 verlor der
+> echte Ball an ein Hintergrundobjekt):
+> **Auswahl** läuft auf rohen Hough-Kandidaten (in 29 echten Paaren immer
+> richtig, wenn sie überhaupt etwas fand). **Präzision** vermisst dann nur
+> das Siegerpaar an seinen Umrissen — beide Kreise oder keiner, und
+> übernommen nur, wenn alle Tore bestehen UND das Residuum echt sinkt.
+> **Rettung** (alle Kandidaten umriss-vermessen, Auswahl erneut) läuft nur,
+> wenn die rohe Auswahl GAR NICHTS Konsistentes fand — das ist exakt der
+> Fehler, den Houghs Bogen-Bias erzeugt. Mehrdeutigkeit wird absichtlich
+> nicht gerettet: Präzision darf nicht entscheiden, welches von zwei
+> ballförmigen Dingen der Ball ist.
+>
+> **Bilanz auf allen echten Daten** (Auswahl-pur → ausgeliefert): Fixtures
+> 3/4 → 4/4 (das Zielpaar kommt dazu, nichts kippt); tote 24er-Serie 8 → 10
+> gefunden — gs_04 echt dazugewonnen (1,83 px), gs_06 von 0,91 auf 0,60 px
+> präzisiert, und **ein neuer Falschtreffer gs_21** (+139 mm, Größe +18,9 %,
+> haarscharf unterm Tor) auf der Szene, die schon vorher zwei Falschtreffer
+> trug (gs_10, gs_23). Ehrlich verbucht; die Antwort bleibt freier
+> Hintergrund laut Protokoll, nicht Schwellen-Tuning.
+>
+> **Neu und wichtiger als jede Zahl oben: ein Paar mit unabhängiger
+> Wahrheit.** `measured_300mm/` — live aufgenommen, Ballvorderkante mit dem
+> Maßband bei 300 mm, Achsenhöhe ~115 mm. Der Detektor sagt Z 330,1 mm
+> (Mitte = 321 mm + Objektiv-Offset), Y +86 mm, Radius 58,9/60,8 px bei
+> erwarteten ~57. Der Test darauf prüft gegen das Maßband, nicht gegen den
+> Detektor selbst — ein Detektor, der driftet, kann sich weiter selbst
+> zustimmen, dem Maßband nicht.
+>
+> **Der Zielwert des Zieltests wurde umverankert** von (−59,2, +78,6, 409,2)
+> auf (−59,7, +80,6, 423,9): die alte Zahl stammte aus genau dem 2,71-px-Paar,
+> das der Test verurteilt, und die Zollstock-Ablesung „300" dieser Aufnahme
+> ist ein Bedienfehler der Art aus Lauf 2 (ein Ball bei ~280 mm subtendierte
+> ~65 px; im Bild gibt es zwischen 28 und 60 px nichts dergleichen). Die Höhe
+> +80,6 passt auf die im selben Setup gemessene Kamerahöhe (100,5 − 21,3 =
+> 79,2 mm).
+>
+> **TDD-Disziplin gehalten:** beide treibenden `refine_ball`-Tests nachweislich
+> rot vor der Implementierung (Kollaps 44 → 27,1 px; Schattenrand 58 → 62,3 px;
+> die weichgezeichnete Dimple-Vorrichtung beißt den alten Code mit 10,5 px
+> Zentrumsfehler), beide Verdrahtungstests rot vor der Verdrahtung; der
+> Zieltest selbst war als expectedFailure der Rot-Beweis. Ein Pin-Test
+> (Mehrdeutigkeit wird nicht adjudiziert) ist konstruktionsbedingt nie rot
+> gewesen und ist als solcher gekennzeichnet.
+>
+> **Stand:** 186 Tests grün auf dem Jetson (vorher 179 mit 1 expectedFailure).
+> Strobe weiterhin nicht angeschlossen — alles hier ist Umgebungslicht, wie
+> es der Messpfad auch nutzt. Nächster Schritt: der 24-Aufnahmen-Messlauf
+> nach `sp1_vision/triangulation_run/PROTOCOL.md`.
+
+\---
+
 \---
 
 ## 🔧 Sub-Project 2: Spin Detection

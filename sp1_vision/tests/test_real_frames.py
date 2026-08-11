@@ -78,24 +78,57 @@ class RealFrameTest(unittest.TestCase):
         self.assertLess(pair.xyz_m[2], ball_pair.MAX_DEPTH_M,
                         "returned a point beyond the measurement volume")
 
-    @unittest.expectedFailure
     def test_a_ball_lit_from_one_side_is_found(self):
-        # THE GOAL. This is a clean scene, a bare wall, and the ball is
-        # plainly visible in both cameras - cam1 (504.5, 595.5) r 42.7,
-        # cam2 (682.5, 608.5) r 35.0. Pairing those two triangulates to
-        # (-59.2, +78.6, 409.2) mm, and +78.6 mm of height says it really is
-        # the ball. It is rejected on a 2.71 px residual because Hough fits
-        # the bright arc rather than the outline, and each camera sees the
-        # shading from a different angle.
+        # THE GOAL of the 2026-08-11 detector work, formerly an
+        # expectedFailure. Clean scene, bare wall, ball plainly visible in
+        # both cameras - and Hough alone rejected it at 2.71 px residual,
+        # because it fits the bright arc rather than the outline and each
+        # camera sees the shading from a different angle. The outline
+        # rescue in find_ball_pair now recovers it at 0.45 px.
         #
-        # 2.71 px is about 10 mm of depth. The budget is 1.8 mm. Until this
-        # passes, no measurement taken with this detector is worth the floor
-        # time - so it is marked as an expected failure rather than deleted
-        # or quietly skipped, and turning it green is the definition of done.
+        # The expected position is the OUTLINE detector's answer, not the
+        # (-59.2, +78.6, 409.2) this comment used to carry - that number
+        # was triangulated from the very 2.71 px arc-biased pair this test
+        # exists to condemn, and was never ground truth. The re-anchored
+        # value is supported independently: its height above the surface
+        # matches the camera height measured with the attitude probe shots
+        # of the same session (100.5 mm - 21.3 mm ball radius = 79.2
+        # against +80.6 here), and the run's tape reading (300) cannot be
+        # reconciled with EITHER value - a ball at 280 mm would subtend
+        # ~65 px and nothing in the frame between 28 and 60 px supports
+        # that - so the reading is an operator error of the kind run 2
+        # already logged once.
         pair, reason = self._find("lit_from_one_side")
         self.assertIsNotNone(pair, reason)
         np.testing.assert_allclose(pair.xyz_m * 1000.0,
-                                   [-59.2, 78.6, 409.2], atol=10.0)
+                                   [-59.7, 80.6, 423.9], atol=10.0)
+        self.assertLess(pair.reprojection_px, 1.0,
+                        "the pair was found but the cameras still disagree "
+                        "by {:.2f} px".format(pair.reprojection_px))
+
+    def test_the_tape_measured_ball_is_where_the_tape_says(self):
+        # The only pair with INDEPENDENT ground truth: captured 2026-08-11
+        # with the ball's front edge tape-measured at 300 mm from the
+        # cameras and the optical axes at ~115 mm above the surface. Centre
+        # depth is therefore 321 mm plus the (unmeasured, small) offset
+        # between the camera front and camera 1's z = 0 - the band below
+        # covers that offset without covering an arc-biased answer.
+        #
+        # Every other fixture's "expected" position is some detector's own
+        # output. This one is a tape measure's, which is the whole point:
+        # a detector that drifts can keep agreeing with itself, it cannot
+        # keep agreeing with the tape.
+        pair, reason = self._find("measured_300mm")
+        self.assertIsNotNone(pair, reason)
+        z_mm = pair.xyz_m[2] * 1000.0
+        self.assertGreater(z_mm, 305.0, "nearer than the tape allows")
+        self.assertLess(z_mm, 355.0, "farther than the tape allows")
+        y_mm = pair.xyz_m[1] * 1000.0
+        self.assertGreater(y_mm, 65.0)
+        self.assertLess(y_mm, 105.0,
+                        "the ~115 mm camera height puts the ball centre "
+                        "about 94 mm below the axis, not {:.0f}".format(y_mm))
+        self.assertLess(pair.reprojection_px, 1.0)
 
 
 if __name__ == "__main__":

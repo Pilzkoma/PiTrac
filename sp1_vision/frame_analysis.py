@@ -129,6 +129,27 @@ REFINE_MAX_DRIFT = 0.8
 
 REFINE_ITERATIONS = 3
 
+# The same idea for the radius. Hough's radius is coarse - a quarter off on
+# a bad day - but never off by half, so a fit that leaves this window has
+# latched onto something that is not the seed's object. Both directions are
+# on record from real frames: plain least squares collapsed 42.7 px to
+# 25.5 px onto dimple texture, and an outermost-edge collector inflated
+# 60.8 px to 87.3 px onto a cast shadow's rim.
+REFINE_MAX_RADIUS_CHANGE = 0.25
+
+# Angular resolution for silhouette collection: five degrees per direction.
+REFINE_ANGULAR_BINS = 72
+
+# MAD multiplier for the trimmed refit. Outline points further than this
+# many spreads from the consensus of the rest are somebody else's contour.
+REFINE_TRIM_K = 2.5
+
+# The trim works on the distilled outline - at most one point per angular
+# bin - so its floor is lower than REFINE_MIN_EDGE_POINTS, which guards the
+# raw edge harvest. Three parameters through ten points spread over the
+# circle is still overdetermined threefold.
+REFINE_TRIM_MIN_POINTS = 10
+
 
 def _fit_circle(xs, ys):
     """Algebraic circle fit through edge points; returns (u, v, r).
@@ -149,6 +170,74 @@ def _fit_circle(xs, ys):
     return float(u), float(v), float(np.sqrt(radius_sq))
 
 
+def _outermost_per_direction(xs, ys, u, v):
+    """The outermost edge point in each angular direction from (u, v).
+
+    Dimples, a printed logo and wood grain all put Canny edges INSIDE the
+    radial band, and on real frames they outnumber the silhouette wherever
+    the shadow flank has no contrast. Whatever else those interior edges
+    are, they are never the outline: along any one direction the silhouette
+    is the last edge the ball can produce. This does NOT hold for edges
+    beyond the ball - a cast shadow's rim is outside the silhouette and
+    crisper than the shadow-side flank - which is why the selection is
+    followed by a trimmed fit rather than trusted on its own.
+    """
+    dx, dy = xs - u, ys - v
+    dist = np.hypot(dx, dy)
+    angle = np.arctan2(dy, dx)
+    bins = ((angle + np.pi) / (2.0 * np.pi)
+            * REFINE_ANGULAR_BINS).astype(int) % REFINE_ANGULAR_BINS
+    # Group-max without a Python loop: sort by (bin, distance), then the
+    # last entry of each bin's run is that bin's outermost point.
+    order = np.lexsort((dist, bins))
+    sorted_bins = bins[order]
+    run_ends = np.nonzero(np.append(sorted_bins[1:] != sorted_bins[:-1],
+                                    True))[0]
+    outermost = order[run_ends]
+    return xs[outermost], ys[outermost]
+
+
+def _trimmed_circle_fit(xs, ys):
+    """Circle fit that discards points the consensus circle cannot explain.
+
+    Plain least squares weights every point equally, and on a real ball
+    that is the whole defect: the minority that is somebody else's contour
+    - a shadow rim, a neighbouring object's edge - drags the fit off the
+    majority that is the silhouette. Fit, measure each point's radial
+    residual, drop the points more than REFINE_TRIM_K spreads from the
+    consensus, refit. The spread is the median absolute deviation, which a
+    minority of outliers cannot inflate the way it inflates a variance.
+
+    A RANSAC-style consensus fit was tried in this spot and measured on the
+    real pairs before being rejected. It recovers the true RADIUS better -
+    the trimmed fit keeps some interior texture and reads 10-15% small -
+    but it picks a slightly different inlier shell in each camera, and for
+    stereo that is the wrong trade: the trimmed fit's bias is the SAME in
+    both cameras and cancels in the disparity (goal pair 0.45 px, radius
+    ratio 1.015), while the consensus fit's per-camera choices do not
+    (1.22 px, ratio 0.928). The pair gates tolerate a common bias; nothing
+    downstream tolerates a cross-camera difference.
+    """
+    fit = None
+    for _ in range(REFINE_ITERATIONS):
+        fit = _fit_circle(xs, ys)
+        if fit is None:
+            return None
+        u, v, r = fit
+        residual = np.hypot(xs - u, ys - v) - r
+        med = float(np.median(residual))
+        mad = float(np.median(np.abs(residual - med)))
+        if mad < 1e-9:
+            break
+        keep = np.abs(residual - med) < REFINE_TRIM_K * mad
+        if int(keep.sum()) < REFINE_TRIM_MIN_POINTS:
+            break
+        if int(keep.sum()) == xs.size:
+            break
+        xs, ys = xs[keep], ys[keep]
+    return fit
+
+
 def refine_ball(frame, u, v, r):
     """Refit a candidate to the ball's OUTLINE. Returns (u, v, r) or None.
 
@@ -162,29 +251,29 @@ def refine_ball(frame, u, v, r):
     visible in both images, which is 10 mm of depth where the whole budget
     is 1.8 mm.
 
-    So this throws the polarity away. It collects outline pixels around the
-    seed, keeps those at a plausible radius, and fits a circle to their
-    geometry alone. A dark-to-bright edge and a bright-to-dark edge are the
-    same evidence about where the ball ends.
+    So this throws the polarity away and fits geometry: Canny edges around
+    the seed, the OUTERMOST edge per angular direction (dimples and logos
+    are interior, the silhouette is the last edge the ball can produce),
+    then a MAD-trimmed fit over the distilled outline (a cast shadow's rim
+    is EXTERIOR and can out-crisp the shadow-side flank, so the outermost
+    selection must not be trusted on its own - the trim drops what the
+    consensus of the rest cannot explain). Both halves are load-bearing,
+    and both defects are on record from real frames: least squares over
+    every band edge collapsed 42.7 px to 25.5 px onto the texture, and
+    outermost-without-trim inflated 60.8 px to 87.3 px onto a shadow rim.
+
+    The centre it returns is biased ONLY in ways shared by both cameras
+    (the fit keeps some interior texture and reads the radius 10-15%
+    small, identically on both sides), which is the property the stereo
+    pair actually needs: a common bias cancels in the disparity, a
+    cross-camera difference never does. A consensus/RANSAC fit that
+    recovers the radius better was measured and rejected on exactly that
+    ground - see _trimmed_circle_fit.
 
     Returns None rather than a guess when the outline is too broken to fit,
-    or when the fit walks far enough from its seed to be a different object.
-
-    NOT ON THE MEASURING PATH YET, and the reason is measured rather than
-    suspected. On synthetic discs it is a clear win - 1.58 px down to
-    0.26 px under a hard one-sided light, and 0.71 px (Hough's accumulator
-    quantisation) down to under 0.05 px on an evenly lit one. On the real
-    2026-08-11 frames, wiring it into ball_candidates made things worse:
-    the cluttered 24-frame set dropped from 11 finds to 9 and its
-    "no consistent pair" rejections rose from 4 to 9.
-
-    The likely cause, to be confirmed with real frames rather than assumed:
-    a real ball carries dimples and a printed logo, and the desk carries
-    wood grain, so Canny returns plenty of edges INSIDE the radial band that
-    have nothing to do with the silhouette. The fit weights them equally.
-    What it probably needs is to keep only the outermost edge along each
-    radial direction, and to reject outliers rather than least-squares
-    everything it is handed.
+    or when the fit leaves the seed's neighbourhood in centre or radius -
+    a refinement is a correction, not a new detection, and a fit that runs
+    away has found somebody else's contour.
     """
     gray = _as_gray(frame)
     height, width = gray.shape[:2]
@@ -214,14 +303,19 @@ def refine_ball(frame, u, v, r):
                (distance < radius * (1.0 + REFINE_RADIAL_BAND))
         if int(keep.sum()) < REFINE_MIN_EDGE_POINTS:
             return None
-        fit = _fit_circle(xs[keep], ys[keep])
+        outline_x, outline_y = _outermost_per_direction(
+            xs[keep], ys[keep], centre_u, centre_v)
+        if outline_x.size < REFINE_TRIM_MIN_POINTS:
+            return None
+        fit = _trimmed_circle_fit(outline_x, outline_y)
         if fit is None:
             return None
         centre_u, centre_v, radius = fit
 
     if np.hypot(centre_u - u, centre_v - v) > REFINE_MAX_DRIFT * r:
         return None
-    if not (0.5 * r <= radius <= 1.8 * r):
+    if not ((1.0 - REFINE_MAX_RADIUS_CHANGE) * r
+            <= radius <= (1.0 + REFINE_MAX_RADIUS_CHANGE) * r):
         return None
     return centre_u, centre_v, radius
 
@@ -260,9 +354,10 @@ def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,
     if circles is None:
         return []
 
-    # NOT refined here, deliberately - see refine_ball's own note. Wiring it
-    # in was tried on 2026-08-11 and made real frames WORSE: the cluttered
-    # set went from 11 finds to 9 and its "nothing consistent" rejections
-    # from 4 to 9. It passes on synthetic discs and fails on real balls,
-    # which is exactly the gap a synthetic fixture cannot show.
+    # NOT refined here, deliberately, and it was measured twice: replacing
+    # every candidate with its refinement handed wins to polished junk on
+    # the cluttered 24-frame set both times it was tried (2026-08-11). The
+    # refinement lives in ball_pair.find_ball_pair instead, where it can be
+    # applied to the SELECTED pair - and to the whole candidate list only
+    # as a rescue, after the raw selection has found nothing at all.
     return [(float(u), float(v), float(r)) for u, v, r in circles[0]]

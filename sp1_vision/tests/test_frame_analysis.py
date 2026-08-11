@@ -130,13 +130,63 @@ def _shaded_ball(cx, cy, r, background=128, bright=240, dark=120):
     return cv2.GaussianBlur(frame, (5, 5), 0)
 
 
+def _textured_shaded_ball(cx, cy, r, background=128, bright=240, dark=120):
+    """A shaded ball that also carries what a real one carries: texture.
+
+    The plain _shaded_ball let a least-squares outline fit look excellent -
+    1.58 px down to 0.26 px - while the same fit, on a real golf ball, drove
+    the radius from 42.7 px to 25.5 px. The difference is dimples and a
+    printed logo: Canny returns plenty of edges INSIDE the radial band that
+    have nothing to do with the silhouette, and a fit that weights them all
+    equally is fitting the texture, not the ball. This fixture puts that
+    interior evidence in, so a fit that survives it has actually earned it.
+    """
+    frame = _shaded_ball(cx, cy, r, background, bright, dark)
+    # Dimples: a grid of small pits, darker than their LOCAL surface the
+    # way a real dimple is - a shadow in the pit, not ink. An earlier
+    # version stamped them pitch black, which made the fixture harsher
+    # than any real ball and demanded a radius accuracy the system's own
+    # gates do not ask for.
+    pits = np.zeros_like(frame)
+    for gy in range(-r, r, 8):
+        for gx in range(-r, r, 8):
+            if gx * gx + gy * gy <= (0.80 * r) ** 2:
+                cv2.circle(pits, (cx + gx, cy + gy), 2, 45, 1)
+    frame = cv2.subtract(frame, pits)
+    # The printed logo IS ink: a solid dark blob, off-centre like a stamp.
+    cv2.ellipse(frame, (int(cx + 0.35 * r), int(cy + 0.15 * r)),
+                (int(0.22 * r), int(0.10 * r)), 20.0, 0, 360, 20, -1)
+    return cv2.GaussianBlur(frame, (5, 5), 0)
+
+
+def _ball_with_cast_shadow(cx, cy, r, background=150):
+    """A lit ball whose cast shadow has a CRISPER rim than its own flank.
+
+    Measured on the live 2026-08-11 pair: the strongest radial gradient in
+    the lower 120 degrees was the shadow's outer boundary at 1.3-1.45 times
+    the ball's radius, not the ball's edge - and an outline collector that
+    prefers the outermost edge per direction inflated the radius from
+    60.8 px to 87.3 px, straight onto the shadow rim.
+    """
+    frame = np.full((800, 1280), background, dtype=np.uint8)
+    # The shadow first, so the ball is drawn over its inner part. Its outer
+    # rim is left hard-edged on purpose: that crispness is the trap.
+    cv2.ellipse(frame, (int(cx + 0.45 * r), int(cy + 0.55 * r)),
+                (int(1.35 * r), int(1.15 * r)), 15.0, 0, 360, 55, -1)
+    yy, xx = np.mgrid[0:frame.shape[0], 0:frame.shape[1]]
+    inside = (xx - cx) ** 2 + (yy - cy) ** 2 <= r * r
+    ramp = np.clip((cx + r - xx) / (2.0 * r), 0.0, 1.0)
+    frame[inside] = (110 + (235 - 110) * ramp)[inside].astype(np.uint8)
+    return cv2.GaussianBlur(frame, (5, 5), 0)
+
+
 def _raw_hough_seed(frame, near_x, near_y):
     """The UNREFINED Hough candidate nearest a point, or None.
 
-    ball_candidates now returns refined circles, so a test that wants to
-    show the refinement earns its place has to reach past it for the raw
-    proposal - otherwise it compares the refined answer with itself and
-    passes no matter what.
+    A test that wants to show a refinement earns its place has to compare
+    against the raw proposal - otherwise it compares the refined answer with
+    itself and passes no matter what. (An earlier wording here claimed
+    ball_candidates itself refines; it never did on the measuring path.)
     """
     gray = cv2.medianBlur(frame_analysis._as_gray(frame), 5)
     circles = cv2.HoughCircles(
@@ -194,6 +244,61 @@ class RefineBallTest(unittest.TestCase):
         self.assertIsNotNone(refined)
         self.assertAlmostEqual(refined[0], 500.0, delta=0.8)
         self.assertAlmostEqual(refined[1], 300.0, delta=0.8)
+
+    def test_interior_texture_does_not_shrink_the_fit(self):
+        # The real 2026-08-11 failure: dimples and a printed logo put edge
+        # points inside the radial band, and a fit that weights them like the
+        # silhouette collapses inward - 42.7 px to 25.5 px on the fixture
+        # pair. The refined radius must stay on the silhouette.
+        frame = _textured_shaded_ball(700, 520, 44)
+        raw = _raw_hough_seed(frame, 700, 520)
+        self.assertIsNotNone(raw, "the textured ball produced no candidate")
+        refined = frame_analysis.refine_ball(frame, *raw)
+        self.assertIsNotNone(refined)
+        u, v, r = refined
+        # The radius tolerance is the system's own: the pair selector
+        # refuses anything more than 20% from the size the range implies,
+        # so a refinement that shrinks past that hands the selector a ball
+        # it must throw away. (The trimmed fit does keep some texture and
+        # reads a few percent small; that bias is common to both cameras
+        # and cancels in the disparity, which is why it is tolerated
+        # rather than chased to zero.)
+        self.assertGreater(r, 44.0 * 0.80,
+                           "radius {:.1f} px against a true 44 - the fit "
+                           "collapsed onto the texture".format(r))
+        self.assertLess(r, 44.0 * 1.20)
+        self.assertLess(np.hypot(u - 700, v - 520), 0.9)
+
+    def test_a_cast_shadows_rim_is_not_the_outline(self):
+        # The complementary trap, measured on the live pair: the shadow's
+        # outer boundary is crisper than the ball's own shadow-side flank,
+        # and an outline collector that simply prefers the outermost edge
+        # per direction walks onto it (60.8 px -> 87.3 px).
+        frame = _ball_with_cast_shadow(600, 450, 58)
+        raw = _raw_hough_seed(frame, 600, 450)
+        self.assertIsNotNone(raw, "the shadowed ball produced no candidate")
+        refined = frame_analysis.refine_ball(frame, *raw)
+        self.assertIsNotNone(refined)
+        u, v, r = refined
+        self.assertAlmostEqual(r, 58.0, delta=3.0,
+                               msg="radius {:.1f} px against a true 58 - the "
+                                   "fit walked onto the shadow rim".format(r))
+        self.assertLess(np.hypot(u - 600, v - 450), 0.9)
+
+    def test_a_fit_that_runs_away_in_radius_is_refused(self):
+        # A refinement is a correction to its seed, not a new detection:
+        # Hough's radius is coarse but never off by half. Seeded well inside
+        # a much larger disc, the only outline on offer is that disc's rim -
+        # reporting it would hand the pair selector a circle Hough never
+        # proposed, at a size the seed cannot explain. Refusal is the only
+        # honest answer.
+        frame = _frame_with_discs((640, 400, 68))
+        result = frame_analysis.refine_ball(frame, 640.0, 400.0, 40.0)
+        if result is not None:
+            u, v, r = result
+            self.assertLess(abs(r / 40.0 - 1.0), 0.30,
+                            "refinement turned a 40 px seed into {:.1f} px "
+                            "instead of refusing".format(r))
 
     def test_refuses_when_there_is_no_outline_to_fit(self):
         flat = np.full((800, 1280), 128, dtype=np.uint8)
