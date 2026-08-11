@@ -44,10 +44,20 @@ MIN_DEPTH_M = 0.25
 MAX_DEPTH_M = 0.95
 MAX_LATERAL_FRACTION = 0.55
 
-# The ball sits on the same surface the unit stands on, a hand's breadth
-# below the optical axis. This bound is what excludes the ceiling lamp and
-# the object on top of the loudspeaker; it is not a tolerance on the answer.
-MAX_HEIGHT_M = 0.35
+# The ball rests on the SAME SURFACE the unit stands on. Its centre is one
+# ball radius above that surface and the optical centre is somewhere between
+# 40 and 220 mm above it - a property of the housing, known to that accuracy
+# from the CAD without measuring anything. So Y, which is positive DOWNWARD,
+# is always positive and lands in a narrow band.
+#
+# This replaces a symmetric +-350 mm bound that was no constraint at all. On
+# the 2026-08-11 frames EVERY spurious survivor sat at Y = -216 to -278 mm:
+# objects on the wall and the monitor, a quarter of a metre ABOVE the axis,
+# which had cleared the volume, the residual and the size gate. Nothing but
+# the height distinguishes them, and the height is not a tolerance on the
+# answer - a ball above the optical axis is not resting on the table.
+MIN_BALL_HEIGHT_M = 0.020
+MAX_BALL_HEIGHT_M = 0.200
 
 # A residual above this means the two rays did not really meet. Necessary
 # and nowhere near sufficient - see the module docstring.
@@ -63,6 +73,18 @@ MAX_REPROJECTION_PX = 2.0
 # at +22 and +28% - so 20% keeps a threefold margin over the real thing and
 # still refuses those. Wider was tried first and let both through.
 MAX_RADIUS_ERROR = 0.20
+
+# How far the two apparent radii may differ FROM EACH OTHER, as a fraction.
+#
+# Not implied by the per-camera check above. 78 mm of baseline against
+# 300-700 mm of range makes the ball almost equidistant from both cameras -
+# their ranges differ by under 2.5% at the near end - so its two radii agree
+# to a few percent whatever the range is. But a pair running +18% in one
+# image and -18% in the other passes both per-camera tests while disagreeing
+# by 40% with itself, and that is what a pairing of two unrelated circles
+# looks like. Observed on real frames: the ball came in at ratios of 0.973,
+# 0.981 and 1.071; the junk at 0.739 and 0.795.
+MAX_RADIUS_RATIO_ERROR = 0.20
 
 # A pixel of residual and a 5% size error are treated as comparable evidence.
 RADIUS_ERROR_WEIGHT_PX = 20.0
@@ -138,7 +160,7 @@ def _in_measurement_volume(xyz):
         return False
     if abs(float(xyz[0])) > MAX_LATERAL_FRACTION * depth:
         return False
-    return abs(float(xyz[1])) <= MAX_HEIGHT_M
+    return MIN_BALL_HEIGHT_M <= float(xyz[1]) <= MAX_BALL_HEIGHT_M
 
 
 def find_ball_pair(rig, frame1, frame2):
@@ -191,6 +213,9 @@ def find_ball_pair(rig, frame1, frame2):
             if worst > MAX_REPROJECTION_PX:
                 continue
             error = _radius_error(rig, xyz, r1, r2)
+            if abs(r1 / r2 - 1.0) > MAX_RADIUS_RATIO_ERROR:
+                rejected_on_size += 1
+                continue
             if error > MAX_RADIUS_ERROR:
                 # Counted rather than dropped silently: an operator whose
                 # every candidate fails on size has a ball-sized problem

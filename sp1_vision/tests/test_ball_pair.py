@@ -171,6 +171,43 @@ class FindBallPairTest(unittest.TestCase):
         pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
         self.assertIsNotNone(pair, reason)
 
+    def test_an_object_above_the_optical_axis_is_not_a_resting_ball(self):
+        # The ball rests on the same surface the unit stands on, so its centre
+        # is always BELOW the optical axis - Y positive, since Y is down. On
+        # the 2026-08-11 frames every spurious survivor sat at Y = -216 to
+        # -278 mm: things on the wall and the monitor, a quarter of a metre
+        # above the axis. They cleared the volume, the residual and the size
+        # gate; only the height says what they are.
+        truth = np.array([0.0, -0.220, 0.500])       # 220 mm ABOVE the axis
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNone(pair, "accepted a point 220 mm above the axis")
+
+    def test_a_ball_on_the_surface_is_still_accepted(self):
+        # The counter-case, so the height band cannot be tightened into
+        # uselessness: the real thing sits at +76 to +86 mm across every
+        # verified shot, and the band has to hold the whole plausible range
+        # of mounting heights rather than the one we happen to have measured.
+        for height in (0.045, 0.0937, 0.150):
+            truth = np.array([0.0, height, 0.500])
+            f1, f2 = frames_with(self.rig, balls=[truth])
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+            self.assertIsNotNone(pair, "{} m: {}".format(height, reason))
+
+    def test_two_circles_of_very_different_size_are_not_one_ball(self):
+        # 78 mm of baseline against half a metre of range: the ball is almost
+        # equidistant from both cameras, so its two apparent radii agree to a
+        # few percent whatever the range. Checking each radius against its own
+        # predicted size does NOT cover this - one may run +18% and the other
+        # -18%, both inside their own tolerance while disagreeing by 40%.
+        truth = np.array([0.0, 0.0937, 0.500])
+        (u1, v1, r1), (u2, v2, r2) = ball_discs(self.rig, truth)
+        f1 = _blur(_draw(_blank(), u1, v1, r1 * 1.18))
+        f2 = _blur(_draw(_blank(), u2, v2, r2 * 0.83))
+        pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
+        self.assertIsNone(pair)
+        self.assertIn("size", reason.lower())
+
     def test_nothing_consistent_is_a_reason_not_a_guess(self):
         speaker = (880.0, 180.0, 66.0)
         f1, f2 = frames_with(self.rig, extra1=[speaker], extra2=[speaker])

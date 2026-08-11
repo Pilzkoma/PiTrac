@@ -103,9 +103,15 @@ CANDIDATE_MIN_SEPARATION_PX = 20
 
 # Accumulator threshold. Lower admits more junk, which is the intended
 # trade: junk is cheap to reject downstream with the rig, and a missed ball
-# cannot be recovered at all. At 30 the ball was absent from camera 2 in
-# gs_03; at 22 it is present in both.
-CANDIDATE_ACCUMULATOR_THRESHOLD = 22
+# cannot be recovered at all.
+#
+# 30 lost the ball in camera 2 of the 2026-08-10 set; 22 lost it in camera 1
+# of the 2026-08-11 set - a white ball on light wood has weaker gradient
+# support than one against a dark speaker, and 22 sat right on that edge. 18
+# finds it in both. Going that low was only affordable once the height band
+# and the radius-ratio check existed to throw the extra junk away: on the
+# same frames, 18 without them turned two good shots into "ambiguous".
+CANDIDATE_ACCUMULATOR_THRESHOLD = 18
 
 
 def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,
