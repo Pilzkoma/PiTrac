@@ -113,7 +113,25 @@ Two rules that cost a session to learn:
 geometry. It is worse on every figure. Do not solve against it.
 The operating detail is in `sp1_vision/calibration_images/README.md`.
 
+## Capture: the driver holds a frame back
+After a pause, the first read from these UVC cameras returns the frame taken just
+after the *previous* read — `CAP_PROP_BUFFERSIZE 1` does not prevent it. Until
+`35ca2db` (2026-09-23) this put every measurement shot one position late, and two
+past "operator errors" were this defect. `CameraPair.grab_with_skew` now discards
+`STALE_FRAMES` by default; only a caller reading back to back (the MJPEG stream)
+may pass `fresh=False`. Any new capture path that reads on demand must keep the
+default. Test for staleness by changing exposure between grabs, not by comparing
+frames of a static scene.
+
 ## Current task
+0. **Measurement run 6** per `sp1_vision/triangulation_run/PROTOCOL.md`, waiting on a
+   dark matt cloth. Run 5 settled the yaw sign (positive = target line right) but
+   not the scale (1.029 ± 0.017): the ball had 1.3 grey levels of contrast in cam2,
+   so `refine_ball` was accepted nowhere and raw Hough centres (1 px grid) set the
+   precision. Run a contrast check on the probe shot (>40 grey levels in both
+   cameras) before letting the operator lay out anything. Results so far:
+   `sp1_vision/triangulation_run/README.md`.
+
 Next SP1 items, in this order:
 1. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
    not equally important:

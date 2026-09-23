@@ -14,7 +14,7 @@
 
 |Sub-Project|Type|Phase|% Complete|Status|Last Updated|
 |-|-|-|-|-|-|
-|SP1 — Hardware & Build|HW+SW|Build|99%|🟡 In Progress|2026-08-11|
+|SP1 — Hardware & Build|HW+SW|Build|99%|🟡 In Progress|2026-09-23|
 |SP2 — Spin Detection|HW + SW|Design|0%|🟡 In Progress|2026-03-15|
 |SP3 — Club Tracking|HW + SW|Design|0%|🔵 Planning|2026-03-14|
 |SP4 — GSPro Integration + Session Data|SW|Build|90%|🟡 In Progress|2026-03-21|
@@ -234,7 +234,7 @@ Next step: solder pins on Teensy when they arrive, wire Jetson Pin 29 ↔ Teensy
 |-|-|-|-|-|
 |PiTrac|github.com/PiTracLM/PiTrac|Base codebase — adapted from RPi to Jetson|GPL-3.0|All vision pipeline, ball detection, spin, GSPro|
 |OpenShotGolf|github.com/(see SP4 notes)|Free GSPro-protocol-compatible simulator (Godot 4.6 .NET) — used as test target|MIT (Godot project)|SP4 testing without GSPro license. V3 vision: porting to Jetson HDMI output.|
-|OpenFlight|github.com/jewbetcha/openflight|Doppler-radar-based DIY launch monitor (24 GHz OPS243-A + K-LD7 angle radars + sound trigger). Primary V2 reference if radar feature added. Hardware validated for golf ball Doppler.|AGPL-3.0|V2 radar hardware reference (OPS243-A, K-LD7), sound trigger pattern (SEN-14262). Do NOT copy code directly — AGPL conflicts with PiTrac GPL-3 + would put Flask dashboard / TCP sender under AGPL network terms. Re-implement clean-room if used.|
+|OpenFlight|github.com/open-flight/openflight (moved from jewbetcha/openflight)|Doppler-radar-based DIY launch monitor (24 GHz OPS243-A + K-LD7 angle radars + sound trigger). Primary V2 reference if radar feature added. Since 2026-09 also a rear-view OV9281 camera with replay: `camera/ball_flight.py` finds the flying ball by differencing against a median of pre-trigger frames and reports a 27-combination threshold sweep's spread as confidence — Block 2 reference for the moving ball (clean-room). Its static-ball detector is weaker than ours. Hardware validated for golf ball Doppler.|AGPL-3.0|V2 radar hardware reference (OPS243-A, K-LD7), sound trigger pattern (SEN-14262). Do NOT copy code directly — AGPL conflicts with PiTrac GPL-3 + would put Flask dashboard / TCP sender under AGPL network terms. Re-implement clean-room if used.|
 
 \---
 
@@ -336,7 +336,7 @@ IMPORTANT RULES FOR THIS CHAT:
 |Status|🟡 In Progress|
 |Depends On|None — this is the foundation|
 |Started|2026-03-14|
-|Last Updated|2026-08-11|
+|Last Updated|2026-09-23|
 
 \---
 
@@ -519,7 +519,9 @@ PiTrac's key techniques:
 * ☑ **Triangulation Block 1 built and merged (2026-08-10).** Python only, nothing in the C++ runtime path yet: `stereo_geometry.py` (the sole frame/unit conversion point, and the rig validation that refuses a mismatched intrinsics/extrinsics pairing), `triangulate.py`, `ground_plane.py`, `cli_triangulate.py`. 147 tests on the Jetson. The extrinsics are consumed for the first time.
 * ☑ **Ball detection rebuilt as a stereo-pair decision (2026-08-10).** `find_ball` returned the strongest Hough circle per image, which in a cluttered room is the loudspeaker — 17 of 24 frames in run 1 returned the same pixel while the ball moved. `ball_pair.find_ball_pair` now chooses the candidate PAIR on three constraints declared in advance: apparent radius matching the range that image's own disparity implies (42.67 mm ball — the check no single image can make), the declared measurement volume, and the rays meeting. The same function runs at capture, so a shot the analysis would reject is rejected while the operator is still standing there.
 * ☑ **Detector fits the silhouette, not the brightest arc (2026-08-11).** Runs 2 and 3 aborted on the ball detector: Hough votes along the gradient and settles on the bright arc, differently per camera — 2.71 px of disagreement on a plainly visible ball. `refine_ball` rebuilt (outermost Canny edge per angular direction, MAD-trimmed circle fit, drift + radius guards), wired **two-phase** into `find_ball_pair`: selection on raw candidates, precision only on the selected pair and only if it strictly improves, outline rescue only when raw selection finds nothing. Goal pair now resolves at 0.45 px; the formerly-expectedFailure goal test is plain green. New tape-measured ground-truth fixture `measured_300mm/`. A RANSAC consensus fit was measured and rejected — better radius, but per-camera inlier shells disagree, and stereo pays for cross-camera differences, not common bias. 186 tests green on the Jetson. Commit `960181b`.
-* ☐ **Measurement run at the device — the only step left in Block 1, and THE FIRST ACTION OF THE NEXT SESSION.** Runs 1–3 failed (loudspeaker; operator reading; detector — the last is now fixed). Same 24 shots, protocol in `sp1_vision/triangulation_run/PROTOCOL.md`; unit facing a bare wall, dark matt cloth over everything behind the measuring field, ball read ALONG the rule, re-placed between repeats. Setup already verified 2026-08-11 with four probe shots (pitch −0.40°, roll +1.37°, camera 100.5 mm above the surface) and the capture check now runs the shipped two-phase detector, so a loudspeaker run cannot silently recur. Run 1's pairs are archived at `sp1_vision/2026-08-10_cluttered/` (untracked) as the only real cluttered-background dataset there is. Settles: whether the shipped scale holds and to what stated precision, the unit's attitude against the surface it stands on (which nothing has ever measured — the calibration measures camera against camera), the mounting height against the assumed 115 mm (the 2026-08-11 live pair suggests the real figure is nearer 105–110), and the sign of `yaw_from_target_line`.
+* ☑ **Stale-frame defect found and fixed (2026-09-23, `35ca2db`).** After a pause the first grab returned the frame the driver had held since the previous read, `BUFFERSIZE 1` notwithstanding — so `cli_triangulate` (and `cli_calibrate`'s shot mode) recorded every shot one late, the first one showing the scene from when the cameras opened. Proven on hardware by switching exposure between grabs. `grab_with_skew` now discards 2 frames per camera by default; only the dashboard's MJPEG stream opts out. Runs 1–4 and three of the four ball-pair fixtures were captured with it; run 2's "operator reading" and the `lit_from_one_side` "operator error" were this defect, not the operator. The 2026-08-09 calibration is unaffected (both cameras held the same instant; no typed label).
+* ☐ **Measurement run 6 — the scale question is still open.** Run 5 (2026-09-23, first run with correct frames) gave pitch −1.19°, roll +0.45°, camera 112.8 mm above the desk (provisional), and **settled the yaw sign: positive = target line to the right**. Scale 1.029 ± 0.017 is undecided: the ball had 1.3 grey levels of contrast against the desk in cam2, `refine_ball` was accepted on none of the shots, and raw Hough centres on a 1 px grid gave 7.6 mm repeat spread (the untouched ball alone: 6.8 mm). Run 6 needs a dark matt cloth, light from the camera side, and marks instead of a rule touching the ball — `PROTOCOL.md` section 2 points 5–7, with a contrast check (target >40 grey levels in both cameras) before the first shot. Also unexplained: run 4 (re-ordered) gave −1.58° / +0.20° / 117.0 mm with the unit untouched. Results in `sp1_vision/triangulation_run/README.md`.
+* ☐ ~~Measurement run at the device — the only step left in Block 1, and THE FIRST ACTION OF THE NEXT SESSION.~~ Superseded by the two items above. Runs 1–3 failed (loudspeaker; operator reading; detector — the last is now fixed). Same 24 shots, protocol in `sp1_vision/triangulation_run/PROTOCOL.md`; unit facing a bare wall, dark matt cloth over everything behind the measuring field, ball read ALONG the rule, re-placed between repeats. Setup already verified 2026-08-11 with four probe shots (pitch −0.40°, roll +1.37°, camera 100.5 mm above the surface) and the capture check now runs the shipped two-phase detector, so a loudspeaker run cannot silently recur. Run 1's pairs are archived at `sp1_vision/2026-08-10_cluttered/` (untracked) as the only real cluttered-background dataset there is. Settles: whether the shipped scale holds and to what stated precision, the unit's attitude against the surface it stands on (which nothing has ever measured — the calibration measures camera against camera), the mounting height against the assumed 115 mm (the 2026-08-11 live pair suggests the real figure is nearer 105–110), and the sign of `yaw_from_target_line`.
 * ☐ **A small residual is not evidence of a correct detection — confirmed on real data.** Run 1's `gs_03` passed the 2 px reprojection gate at 1.96 px with both cameras locked onto the same loudspeaker at 1295 mm. Keep this in mind for Block 2: the guard against a wrong correspondence is physical (size, volume, depth sign), not the residual.
 * ☐ **The baseline figure needs correcting, independently of that run.** 78.28 mm is from the springs-against-bolted comparison table in `calibration_images/README.md`, a different solve from the shipped one — it reports pitch −0.923° where `stereo_extrinsics.json` says −0.9423°. The file the code actually reads says **78.749 mm**, and `CALIB_FIX_INTRINSIC` means 78.28 cannot be substituted into its R/T without re-solving. Every "78.28" in this logbook and in CLAUDE.md is quoting the comparison table, not the shipped geometry. Depth resolution follows: 3.53 mm/px at 0.500 m with the shipped baseline, not 3.55.
 * ☐ Nothing consumes the extrinsics inside `pitrac_lm` yet — the ball-position path there is still PiTrac's monocular radius method, roughly an order of magnitude worse at these distances. That is Block 2, and for the flying ball it waits on `WaitForCam2Trigger`.
@@ -1612,6 +1614,67 @@ PiTrac's key techniques:
 > Strobe weiterhin nicht angeschlossen — alles hier ist Umgebungslicht, wie
 > es der Messpfad auch nutzt. Nächster Schritt: der 24-Aufnahmen-Messlauf
 > nach `sp1_vision/triangulation_run/PROTOCOL.md`.
+
+**2026-09-23 — Jedes Bild war eine Aufnahme zu spät. Der Bediener hatte es gesehen.**
+
+> **OpenFlight zuerst angesehen** (Repo jetzt `open-flight/openflight`, AGPL,
+> inzwischen mit OV9281-Kamera und Replay). Der Kameradetektor ist Schwelle +
+> Hough für einen IR-hellen Ball und schwächer als unserer; der ruhende Ball
+> wird bei 9–30 px pixelgenau gemessen. Brauchbar für Block 2 sind zwei Ideen,
+> clean-room: **Differenzbild gegen einen Median-Hintergrund aus den Bildern vor
+> dem Schlag** (statische Störer verschwinden per Konstruktion) und ein
+> **Parameter-Sweep als Konfidenzmaß** (27 Schwellenkombinationen, Streuung des
+> Ergebnisses = Konfidenz). Deshalb nimmt das Protokoll jetzt Leerbilder auf.
+>
+> **Lauf 4 lieferte Z immer ~50 mm unter der Marke.** Meine erste Erklärung —
+> der Bediener tippe den Wert der nächsten Position — war falsch; er hatte
+> es live beobachtet und widersprach. gs_01 zeigte gar keinen Ball, obwohl er
+> lag. Beweis ohne Bediener: Belichtung zwischen zwei Aufnahmen hart
+> umgeschaltet, und das erste Bild danach hatte in **beiden** Kameras noch die
+> alte Helligkeit (42,2 statt ~80). Der Treiber hält trotz `BUFFERSIZE 1` ein
+> Bild zurück; wer nach einer Pause einmal liest, bekommt das von direkt nach
+> dem vorigen Lesen. Behoben in `35ca2db` (2 Bilder je Kamera verwerfen,
+> parallel vor der Barriere; nur der MJPEG-Stream verzichtet darauf). Der
+> Hardware-Test war vor der Korrektur rot, 37,7 gegen 38,2.
+>
+> **Das korrigiert zwei alte Urteile.** Lauf 2 („Ablesefehler") und die
+> Fixture `lit_from_one_side` („Bedienfehler, 300 kann nicht stimmen") waren
+> dieser Fehler. Per Hash zugeordnet: `lit_from_one_side` = Lauf 3 gs_01,
+> `cluttered_ball` = Lauf 1 gs_05 (lag bei 450, nicht 500), `cluttered_decoy` =
+> Lauf 1 gs_03 (350, nicht 400). Die Testwerte bleiben — sie hingen nie an der
+> Ablesung —, die Begründungen sind korrigiert. Der Kalibrierung vom 08-09 ist
+> nichts passiert: ein Paar zeigt denselben Moment in beiden Kameras, und es
+> trägt keinen eingetippten Wert.
+>
+> **Lauf 5 hatte richtige Bilder und hat die Vorzeichenfrage beantwortet:**
+> ferner Ziellinienball nach rechts → `yaw` +24,5°, also positiv = rechts,
+> nicht invertiert. Nicken −1,19°, Rollen +0,45°, Höhe 112,8 mm — vorläufig,
+> weil Lauf 4 umgeordnet bei unbewegtem Gerät −1,58° / +0,20° / 117,0 mm sagt.
+>
+> **Der Maßstab ist nicht entschieden, 1,029 ± 0,017, und der Grund ist
+> gemessen, nicht vermutet.** In cam2 war der Ball 1,3 Graustufen heller als
+> der Tisch, bei 2,2 Rauschen — von hinten beleuchtet, auf hellem Holz. Die
+> Präzisionsstufe wurde auf **keiner** Aufnahme angenommen: `refine_ball`
+> nimmt die äußerste Kante, und das war in cam1 die Kante des anliegenden
+> Lineals und der Schattenrand. Also rohe Hough-Mitten auf 1-px-Raster:
+> derselbe unberührte Ball ergab 684,9 und 678,1 mm. Die Wiederholstreuung
+> ist Detektor, nicht Platzierung.
+>
+> **Ein Versuch, den Detektor zu umgehen, wurde gemessen und verworfen:**
+> Ballinneres aus cam1 in cam2 wiederfinden, statt zwei Kreise zu fitten —
+> ruhender Ball 0,6 mm, aber über die Positionen Sprünge auf Nachbardellen,
+> insgesamt nicht besser als Hough. Auf einem Bild mit 1,3 Graustufen
+> Kontrast wird keine Detektorvariante fair geprüft. Lauf 6 ändert deshalb
+> die Szene statt den Code: dunkles Tuch, Licht von der Kameraseite, Marken
+> statt eines Lineals am Ball, Kontrastprüfung vor Aufnahme 1.
+>
+> **Nebenbefund für Block 2:** die automatische Belichtung stand im
+> Dämmerlicht bei 40 ms — die Kameras liefen mit ~25 statt 120 Bildern/s,
+> daher 15–19 ms Kameraversatz statt 3. Für einen fliegenden Ball fatal.
+>
+> **Stand:** 189 Tests grün auf dem Jetson. Rohdaten von Lauf 4 und 5
+> datiert unter `sp1_vision/`, nicht in git. Nächster Schritt: Lauf 6, sobald
+> das Tuch da ist.
 
 \---
 

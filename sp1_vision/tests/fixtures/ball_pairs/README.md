@@ -32,10 +32,12 @@ circle fit, seed guards) recovers it; the test pins the rescued position.
 
 Two records set straight on 2026-08-11, both measured rather than assumed:
 
-* the run.json reading of 300 mm for this shot is an **operator error** of
-  the run-2 kind — a ball at ~280 mm would subtend ~65 px, and the per-angle
-  radial-gradient sweep shows nothing circular between 28 and 60 px except
-  the ball at ~38–45 px. The frame is fine for detector work; it carries no
+* the run.json reading of 300 mm does not belong to this frame. It was
+  logged here as an operator error; **it was not one** (corrected
+  2026-09-23). This was the first shot of its session, and until commit
+  `35ca2db` a grab after a pause returned the frame the driver had held
+  back — here the one from when the cameras were opened, before the ball
+  was put at 300. The frame is fine for detector work; it carries no
   absolute depth truth. That is what `measured_300mm/` is for.
 * the rescued height (+80.6 mm) matches the camera height measured by that
   session's attitude probe shots (100.5 mm − 21.3 mm ball radius = 79.2 mm),
@@ -59,15 +61,27 @@ This pair is also the frame where outermost-edge collection without a
 radius guard exploded onto the cast shadow's rim (60.8 → 87.3 px), which is
 why `REFINE_MAX_RADIUS_CHANGE` exists.
 
+Checked against the stale-frame defect on 2026-09-23 and **consistent**:
+it too predates the fix, but its Z of 330 sits where the 2026-09-23 run put
+the 300 mm mark (316–320 mm on a different setup), not 50 mm off as a
+one-shot-late frame would. The ball was evidently in place before the
+cameras were opened.
+
 ## `cluttered_ball/` — the positive control
 
-2026-08-10, reading 500 mm, desk facing a full room: loudspeaker with woofer
-and tweeter, a sphere on top of it, picture frames, plants. The ball must
-come back at roughly **(−37, +83, 475) mm**, and nothing else may.
+2026-08-10 (run 1, `gs_05`), desk facing a full room: loudspeaker with
+woofer and tweeter, a sphere on top of it, picture frames, plants. The ball
+must come back at roughly **(−37, +83, 475) mm**, and nothing else may.
+
+Run 1 recorded this frame against a reading of 500 mm. It was captured with
+the stale-frame defect (fixed in `35ca2db`), so every frame of that run
+shows the ball at the PREVIOUS shot's mark: this one lay at 450, which is
+what 475 corresponds to once the lens-plane offset and ball radius are
+added. The decoy below lay at 350, not the recorded 400.
 
 ## `cluttered_decoy/` — why a small residual proves nothing
 
-2026-08-10, reading 400 mm, same room. This pair once **passed** the 2 px
+2026-08-10 (run 1, `gs_03`), same room. This pair once **passed** the 2 px
 reprojection gate at 1.96 px — with both cameras locked onto the same
 loudspeaker, 1295 mm away and 27 mm *above* the optical axis.
 

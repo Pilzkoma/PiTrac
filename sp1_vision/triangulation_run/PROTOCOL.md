@@ -1,28 +1,41 @@
 # Messlauf Triangulation — Anleitung für das Gerät
 
-Stand 2026-08-10. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `c6673b7`.
-Das Ergebnis dieses Laufs wird in `README.md` daneben festgehalten.
+Stand 2026-09-23. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `35ca2db`
+— **nicht davor**: bis dahin zeigte jede Aufnahme den Ball an der Marke der
+VORIGEN Aufnahme (der Treiber hielt ein Bild zurück). Alle Läufe vor dem
+2026-09-23 sind davon betroffen. Die Ergebnisse stehen in `README.md` daneben.
 
-> **Der erste Lauf am 2026-08-10 ist gescheitert** — der Detektor hat einen
-> Lautsprecher vermessen, siehe Abschnitt 2 Punkt 4. Seine 24 Bildpaare liegen
-> noch in diesem Verzeichnis. **Vor dem zweiten Lauf wegschieben**, sonst zählt
-> das Werkzeug hinter sie weiter:
+> **Vor jedem Lauf das Verzeichnis leeren**, sonst zählt das Werkzeug hinter
+> alte Aufnahmen weiter. Nicht löschen, datiert wegschieben:
 >
 > ```bash
 > cd ~/JetsonLM/sp1_vision
-> mv triangulation_run/cam1 triangulation_run/cam2 triangulation_run/run.json \
->    2026-08-10_cluttered/    # nach mkdir
+> mkdir JJJJ-MM-TT_runN && mv triangulation_run/cam1 triangulation_run/cam2 \
+>    triangulation_run/run.json JJJJ-MM-TT_runN/
 > ```
 
 **Was der Lauf beantworten soll**
 
 1. Stimmt die Triangulation gegen ein unabhängiges Längenmaß — und auf wie viel
-   Prozent genau lässt sich das sagen?
+   Prozent genau lässt sich das sagen? **Offen.** Lauf 5 kam auf
+   1,029 ± 0,017, weil der Ball in seiner Szene kaum Kontrast hatte (s. u.).
 2. Wie sitzt das Gerät gegenüber dem Boden? Nicken, Rollen, Montagehöhe.
-3. Welches Vorzeichen hat `yaw_from_target_line` physikalisch?
+   **Vorläufig** aus Lauf 5.
+3. Welches Vorzeichen hat `yaw_from_target_line` physikalisch? **Beantwortet
+   2026-09-23: positiv = Ziellinie rechts.** Die Aufnahmen 23/24 bleiben
+   trotzdem im Lauf, sie kosten nichts.
 
-Punkt 2 ist sicher. Punkt 1 ist knapp: das Signal ist 0,6 %, das Budget dieses
-Aufbaus liegt bei ~0,45 %. Deshalb hängt einiges an der Sorgfalt unten.
+Punkt 1 ist knapp: das Signal ist 0,6 %, das Budget dieses Aufbaus liegt bei
+~0,45 %. Deshalb hängt einiges an der Sorgfalt unten — und, seit Lauf 5, am
+**Kontrast des Balls**.
+
+> **Warum Lauf 5 den Maßstab nicht entscheiden konnte.** Der Ball lag auf
+> hellem Holz, von hinten beleuchtet, und war in cam2 **1,3 Graustufen**
+> heller als der Tisch daneben, bei 2,2 Graustufen Bildrauschen. Sein Umriss
+> war unsichtbar; Hough-Mitten sprangen um ganze Pixel (derselbe unberührte
+> Ball: 684,9 gegen 678,1 mm), und `refine_ball` griff in cam1 die Kante des
+> anliegenden Lineals und den Schattenrand. Deshalb ab Lauf 6: dunkles Tuch,
+> Licht von der Kameraseite, kein Lineal am Ball — Abschnitt 2 Punkte 5–7.
 
 ---
 
@@ -33,6 +46,9 @@ Aufbaus liegt bei ~0,45 %. Deshalb hängt einiges an der Sorgfalt unten.
 | Golfball | **einer**, weiß, sauber, ohne Markierungen. Keine zweite Kugel im Raum. |
 | Lineal | Zollstock oder Rollmaßband, **mindestens 700 mm**, matt (kein spiegelndes Metall) |
 | Zweites Maß | für die seitlichen Positionen, grob reicht |
+| **Dunkles, mattes Tuch** | groß genug für den ganzen Messbereich, ca. 70 × 60 cm, **flach und straff** — Falten heben den Ball an und verkippen die Ebene |
+| **Lampe** | eine, die hinter oder über dem Gerät steht und auf den Ball scheint |
+| **Klebestreifen** | kurze Stücke zum Markieren der Sollmarken auf dem Tuch |
 | Zettel + Stift | für die Dinge, die das Werkzeug nicht fragt (siehe Abschnitt 6) |
 | SSH-Sitzung | zum Jetson, `ssh -i ~/.ssh/jetsonlm_key brain@192.168.178.194` |
 
@@ -84,6 +100,23 @@ Zeitbedarf: etwa 30–40 Minuten für 24 Aufnahmen.
    Arbeit, die das Werkzeug für dich erledigen muss, und manchmal kann es das
    nicht.
 
+5. **Dunkles Tuch unter den ganzen Messbereich** — neu seit Lauf 5, dort ist
+   der Maßstab daran gescheitert. Ein weißer Ball auf hellem Holz hat keinen
+   Umriss, den eine Kamera finden kann. Das Tuch liegt flach unter **allen**
+   Positionen: Tiefenreihe, seitlich und Ziellinie. Ungleiche Unterlage
+   verkippt die Ebene.
+
+6. **Licht von der Kameraseite.** Die Lampe steht hinter oder über dem Gerät
+   und scheint auf den Ball, nicht von hinten ins Bild. Ein von hinten
+   beleuchteter Ball ist dunkler als das, worauf er liegt — genau das Bild aus
+   Lauf 5. Im Betrieb übernimmt das später der IR-Blitz. **Ab dem Probeschuss
+   das Licht nicht mehr ändern.**
+
+7. **Die Sollmarken aufs Tuch, dann das Lineal weg** — siehe Abschnitt 4. Ein
+   Lineal, das am Ball anliegt, ist für den Umrissfit eine fremde Kante direkt
+   neben dem Ball; in Lauf 5 hat `refine_ball` sie in cam1 für den Ballrand
+   gehalten.
+
 ---
 
 ## 3. Probeschuss — bevor du irgendetwas auslegst
@@ -126,8 +159,20 @@ bleiben.
 | `… solved BEHIND the cameras … check which device is cam1` | Die Kameras sind vertauscht. `camera_paths.py` prüfen, nicht weitermessen. |
 | `NO BALL` trotz sauberem Bild | Dünne, **matte dunkle Unterlage** — aber unter **allen** Positionen, auch den seitlichen und den Ziellinien-Positionen. Ungleiche Unterlage verkippt die Ebene. |
 
-Findet der Probeschuss den Ball, `/tmp/testshot` löschen und weiter. Die
-Belichtungsoption, die funktioniert hat, merkst du dir für den echten Lauf.
+**Kontrastprüfung, bevor irgendetwas ausgelegt wird.** Findet der Probeschuss
+den Ball, prüft Claude per SSH in beiden Bildern den Helligkeitsabstand
+zwischen Ball und Tuch direkt daneben. Ziel: **über 40 Graustufen in beiden
+Kameras.** Lauf 5 hatte 12 (cam1) und 1,3 (cam2) — damit ist der Maßstab
+nicht zu entscheiden, egal wie sorgfältig abgelesen wird. Liegt der Wert
+darunter: Lampe näher oder anders ausrichten, erneut probeschießen.
+
+Achte auch auf `skew`: bei gutem Licht um 3 ms. Werte um 15–19 ms (Lauf 5)
+heißen, die automatische Belichtung ist bei 40 ms angekommen und die Kameras
+laufen nur noch mit ~25 statt 120 Bildern pro Sekunde — ein Zeichen für zu
+wenig Licht.
+
+Dann `/tmp/testshot` löschen und weiter. Die Belichtungsoption, die
+funktioniert hat, merkst du dir für den echten Lauf.
 
 > Die Aufnahme lädt jetzt die Kalibrierung, bevor der erste Schuss fällt —
 > ohne Rig lässt sich nicht prüfen, ob ein Kreis ein Ball ist. Eine kaputte
@@ -137,17 +182,31 @@ Belichtungsoption, die funktioniert hat, merkst du dir für den echten Lauf.
 
 ## 4. Ablesen — die eine Sache, die den Maßstab entscheidet
 
-**Der Ball liegt auf dem BODEN, seitlich am Lineal, an dessen Längskante.
-Niemals auf dem Lineal.**
+**Ab Lauf 6: Marken setzen, Lineal weg, Ball an die Marke.**
 
-> Läge er auf dem Lineal, säße die ganze Tiefenreihe eine Linealdicke höher als
-> die seitlichen Bälle. Die Ebenenanpassung mittelt dann zwischen zwei parallelen
-> Ebenen und verkippt — Nicken und Rollen wären falsch, und nichts in der
-> Ausgabe würde es sagen.
+1. Lineal flach aufs Tuch, Nullende an der Frontfläche.
+2. An jeder Sollmarke (300, 350, … 640) einen kurzen Klebestreifen **quer**
+   aufs Tuch kleben, **etwa 4 cm neben** der Linie, auf der die Bälle liegen
+   werden — nicht unter und nicht direkt neben dem Ball. Die Vorderkante des
+   Streifens liegt genau auf der Marke.
+3. **Lineal wegnehmen.** Es bleibt für die ganze Serie weg.
+4. Ball so hinlegen, dass seine **nahe Kante** (die dem Gerät zugewandte
+   Seite) auf Höhe der Streifenvorderkante liegt. Senkrecht von oben
+   anpeilen; ein Geodreieck quer über Streifen und Ball hilft.
 
-**Abgelesen wird die NAHE Kante des Balls** — die dem Gerät zugewandte Seite —
-dort, wo sie auf das Lineal trifft. Immer dieselbe Kante, immer dieselbe
-Linealseite, die ganze Serie lang.
+Vier Zentimeter Abstand, weil `refine_ball` Kanten bis etwa einen halben
+Ballradius außerhalb des Balls noch für den Rand halten kann — ein Streifen
+direkt am Ball wäre wieder das Lineal aus Lauf 5.
+
+**Der Ball liegt auf dem Tuch, niemals auf einem Streifen oder dem Lineal.**
+
+> Läge er erhöht, säße die ganze Tiefenreihe eine Streifen- oder Linealdicke
+> höher als die seitlichen Bälle. Die Ebenenanpassung mittelt dann zwischen
+> zwei parallelen Ebenen und verkippt — Nicken und Rollen wären falsch, und
+> nichts in der Ausgabe würde es sagen.
+
+**Maßgeblich ist die NAHE Kante des Balls.** Immer dieselbe Kante, immer
+dieselbe Seite der Streifen, die ganze Serie lang.
 
 Warum die Kante und nicht die Mitte: eine Kante ist scharf und lässt sich von
 oben anpeilen, eine Mitte ist eine Schätzung. Der eine Ballradius, den die
@@ -159,16 +218,12 @@ Beim Ablesen **senkrecht von oben schauen**, nicht schräg. Schräg kostet dich
 leicht 3 mm, und 3 mm auf einer 340-mm-Spanne sind 0,9 % — das Anderthalbfache
 des gesuchten Signals.
 
-**Mit einem Zollstock ist die Marke genauer als die Ablesung.** Ein Zollstock
-lässt sich nicht auf einen halben Millimeter ablesen, ein Ball aber recht gut
-an eine angezeichnete Kante legen. Also: sorgfältig an die Sollmarke legen und
-die **runde Zahl eintippen**. Der Platzierungsfehler landet dann im Residuum
-statt in der x-Achse, und der Standardfehler der Anpassung weist ihn aus,
-statt ihn zu verstecken.
-
-(Hättest du ein Maß, das sich auf einen halben Millimeter ablesen lässt, wäre
-das Umgekehrte besser — Ball hinlegen, ablesen, den tatsächlichen Wert
-eintippen. Beides ist zulässig; nur nicht mitten in der Serie wechseln.)
+**Die Marke ist genauer als eine Ablesung.** Einen Ball an eine Kante zu
+legen gelingt besser, als einen Zollstock auf einen halben Millimeter
+abzulesen. Also: sorgfältig an die Marke legen und die **runde Zahl
+eintippen**. Der Platzierungsfehler landet dann im Residuum statt in der
+x-Achse, und der Standardfehler der Anpassung weist ihn aus, statt ihn zu
+verstecken.
 
 ---
 
@@ -183,6 +238,16 @@ python3 -m sp1_vision.cli_triangulate --shots 24 --out sp1_vision/triangulation_
 
 Bricht etwas ab: einfach neu aufrufen. Er zählt hinter das Vorhandene weiter
 und schreibt `run.json` nach jeder Aufnahme.
+
+**Davor und danach je ein Leerbild** — dieselbe Szene ohne Ball, Wert `0`,
+Serie `d`; die Meldung `NO BALL` ist hier richtig. Es ist Rohmaterial, um
+einen Detektor, der gegen den leeren Hintergrund vergleicht, später an
+echten Bildern zu prüfen, und zeigt nebenbei, ob sich das Licht während des
+Laufs verändert hat:
+
+```bash
+python3 -m sp1_vision.cli_triangulate --shots 1 --out sp1_vision/triangulation_run_empty
+```
 
 ### Wie eine einzelne Aufnahme abläuft
 
@@ -210,15 +275,15 @@ mit dem Grund; die Tabelle in Abschnitt 3 sagt, was zu tun ist.
 
 Die praktische Reihenfolge am Boden ist deshalb:
 
-1. Ball hinlegen
-2. ablesen, Zahl merken
-3. zur Tastatur, Zahl tippen, Serienbuchstabe tippen
-4. **prüfen, dass du nicht im Bildfeld stehst**, dann Enter
-5. die Rückmeldezeile lesen
+1. Ball an die Marke legen
+2. zur Tastatur, Markenwert tippen, Serienbuchstabe tippen
+3. **prüfen, dass du nicht im Bildfeld stehst**, dann Enter
+4. die Rückmeldezeile lesen
 
 Der dritte Prompt heißt zwar „place the ball" — zu dem Zeitpunkt liegt er
 längst. Was er wirklich meint: **jetzt ist niemand mehr im Bild und nichts
-bewegt sich.**
+bewegt sich.** Das Bild entsteht erst NACH diesem Enter (seit `35ca2db`;
+davor zeigte es die vorige Position).
 
 > **Stell Laptop oder Tastatur seitlich oder hinter das Gerät**, außerhalb des
 > Blickfelds der Kameras. Sonst stehst du bei jedem Enter im Bild und musst für
@@ -232,10 +297,10 @@ dann zurück zu Abschnitt 2 Punkt 4.
 
 ### 5.1 Tiefenreihe, erster Durchgang — Aufnahmen 1 bis 8
 
-Lineal liegt. Ball an die Linealkante, an die Sollmarke, nahe Kante ablesen,
-Wert eintippen, Serie `d`.
+Marken kleben, Lineal ist weg. Ball mit der nahen Kante an die Marke,
+Markenwert eintippen, Serie `d`.
 
-| # | Sollmarke am Lineal | Serie | Anmerkung |
+| # | Marke | Serie | Anmerkung |
 |---|---|---|---|
 | 1 | 300 mm | `d` | nächste Position |
 | 2 | 350 mm | `d` | |
@@ -251,9 +316,9 @@ Die Sollmarken sind so gewählt, dass die tatsächliche Tiefe zur Kamera etwa
 
 ### 5.2 Tiefenreihe, zweiter Durchgang — Aufnahmen 9 bis 16
 
-**Dieselben acht Sollmarken noch einmal, Ball jedes Mal neu hingelegt und neu
-abgelesen.** Nicht die Werte von oben abtippen — neu ablesen, auch wenn `498.0`
-statt `500.0` herauskommt. Genau diese Streuung ist die Information.
+**Dieselben acht Marken noch einmal, Ball jedes Mal neu hingelegt.** Den Ball
+zwischendurch wirklich wegnehmen und neu an die Marke legen — genau diese
+Streuung ist die Information.
 
 | # | Sollmarke | Serie |
 |---|---|---|
@@ -285,7 +350,7 @@ die reine Wiederholbarkeit von Sensor und Detektor. Am fernen Ende, weil dort
 die Tiefenauflösung am schlechtesten ist — 6,9 mm pro Pixel Disparitätsfehler.
 Die Auswertung druckt daraus die Zeile `repeat spread`.
 
-**Jetzt das Lineal wegnehmen.**
+(Das Lineal ist schon seit dem Markenkleben weg.)
 
 ### 5.4 Seitliche Positionen — Aufnahmen 19 bis 22
 
@@ -300,8 +365,13 @@ Alle vier auf den Boden, geschätzte Werte reichen, Serie `s`:
 |---|---|---|---|---|
 | 19 | 440 mm | **190 mm links** | `s` | `440` genügt |
 | 20 | 440 mm | **190 mm rechts** | `s` | `440` genügt |
-| 21 | 590 mm | **260 mm links** | `s` | `590` genügt |
-| 22 | 590 mm | **260 mm rechts** | `s` | `590` genügt |
+| 21 | 590 mm | **~230 mm links** | `s` | `590` genügt |
+| 22 | 590 mm | **~230 mm rechts** | `s` | `590` genügt |
+
+230 statt der Obergrenze 254 mm: dort ist der Ball schon am Rand, und ein
+Gegenstand, der den Platz begrenzt, liegt direkt daneben. Links und rechts
+möglichst gleich weit; `conditioning` in der Auswertung sagt, ob es reicht
+(Lauf 5: 0,513 bei 213 mm rechts).
 
 Links und rechts von dir aus gesehen, wenn du hinter dem Gerät stehst und über
 es hinweg nach vorn schaust.
@@ -329,10 +399,12 @@ die Vorzeichenfrage, die seit dem Review offen ist.
 Rechts, wenn du **hinter dem Gerät** stehst und nach vorn schaust. Miss die
 100 mm einigermaßen ordentlich und **schreib die Richtung auf den Zettel.**
 
-Erwartet wird `yaw ≈ +19,7°` (das ist arctan(100/280)). Kommt **−19,7°**
-heraus, ist die Vorzeichenkonvention von `yaw_from_target_line` invertiert —
-und dann ist das die Antwort, nicht ein Fehler. Der Betrag muss stimmen; nur
-das Vorzeichen ist die offene Frage.
+Erwartet wird `yaw ≈ +19,7°` (das ist arctan(100/280)), plus die Schräglage
+des Lineals. **Das Vorzeichen ist seit 2026-09-23 beantwortet:** Lauf 5 legte
+den fernen Ball nach rechts und erhielt +24,5° — positiv heißt Ziellinie
+rechts, die Konvention ist nicht invertiert. (Der Betrag lag höher, weil der
+Ball 112 statt 100 mm neben der Tiefenlinie lag.) Die Aufnahmen bleiben im
+Lauf, weil Gieren die heutige Aufstellung beschreibt und jedes Mal neu ist.
 
 > Der Versatz ist bewusst groß. Bei 10 mm misst du Rauschen statt Richtung.
 

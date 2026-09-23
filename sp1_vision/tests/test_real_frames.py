@@ -93,11 +93,11 @@ class RealFrameTest(unittest.TestCase):
         # value is supported independently: its height above the surface
         # matches the camera height measured with the attitude probe shots
         # of the same session (100.5 mm - 21.3 mm ball radius = 79.2
-        # against +80.6 here), and the run's tape reading (300) cannot be
-        # reconciled with EITHER value - a ball at 280 mm would subtend
-        # ~65 px and nothing in the frame between 28 and 60 px supports
-        # that - so the reading is an operator error of the kind run 2
-        # already logged once.
+        # against +80.6 here). The run's tape reading (300) belongs to a
+        # different frame: this was the first shot of its session, and until
+        # 2026-09-23 the capture returned the frame the driver had held since
+        # the cameras were opened, before the ball was put at 300. It was
+        # once logged here as an operator error; it was not one.
         pair, reason = self._find("lit_from_one_side")
         self.assertIsNotNone(pair, reason)
         np.testing.assert_allclose(pair.xyz_m * 1000.0,

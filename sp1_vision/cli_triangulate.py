@@ -1,68 +1,19 @@
 #!/usr/bin/env python3
 """Capture and analyse a triangulation measurement series.
 
-Capture:  python3 -m sp1_vision.cli_triangulate --shots 12 --out RUNDIR
+Capture:  python3 -m sp1_vision.cli_triangulate --shots 24 --out RUNDIR
 Analyse:  python3 -m sp1_vision.cli_triangulate --analyse RUNDIR
 
-The series measures three things at once, which is why it is one series and
-not three:
+The layout, the setup and how to read the rule are in
+sp1_vision/triangulation_run/PROTOCOL.md - follow that, not memory.
 
-  * whether triangulation agrees with a tape measure at all;
-  * how the device sits against the floor, which nothing has ever measured;
-  * which baseline is right, 78.28 mm or the 78.749 in the extrinsics file.
+Each shot: type the reading, type the series (d / s / t), make sure nobody
+is in frame, press Enter. The frame is taken AFTER that Enter. Check the
+line that comes back: Z a little beyond the mark, Y positive, size small.
 
-The suggested layout, 12 shots:
-
-  depth   6 positions along a straight line running directly away from the
-          unit, tape-measured, e.g. 350 / 420 / 490 / 560 / 630 / 700 mm.
-          Consecutive gaps are known precisely, which is what settles the
-          baseline - measuring DIFFERENCES isolates scale from any error in
-          where the lens plane sits.
-  spread  4 positions off to the sides at assorted distances, AT LEAST 2.
-          They do nothing for scale and everything for the plane: without
-          lateral spread across the image width the floor fit is
-          undetermined however small its residual, and pitch, roll AND yaw
-          are all lost with it. Shot count does not substitute - six depth
-          positions are one line no matter how many of them there are.
-  target  2 positions along the intended target line. The floor plane cannot
-          give yaw - it is rotationally symmetric about its own normal - and
-          this pair is the only thing that can. It cannot be added afterwards
-          without repeating the run.
-
-WHERE THE BALL MAY GO: depth 340-700 mm, and no further sideways than 0.43
-of the depth. Not near AND wide at once - the lens distortion is not
-calibrated out there, and an uncalibrated corner reads as a real
-displacement.
-
-HOW TO READ THE RULE, since the analysis depends on it. Lay a rule flat on
-the floor, its end against the unit's front face, pointing away. Put the ball
-on the FLOOR beside it, touching its long edge, always the same side. Read
-the rule where the ball's NEAR edge - the side facing the unit - meets it.
-
-The ball must not sit ON the rule. It would then ride a rule's thickness
-above every spread and target ball, and the floor-plane fit would tilt to
-split the difference between two parallel planes, taking pitch and roll with
-it. All of them on the floor, or the attitude is wrong and nothing says so.
-
-Reading an edge rather than the centre is deliberate: an edge is a sharp
-thing to sight down on, a centre is a judgement, and the ball radius the
-edge costs is a CONSTANT that lands in the fit's intercept. So does the
-rule's zero, wherever it sits. The intercept is reported rather than
-cancelled - it is this project's only estimate of how deep the optical
-centre sits behind the front face.
-
-Which DIRECTION the rule points matters more, but the run measures that too:
-the balls themselves give the angle between the rule and the optical axis,
-and the analysis prints the raw scale and the angle-corrected one side by
-side. Lay the rule roughly square to the front face and the two agree to
-hundredths of a percent.
-
-REPEATS ARE FREE PRECISION, with one condition: RE-PLACE THE BALL between
-them. Three shots at one mark without touching the ball average the sensor
-noise away and leave the detector's sub-pixel bias exactly where it was -
-that shrinks the printed uncertainty without shrinking the error, which is
-worse than not repeating at all. Type the same tape reading for each; the
-fit uses them all and reports their spread separately.
+The ball lies on the surface, never on the rule; read its NEAR edge.
+Re-place it between repeats - repeats without touching it share the same
+detector bias and only shrink the printed uncertainty, not the error.
 """
 
 import argparse
