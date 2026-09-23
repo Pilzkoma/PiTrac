@@ -52,6 +52,15 @@ EXPOSURE_CTL_TIMEOUT_S = 5.0
 # failed to start - would otherwise hang the grab, and with it the lock.
 BARRIER_TIMEOUT_S = 5.0
 
+# Frames discarded before a grab, so that what comes back was taken after the
+# grab was asked for. The driver holds a frame back despite BUFFERSIZE 1:
+# after a pause the first read returns the frame from just after the PREVIOUS
+# read. That recorded the whole 2026-09-23 measurement run one shot late,
+# every ball at the mark before the one typed in. Measured at exactly one
+# held frame on 2026-09-23 (exposure switched between grabs); the second is
+# a spare, at one frame period, 8 ms.
+STALE_FRAMES = 2
+
 
 def set_manual_exposure(device, exposure_units):
     """Force manual exposure so a capture series is consistently lit.
@@ -114,11 +123,17 @@ class CameraPair:
         frames, _ = self.grab_with_skew()
         return frames
 
-    def grab_with_skew(self):
+    def grab_with_skew(self, fresh=True):
         """Return ({camera_number: frame}, skew_seconds).
 
         Skew is the spread between the two read completions - a health
         measure for how simultaneous the pair really was.
+
+        fresh discards the frames the driver held back (STALE_FRAMES), so the
+        pair shows the scene as it is when the grab is made, not as it was at
+        the previous one. Only a caller reading back to back - a live stream -
+        should turn it off: its held frame is at most one grab old, and the
+        discard would only cost it frame rate.
 
         The calling thread is one of the barrier parties, so only one thread
         is spawned per grab rather than two. The dashboard grabs this around
@@ -139,6 +154,11 @@ class CameraPair:
 
         def read_one(n, cap):
             try:
+                # Before the barrier, so both cameras drain in parallel and
+                # the barrier still lines up the reads that count.
+                if fresh:
+                    for _ in range(STALE_FRAMES):
+                        cap.grab()
                 barrier.wait()
                 ok, frame = cap.read()
                 stamps[n] = time.perf_counter()
@@ -236,17 +256,18 @@ class CalibrationSession:
                 self._watchdog = threading.Thread(target=self._watch, daemon=True)
                 self._watchdog.start()
 
-    def grab(self):
+    def grab(self, fresh=True):
         """Return ({camera_number: frame}, skew_seconds), or (None, None).
 
         (None, None) means the session is closed. Callers decide whether that
         is an error or simply means calibration is not in progress.
+        fresh is CameraPair.grab_with_skew's.
         """
         with self._lock:
             if self._pair is None:
                 return None, None
             self._last_use = time.monotonic()
-            return self._pair.grab_with_skew()
+            return self._pair.grab_with_skew(fresh=fresh)
 
     def release(self):
         """Hand the cameras back. Idempotent.

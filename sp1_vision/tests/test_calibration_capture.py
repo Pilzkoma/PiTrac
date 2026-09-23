@@ -41,9 +41,73 @@ class CameraPairTest(unittest.TestCase):
         # differ somewhere. Identical frames mean a stale buffer.
         self.assertFalse((first[1] == second[1]).all())
 
+    def test_a_grab_after_a_pause_shows_the_scene_as_it_is_now(self):
+        # The 2026-09-23 measurement run recorded every ball one shot late:
+        # after a pause the first read returned the frame the driver had held
+        # since the previous read, BUFFERSIZE 1 notwithstanding. The scene is
+        # changed here by exposure rather than by moving anything, so the
+        # test needs no operator: dark, pause, switch to bright, pause, grab.
+        devices = list(self.pair._devices.values())
+        try:
+            for dev in devices:
+                calibration_capture.set_manual_exposure(dev, 20)
+            time.sleep(1.0)
+            self.pair.grab()
+            dark = self.pair.grab()
+            time.sleep(1.0)
+            for dev in devices:
+                calibration_capture.set_manual_exposure(dev, 400)
+            time.sleep(1.0)
+            now = self.pair.grab()
+        finally:
+            for dev in devices:
+                calibration_capture.set_manual_exposure(dev, None)
+        for n in (1, 2):
+            self.assertGreater(
+                now[n].mean(), 1.4 * dark[n].mean(),
+                "cam{} returned a frame from before the scene changed".format(n))
+
     def test_release_is_idempotent(self):
         self.pair.release()
         self.pair.release()
+
+
+class _HeldBackCamera:
+    """A capture whose driver holds one frame back, as the OV9281s do.
+
+    Frames come out in order; the first one is the frame the driver kept from
+    before the pause. grab() dequeues without decoding, read() dequeues and
+    returns - the two calls cv2.VideoCapture offers.
+    """
+
+    def __init__(self):
+        self.frames = ["held back"] + ["live {}".format(i) for i in range(10)]
+
+    def grab(self):
+        self.frames.pop(0)
+        return True
+
+    def read(self):
+        return True, self.frames.pop(0)
+
+
+class HeldBackFrameTest(unittest.TestCase):
+    """The stale-frame logic without the hardware, so it runs anywhere."""
+
+    def test_a_grab_never_returns_the_frame_held_from_before_it(self):
+        pair = calibration_capture.CameraPair()
+        pair._caps = {1: _HeldBackCamera(), 2: _HeldBackCamera()}
+        frames, _ = pair.grab_with_skew()
+        self.assertNotEqual(frames[1], "held back")
+        self.assertNotEqual(frames[2], "held back")
+
+    def test_a_live_stream_may_opt_out_and_takes_the_next_frame(self):
+        # A stream reading back to back never lets a frame go stale, and
+        # discarding there would only cost it frame rate.
+        pair = calibration_capture.CameraPair()
+        pair._caps = {1: _HeldBackCamera(), 2: _HeldBackCamera()}
+        frames, _ = pair.grab_with_skew(fresh=False)
+        self.assertEqual(frames[1], "held back")
 
 
 class CalibrationSessionTest(unittest.TestCase):

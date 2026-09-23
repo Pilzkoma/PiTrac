@@ -291,7 +291,9 @@ def calibration_stream(camera_number):
     def frames():
         calibration_capture.SESSION.ensure_open()
         while True:
-            pair, _ = calibration_capture.SESSION.grab()
+            # Not fresh: reading back to back, the held frame is one grab
+            # old at most, and discarding would only cost the stream rate.
+            pair, _ = calibration_capture.SESSION.grab(fresh=False)
             if pair is None:
                 # Released - the user pressed the button, or it idled out.
                 # Stop rather than reopening the cameras behind their back.
