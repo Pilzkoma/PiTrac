@@ -21,14 +21,15 @@
     "gs_22.png",
     "gs_23.png"
   ],
-  "square_mm": 24.0,
+  "square_mm": 24.27,
+  "square_mm_note": "Measured 2026-09-24 on the printed board with a ruler: 194.5 mm over 8 squares (24.31) and 121.0 mm over 5 (24.20), 315.5 mm over 13 = 24.27 mm. The solve ran with 24.0; the square size scales ONLY the translation, so translation_mm and baseline_mm were multiplied by 24.27/24.0 = 1.01125. Rotation, rms and the intrinsics in golf_sim_config.json do not depend on it.",
   "rms_px": 0.8458383644738413,
-  "baseline_mm": 78.74922387959465,
+  "baseline_mm": 79.6351526482401,
   "cad_baseline_mm": 80.0,
   "translation_mm": [
-    78.71040445887814,
-    -0.27860070291121036,
-    -2.4565978927518395
+    79.59589650904053,
+    -0.2817349608189615,
+    -2.4842346190452975
   ],
   "rotation_matrix": [
     [

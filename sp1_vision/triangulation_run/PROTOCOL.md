@@ -1,5 +1,10 @@
 # Messlauf Triangulation — Anleitung für das Gerät
 
+> **Abgeschlossen am 2026-09-24.** Die Maßstabsfrage, für die diese Anleitung
+> geschrieben wurde, ist mit einem Lineal am Kalibrierbrett beantwortet
+> (`calibration_images/README.md`); Lage und Höhe liefert Lauf 6. Die
+> Anleitung bleibt für den Fall, dass ein ruhender Lauf noch einmal nötig wird.
+
 Stand 2026-09-24. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `35ca2db`
 — **nicht davor**: bis dahin zeigte jede Aufnahme den Ball an der Marke der
 VORIGEN Aufnahme (der Treiber hielt ein Bild zurück). Alle Läufe vor dem

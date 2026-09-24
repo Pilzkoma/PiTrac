@@ -56,7 +56,7 @@ Two things to read from it, and one not to:
 | | |
 |---|---|
 | Board | `Software/CalibrateCameraDistortions/checkerboard.png`, 9×6 inner corners |
-| **Square size** | **24 mm, measured with a ruler** — pass `--square-mm 24.0` |
+| **Square size** | **24.27 mm** — measured 2026-09-24 over 8 squares (194.5 mm) and 5 (121.0 mm). Pass `--square-mm 24.27`. The 24 mm used until then came from reading single squares and was 1.1 % short — see below |
 | Distance | **30–90 cm**, spread across the set |
 | Board | **standing, propped or leaned — not hand-held** |
 | Tilt | 20–45°, varied in direction |
@@ -115,7 +115,7 @@ python3 CameraCalibration.py --images $SET/cam2 --label 2 --save-npz /tmp/cam2.n
     --undistort-check /tmp/undistort_cam2.png
 
 python3 StereoCalibration.py --cam1-npz /tmp/cam1.npz --cam2-npz /tmp/cam2.npz \
-    --cam1-images $SET/cam1 --cam2-images $SET/cam2 --square-mm 24.0 \
+    --cam1-images $SET/cam1 --cam2-images $SET/cam2 --square-mm 24.27 \
     --save-json ../../sp1_vision/calibration_results/stereo_extrinsics.json
 ```
 
@@ -170,6 +170,21 @@ dimension it had no reason to move in.
 **78.3 mm against the CAD's 80.00 is real, and is print shrinkage.** −2.1 %,
 ordinary for the part. The archive's 0.2 % agreement with the CAD was luck: it
 came from a 35–55 cm set, the narrow-depth condition that produces 81 mm here.
+
+> **Correction, 2026-09-24: mostly not shrinkage — the square size.** Every
+> baseline in this file was solved with 24.0 mm squares. Measured over many
+> squares at once, the printed board has **24.27 mm** (194.5 mm over 8,
+> 121.0 mm over 5; the two directions agree to within reading error). The
+> square size scales the stereo translation and nothing else — rotation,
+> residual and every intrinsic are independent of it — so
+> `stereo_extrinsics.json` was corrected by 24.27 / 24.0 = 1.01125 rather than
+> re-solved: its baseline went from 78.75 to **79.64 mm**, −0.5 % from the
+> CAD instead of −1.6 %. The figures in the tables above and below are the
+> uncorrected ones, kept as recorded; multiply by 1.01125.
+>
+> This was the scale question the triangulation runs 4–6 were chasing. A
+> ruler across the whole board answered it in two minutes; a ruler across
+> one square cannot, because half a millimetre on 24 mm is 2 %.
 
 Stability, to say how far these digits can be trusted — halves, odds, evens,
 with and without the six lower-frame shots:

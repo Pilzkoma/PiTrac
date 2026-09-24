@@ -7,18 +7,23 @@ sondern datiert unter `sp1_vision/` auf dem Jetson und auf dem Windows-Rechner.
 
 | Frage | Antwort | Belastbarkeit |
 |---|---|---|
-| Maßstab gegen das Maßband | — | **offen.** Lauf 5: Kontrast zu gering. Lauf 6: keine Marken gesetzt, Ball nach Augenmaß um „5 cm" verschoben — 0,961 misst die Schrittlänge, nicht die Geometrie |
-| Nicken / Rollen gegen den **Boden** | −1,56° / −0,50° | Lauf 6, `--refiner contrast`, Ebene 2,1 mm rms |
-| Höhe cam1 über dem Boden | 116,6 mm (Annahme 115) | Lauf 6 |
+| Maßstab | **+1,1 %, korrigiert** | **entschieden 2026-09-24 — ohne Messlauf.** Das Kalibrierbrett hat 24,27 mm statt 24,0 mm Felder (Lineal über 8 und 5 Felder); die Basislinie ist jetzt 79,64 mm. Siehe `calibration_images/README.md` |
+| Nicken / Rollen gegen den **Boden** | −1,55° / −0,50° | Lauf 6, `--refiner contrast`, Ebene 2,1 mm rms |
+| Höhe cam1 über dem Boden | 117,5 mm (Annahme 115) | Lauf 6, mit korrigiertem Maßstab |
 | Vorzeichen `yaw_from_target_line` | **positiv = Ziellinie rechts** | entschieden (Lauf 5) |
+
+**Die Messläufe mit ruhendem Ball sind abgeschlossen.** Die Frage, die sie
+beantworten sollten, hing an einer einzigen Zahl — der Feldgröße des
+Kalibrierbretts —, und die ließ sich direkt messen. Ein Lauf 7 wurde bewusst
+nicht gemacht: Raumlicht und lange Belichtung sind nicht die Bedingungen, unter
+denen das Gerät arbeitet. Weiter geht es mit Aufnahmen unter dem IR-Blitz.
 
 Lauf 6 stand auf dem Boden, Läufe 4/5 auf der Schreibtischplatte — ein
 anderes Rollen ist deshalb kein Widerspruch. Nicken und Höhe von Lauf 6
 treffen Lauf 4 (−1,58°, 117,0 mm); Lauf 5 (−1,19°, 112,8 mm) war der Ausreißer,
 und seine Hough-Mitten auf kontrastloser Szene sind die naheliegende Erklärung.
-
-**Für den Maßstab fehlt ein Lauf mit geklebten Marken** (PROTOCOL.md
-Abschnitt 4). Szene, Licht und Auswertung aus Lauf 6 können bleiben.
+(Die Höhen der Läufe 4 und 5 stammen noch vom alten Maßstab; mit 1,01125
+multipliziert: 118,3 und 114,1 mm.)
 
 ## Die Läufe
 

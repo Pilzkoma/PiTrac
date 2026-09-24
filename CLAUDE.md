@@ -17,8 +17,9 @@ hardware, they get changed.
   by screwing the lens). 1280x800 @ 120 FPS MJPG measured. The cameras USB-autosuspend
   when idle (`control=auto`, 2 s) and the dashboard hands the V4L2 nodes back after
   120 s idle — they are not powered up between uses.
-- Cameras mounted **side by side, measured baseline 78.28 mm** (CAD says 80.00; the
-  −2.1 % is print shrinkage), optical axes parallel to within pitch −0.92°, yaw +0.43°,
+- Cameras mounted **side by side, calibrated baseline 79.64 mm** (CAD says 80.00;
+  the −1.6 % once blamed on print shrinkage was mostly a 24.0 mm square size for a
+  board printed at 24.27 — see Calibration), optical axes parallel to within pitch −0.92°, yaw +0.43°,
   roll −0.85°. **The mount is no longer adjustable:** the 3-point spring/screw kinematic
   mount was stripped of its springs on 2026-08-08 and the plate bolted down solid. That
   rebuild *inverted* pitch and roll rather than nulling them, and only improved yaw;
@@ -99,6 +100,13 @@ cy 420.05 / 421.09, sensor 3.840 x 2.400 mm), extrinsics in
 `sp1_vision/calibration_results/stereo_extrinsics.json`. Verified reaching the
 C++ in a live trace run.
 
+**Square size corrected 2026-09-24:** the board's squares are **24.27 mm**
+(ruler over 8 and 5 squares), not the 24.0 the solve used. The square size
+scales the stereo translation and nothing else, so `translation_mm` and
+`baseline_mm` were multiplied by 1.01125 in place (baseline 78.75 → 79.64 mm);
+rotation and intrinsics are untouched and still from the same solve. Any
+re-solve must pass `--square-mm 24.27`.
+
 Two rules that cost a session to learn:
 - **Intrinsics and extrinsics must come from the same solve.** `CALIB_FIX_INTRINSIC`
   makes the stereo step absorb whatever error the camera matrices carry into R and T,
@@ -124,18 +132,19 @@ default. Test for staleness by changing exposure between grabs, not by comparing
 frames of a static scene.
 
 ## Current task
-0. **Measurement run 7** per `sp1_vision/triangulation_run/PROTOCOL.md`, for the
-   scale alone. Run 6 (2026-09-24) measured the attitude against the floor
-   (pitch −1.56°, roll −0.50°, cam1 116.6 mm up) but not the scale: the operator
-   set **no marks** and moved the ball "5 cm" by eye, so its 0.961 is step length.
-   Make sure the tape strips are actually laid before shot 1.
-   Run a contrast check on the probe shot first (>40 grey levels in both cameras;
-   script `contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`).
-   Black cloth is light grey in the IR (the run-6 towel read ~115); on a bright
-   surround `refine_ball`'s brightness-scaled Canny loses every ball beyond
-   ~550 mm, so analyse with `--analyse ... --refiner contrast`. Never mix
-   refiners within a run — a per-shot fallback moved the scale 0.961 → 0.931.
-   Results so far: `sp1_vision/triangulation_run/README.md`.
+0. **The ambient-lit measurement runs are closed.** The scale they chased was
+   settled with a ruler on the calibration board (see Calibration). Run 6
+   (2026-09-24, corrected scale) gives the attitude against the floor: pitch
+   −1.55°, roll −0.50°, cam1 117.5 mm up. Run 7 was dropped on purpose: the
+   owner found the static ambient-lit protocol needlessly complicated, and it
+   tests conditions the device never works in. **Next is the IR strobe** —
+   real strobe-lit frames are where detector work pays off, and the only
+   honest test of garage conditions (direct sun is a known open question for
+   any 850 nm system). If a static run is ever needed again: contrast check
+   first (`contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`),
+   and on a surround brighter than ~90 grey levels analyse with
+   `--refiner contrast`; never mix refiners within a run.
+   Results: `sp1_vision/triangulation_run/README.md`.
 
 Next SP1 items, in this order:
 1. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
@@ -155,11 +164,11 @@ Next SP1 items, in this order:
      so they are the ones that actually matter.
    - `kCamera2OffsetFromCamera1OriginMeters` = `[0.00, -0.19, 0.0]`, added at
      `gs_camera.cpp:700-703` and `lm_main.cpp:865`. This is PiTrac's **vertical** 19 cm
-     camera stacking. Ours sit side by side at 78.28 mm, so until this is changed the
+     camera stacking. Ours sit side by side at 79.64 mm, so until this is changed the
      delta path carries a 19 cm offset that does not exist. Note the axis permutation
      at 701-703: `position_deltas_ball_perspective_` takes offset `[2],[1],[0]`.
 2. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
-   still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.55 mm
+   still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.49 mm
    of depth per pixel of disparity error (~1.8 mm at half-pixel matching), which is
    the largest accuracy gain available.
 3. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false.
