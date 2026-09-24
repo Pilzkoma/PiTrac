@@ -132,7 +132,15 @@ default. Test for staleness by changing exposure between grabs, not by comparing
 frames of a static scene.
 
 ## Current task
-0. **The ambient-lit measurement runs are closed.** The scale they chased was
+0. **Next session opens with the strobe on the perfboard.** The owner is
+   soldering the 2026-05-12-tested circuit onto a perfboard (wire list in the
+   LOGBOOK entry of 2026-09-24) and expects it built when he returns. Start
+   with `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` (flashes
+   visible through a phone camera, PSU ammeter twitches), then the first
+   strobe-lit captures. If the bypass test fails, check the wiring against
+   that list before touching any software.
+
+   **The ambient-lit measurement runs are closed.** The scale they chased was
    settled with a ruler on the calibration board (see Calibration). Run 6
    (2026-09-24, corrected scale) gives the attitude against the floor: pitch
    −1.55°, roll −0.50°, cam1 117.5 mm up. Run 7 was dropped on purpose: the

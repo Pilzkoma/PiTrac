@@ -1676,6 +1676,45 @@ PiTrac's key techniques:
 > datiert unter `sp1_vision/`, nicht in git. Nächster Schritt: Lauf 6, sobald
 > das Tuch da ist.
 
+**2026-09-24 — Das Tuch war hell, der Maßstab stand auf dem Brett, der Blitz kommt auf die Platine.**
+
+> **Lauf 6** (schwarzes Handtuch, Lampe seitlich): Kontrast +66 / +70, aber
+> das Handtuch ist im nahen Infrarot hellgrau (~115). `refine_ball` setzt
+> seine Canny-Schwellen aus der Helligkeit (≈ 75/150) — ein Ball bei 650 mm
+> hat ≈ 50 Randkante, also verlor die Verfeinerung jede Aufnahme ab 550 mm.
+> Neu: `refine_ball_by_contrast` und `cli_triangulate --analyse … --refiner
+> contrast` (eine Methode für den ganzen Lauf; ein Rückfall pro Aufnahme
+> wurde gemessen und verworfen, er verschob den Maßstab 0,961 → 0,931).
+> Residuum der Tiefenreihe 13,4 → 4,4 mm. Ohne Marken gemessen, deshalb kein
+> Maßstab aus diesem Lauf. (`7cf1097`)
+>
+> **Der Maßstab kam vom Lineal, nicht vom Messlauf.** Die Felder des
+> Kalibrierbretts sind 24,27 mm (194,5 mm über 8, 121,0 mm über 5), nicht
+> 24,0. T in `stereo_extrinsics.json` mit 1,01125 skaliert, Basislinie
+> 78,75 → **79,64 mm** (CAD 80,00). Der „Druckschwund" war größtenteils das.
+> Lage gegen den Boden: Nicken −1,55°, Rollen −0,50°, cam1 117,5 mm hoch.
+> (`e61b0fd`)
+>
+> **Die Messläufe mit ruhendem Ball sind abgeschlossen.** Der Besitzer fand
+> das Protokoll (Tuch, Lampe, Streifen, Kontrastprüfung) unnötig kompliziert,
+> und es prüft Bedingungen, unter denen das Gerät nie arbeitet: Raumlicht,
+> lange Belichtung. Unter dem Blitz sind wenige 100 µs Belichtung und ein
+> heller Ball nah an den LEDs zu erwarten — dort lohnt sich Detektorarbeit.
+>
+> **Nebenbei:** Python 3.14 + numpy + OpenCV 5.0 auf dem Windows-Rechner
+> (`python`, nicht `python3` in der Git-Bash). Tests bleiben auf dem Jetson.
+>
+> **Nächste Sitzung — beginnt mit dem Blitz auf der Lochrasterplatine.** Der
+> Besitzer lötet bis dahin die am 2026-05-12 getestete Schaltung fest auf:
+> Jetson Pin 29 → Teensy Pin 2; Jetson Pin 30 (GND) → GND-Schiene; Teensy GND
+> → GND-Schiene; Teensy Pin 3 → IRLZ44N Gate (Pin 1), 1 kΩ Gate–Source direkt
+> am MOSFET; Netzteil +12 V → LED-Array +; LED-Array − → Drain (Pin 2);
+> Netzteil − → Source (Pin 3)/GND-Schiene (die drei Laststrang-Leitungen
+> dick); Teensy per USB am Jetson, sonst nichts am Teensy. Erster Schritt:
+> `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` — Handykamera
+> sieht die Blitze, Stromanzeige am Netzteil zuckt. Danach die ersten
+> Aufnahmen mit Blitz.
+
 \---
 
 \---
