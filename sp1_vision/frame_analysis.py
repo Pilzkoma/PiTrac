@@ -150,6 +150,21 @@ REFINE_TRIM_K = 2.5
 # circle is still overdetermined threefold.
 REFINE_TRIM_MIN_POINTS = 10
 
+# refine_ball_by_contrast only. An outline edge must reach this fraction of
+# the ball's typical edge strength (median over rays of each ray's
+# strongest edge) - relative to the ball's contrast, never to the scene's
+# brightness. Half keeps the dimmer shadow-side flank (p25 ~ 0.75 of the
+# median on run 6).
+REFINE_CONTRAST_TYPICAL_FRACTION = 0.5
+
+# ... and this fraction of the strongest edge on its own ray, which is
+# what keeps surface texture just outside the ball from counting as the
+# outermost edge. See _outermost_edge_per_ray.
+REFINE_CONTRAST_RAY_FRACTION = 0.75
+
+# Sampling step along each ray, in pixels.
+REFINE_RAY_STEP_PX = 0.25
+
 
 def _fit_circle(xs, ys):
     """Algebraic circle fit through edge points; returns (u, v, r).
@@ -312,12 +327,129 @@ def refine_ball(frame, u, v, r):
             return None
         centre_u, centre_v, radius = fit
 
+    return _within_seed_guards(u, v, r, (centre_u, centre_v, radius))
+
+
+def _within_seed_guards(u, v, r, fit):
+    """The fit, or None if it has left the seed's neighbourhood."""
+    centre_u, centre_v, radius = fit
     if np.hypot(centre_u - u, centre_v - v) > REFINE_MAX_DRIFT * r:
         return None
     if not ((1.0 - REFINE_MAX_RADIUS_CHANGE) * r
             <= radius <= (1.0 + REFINE_MAX_RADIUS_CHANGE) * r):
         return None
     return centre_u, centre_v, radius
+
+
+def _outermost_edge_per_ray(blurred, u, v, radius):
+    """The outermost outline edge along each ray from (u, v), or None.
+
+    Returns (xs, ys), at most one point per ray. The same "outermost edge
+    per direction" rule as _outermost_per_direction, but "edge" is judged
+    against the ball's own contrast instead of a Canny threshold: a local
+    maximum of the absolute radial derivative that reaches BOTH
+    REFINE_CONTRAST_TYPICAL_FRACTION of the ball's typical edge strength
+    (the median over rays of each ray's strongest edge) AND
+    REFINE_CONTRAST_RAY_FRACTION of the strongest edge on its own ray.
+
+    The second condition is what keeps it off the surface around the ball.
+    Run 6's towel reached 28-36 just outside a silhouette of ~50 - over any
+    global threshold low enough to see that silhouette - but on the same
+    ray it stays below the silhouette it sits behind. Without it the
+    outermost pick walked onto the texture and took the band with it, one
+    iteration at a time (27 -> 33 -> 39 -> 50 px on the synthetic cloth).
+    A logo or a shadow rim that out-crisps its ray's silhouette still wins
+    that ray; those are a minority, and the trimmed fit is there for them.
+    """
+    step = REFINE_RAY_STEP_PX
+    radii = np.arange(radius * (1.0 - REFINE_RADIAL_BAND),
+                      radius * (1.0 + REFINE_RADIAL_BAND), step)
+    angles = np.linspace(-np.pi, np.pi, REFINE_ANGULAR_BINS, endpoint=False)
+    map_x = (u + np.outer(np.cos(angles), radii)).astype(np.float32)
+    map_y = (v + np.outer(np.sin(angles), radii)).astype(np.float32)
+    profiles = cv2.remap(blurred, map_x, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REPLICATE)
+    strength = np.abs(np.gradient(profiles, step, axis=1))
+    # Samples off the ROI carry replicated border pixels, not image; a
+    # clipped ball simply has fewer rays.
+    on_image = ((map_x >= 0) & (map_y >= 0) &
+                (map_x <= blurred.shape[1] - 1) &
+                (map_y <= blurred.shape[0] - 1))
+    strength[~on_image] = 0.0
+
+    ray_max = strength.max(axis=1)
+    typical = float(np.median(ray_max))
+    if typical <= 0.0:
+        return None
+    peak = np.zeros_like(strength, dtype=bool)
+    peak[:, 1:-1] = ((strength[:, 1:-1] >= strength[:, :-2]) &
+                     (strength[:, 1:-1] > strength[:, 2:]))
+    peak &= strength >= REFINE_CONTRAST_TYPICAL_FRACTION * typical
+    peak &= strength >= REFINE_CONTRAST_RAY_FRACTION * ray_max[:, None]
+
+    rows = np.nonzero(peak.any(axis=1))[0]
+    if rows.size == 0:
+        return None
+    # Last True per row: argmax over the row reversed.
+    cols = peak.shape[1] - 1 - np.argmax(peak[rows, ::-1], axis=1)
+    # Parabolic interpolation of the peak, so the quarter-pixel grid does
+    # not set the precision. Peaks are never in the first or last column.
+    left = strength[rows, cols - 1]
+    mid = strength[rows, cols]
+    right = strength[rows, cols + 1]
+    curvature = left - 2.0 * mid + right
+    safe = np.where(curvature < 0.0, curvature, -1.0)
+    offset = np.where(curvature < 0.0, 0.5 * (left - right) / safe, 0.0)
+    at = radii[0] + (cols + offset) * step
+    return (u + at * np.cos(angles[rows]), v + at * np.sin(angles[rows]))
+
+
+def refine_ball_by_contrast(frame, u, v, r):
+    """refine_ball for a ball whose outline Canny cannot see. (u, v, r) or None.
+
+    refine_ball takes its Canny thresholds from the ROI's median
+    BRIGHTNESS. On run 6 (2026-09-24) the towel under the ball was light
+    grey in the near infrared, the thresholds landed at ~75/150, and a far
+    ball's silhouette gradient was ~50: every ball beyond 550 mm lost its
+    outline and fell back to raw Hough, up to 4 px off in one camera.
+
+    The brightness scaling cannot simply be replaced. On the one-sided lit
+    fixture it is what WORKS: thresholds far above the ball's median edge
+    let only the lit arc through, and anything lower admits the desk grain
+    on the shadow side. So this is a fallback, not a successor - ball_pair
+    calls it only where refine_ball refuses, and then for BOTH cameras, so
+    the two halves of a pair are always measured by one method.
+
+    Same shape as refine_ball: outermost edge per direction, MAD-trimmed
+    fit, seed guards. Only what counts as an edge differs - see
+    _outermost_edge_per_ray.
+    """
+    gray = _as_gray(frame)
+    height, width = gray.shape[:2]
+    # Room for the band around a centre that has drifted as far as the
+    # guards allow, at a radius grown as far as they allow.
+    half = int(round(r * ((1.0 + REFINE_RADIAL_BAND)
+                          * (1.0 + REFINE_MAX_RADIUS_CHANGE)
+                          + REFINE_MAX_DRIFT))) + 4
+    x0, y0 = max(0, int(u) - half), max(0, int(v) - half)
+    x1, y1 = min(width, int(u) + half + 1), min(height, int(v) + half + 1)
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0 or min(roi.shape[:2]) < 8:
+        return None
+    blurred = cv2.GaussianBlur(roi, (5, 5), 0).astype(np.float32)
+
+    # ROI coordinates inside the loop.
+    centre_u, centre_v, radius = float(u) - x0, float(v) - y0, float(r)
+    for _ in range(REFINE_ITERATIONS):
+        outline = _outermost_edge_per_ray(blurred, centre_u, centre_v, radius)
+        if outline is None or outline[0].size < REFINE_TRIM_MIN_POINTS:
+            return None
+        fit = _trimmed_circle_fit(*outline)
+        if fit is None:
+            return None
+        centre_u, centre_v, radius = fit
+    return _within_seed_guards(u, v, r,
+                               (centre_u + x0, centre_v + y0, radius))
 
 
 def ball_candidates(frame, min_radius=BALL_MIN_RADIUS_PX,

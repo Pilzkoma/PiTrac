@@ -350,12 +350,32 @@ class TestArgparseHelp(unittest.TestCase):
                 main(["--help"])
         output = stdout.getvalue()
         for flag in ("--shots", "--out", "--exposure", "--analyse",
-                     "--extrinsics", "--config"):
+                     "--extrinsics", "--config", "--refiner"):
             self.assertIn(flag, output)
         # The two that used to appear bare.
         self.assertIn("stereo_extrinsics.json", output)
         self.assertIn("golf_sim_config.json", output)
         self.assertIn("never writes", output)
+
+    def test_refiner_names_map_to_the_two_refiners(self):
+        from sp1_vision import frame_analysis
+        for name, expected in (("canny", frame_analysis.refine_ball),
+                               ("contrast",
+                                frame_analysis.refine_ball_by_contrast)):
+            with mock.patch("sp1_vision.cli_triangulate.run_analysis",
+                            return_value=0) as spy:
+                main(["--analyse", "somewhere", "--refiner", name])
+            self.assertIs(spy.call_args[1]["refine"], expected, name)
+
+    def test_the_default_refiner_is_the_live_one(self):
+        # The live detector at capture time uses refine_ball; an analysis
+        # that silently used another would disagree with the operator's
+        # at-device feedback line.
+        from sp1_vision import frame_analysis
+        with mock.patch("sp1_vision.cli_triangulate.run_analysis",
+                        return_value=0) as spy:
+            main(["--analyse", "somewhere"])
+        self.assertIs(spy.call_args[1]["refine"], frame_analysis.refine_ball)
 
 
 class TestResumeStartNumber(unittest.TestCase):
@@ -477,6 +497,23 @@ class TestMeasureShot(unittest.TestCase):
             self.assertIsNotNone(xyz, info)
             np.testing.assert_allclose(xyz, truth, atol=0.005)
             self.assertLessEqual(info, MAX_REPROJECTION_PX)
+        finally:
+            shutil.rmtree(run_dir)
+
+    def test_the_chosen_refiner_reaches_the_pair_selection(self):
+        # --refiner contrast measures a WHOLE run with one method; that only
+        # holds if every shot's detection is handed the same refiner.
+        rig = make_rig(pitch_deg=-0.94)
+        run_dir = tempfile.mkdtemp()
+        try:
+            shot = self._write_ball(run_dir, "gs_01.png", rig,
+                                    np.array([0.02, 0.09, 0.5]))
+            chosen = mock.Mock(return_value=None)
+            with mock.patch("sp1_vision.cli_triangulate.ball_pair."
+                            "find_ball_pair",
+                            return_value=(None, "stub")) as spy:
+                _measure_shot(rig, run_dir, shot, refine=chosen)
+            self.assertIs(spy.call_args[1].get("refine"), chosen)
         finally:
             shutil.rmtree(run_dir)
 

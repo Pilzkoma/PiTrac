@@ -180,6 +180,26 @@ def _ball_with_cast_shadow(cx, cy, r, background=150):
     return cv2.GaussianBlur(frame, (5, 5), 0)
 
 
+def _ball_on_bright_cloth(cx, cy, r, cloth=110, ball=150, seed=6):
+    """A far ball on a textured cloth that is BRIGHT in the camera's eyes.
+
+    The numbers are run 6's shot 17, measured: ball 147 against a surround
+    of 104 (contrast ~43), an edge 7 px wide from 10 to 90 %, and - the
+    figures that decide it - a silhouette gradient of ~50 against towel
+    texture whose gradient reaches 28-36 at the 90th percentile just
+    outside the ball. This fixture gives 49 and 34. The texture is there on
+    purpose: it is what any threshold low enough to see this silhouette
+    also sees.
+    """
+    rng = np.random.RandomState(seed)
+    texture = cv2.GaussianBlur(rng.normal(0.0, 30.0, (800, 1280)), (0, 0), 1.2)
+    yy, xx = np.mgrid[0:800, 0:1280]
+    inside = ((xx - cx) ** 2 + (yy - cy) ** 2 <= r * r).astype(np.float64)
+    inside = cv2.GaussianBlur(inside, (0, 0), 2.2)
+    frame = cloth + (ball - cloth) * inside + texture * (1.0 - inside)
+    return np.clip(frame, 0, 255).astype(np.uint8)
+
+
 def _raw_hough_seed(frame, near_x, near_y):
     """The UNREFINED Hough candidate nearest a point, or None.
 
@@ -284,6 +304,25 @@ class RefineBallTest(unittest.TestCase):
                                msg="radius {:.1f} px against a true 58 - the "
                                    "fit walked onto the shadow rim".format(r))
         self.assertLess(np.hypot(u - 600, v - 450), 0.9)
+
+    def test_a_small_low_contrast_ball_on_a_bright_cloth_is_refined(self):
+        # Run 6, 2026-09-24: a ball at 650 mm on a towel the cameras see as
+        # light grey. Its silhouette gradient (~50) sat below Canny
+        # thresholds taken from the ROI's median brightness (~75/150), so
+        # refine_ball refused every far shot. The contrast refiner is the
+        # fallback for exactly that; what it must see is the ball's
+        # CONTRAST, not how bright the surround is - and it must not walk
+        # onto the texture of the cloth around it.
+        frame = _ball_on_bright_cloth(640, 520, 29)
+        self.assertIsNone(frame_analysis.refine_ball(frame, 637.0, 517.0, 27.0),
+                          "refine_ball now sees this ball - the fixture no "
+                          "longer exercises the fallback")
+        refined = frame_analysis.refine_ball_by_contrast(frame, 637.0, 517.0,
+                                                         27.0)
+        self.assertIsNotNone(refined, "refused a plainly visible ball")
+        u, v, r = refined
+        self.assertLess(np.hypot(u - 640, v - 520), 0.6)
+        self.assertAlmostEqual(r, 29.0, delta=29.0 * 0.10)
 
     def test_a_fit_that_runs_away_in_radius_is_refused(self):
         # A refinement is a correction to its seed, not a new detection:

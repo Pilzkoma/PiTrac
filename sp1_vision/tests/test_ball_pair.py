@@ -382,6 +382,45 @@ class FindBallPairTest(unittest.TestCase):
                                            "adopted")
         np.testing.assert_allclose(pair.uv2, raw_pair.uv2, atol=1e-9)
 
+    def test_a_caller_chosen_refiner_measures_the_pair(self):
+        # cli_triangulate --analyse --refiner contrast measures a whole run
+        # with ONE method. Mixing them - Canny where it copes, the contrast
+        # refiner where it refuses - was tried on run 6 (2026-09-24) and
+        # changed the fitted scale from 0.961 to 0.931: each method has its
+        # own small bias, and switching method with distance turns that
+        # into a bias that grows with depth, which is a scale error.
+        truth = np.array([0.03, 0.0937, 0.600])
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        d1, d2 = ball_discs(self.rig, truth)
+        chosen = mock.Mock(side_effect=self._truth_refiner(truth))
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               side_effect=AssertionError(
+                                   "the default refiner ran")):
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2,
+                                                    refine=chosen)
+        self.assertIsNotNone(pair, reason)
+        self.assertEqual(chosen.call_count, 2)
+        np.testing.assert_allclose(pair.uv1, d1[:2], atol=1e-9)
+        np.testing.assert_allclose(pair.uv2, d2[:2], atol=1e-9)
+
+    def test_a_caller_chosen_refiner_also_runs_the_rescue(self):
+        # One method per run means both phases: the rescue re-measures
+        # every candidate, and it must do so with the refiner the caller
+        # chose, or a rescued shot is measured differently from the rest.
+        f1, f2 = _blank(), _blank()
+        _draw(f1, 600, 400, 35)
+        _draw(f2, 700, 600, 35)  # no pairing of these two is consistent
+        chosen = mock.Mock(return_value=None)
+        with mock.patch.object(ball_pair.frame_analysis, "refine_ball",
+                               side_effect=AssertionError(
+                                   "the default refiner ran")):
+            pair, _ = ball_pair.find_ball_pair(self.rig, _blur(f1), _blur(f2),
+                                               refine=chosen)
+        self.assertIsNone(pair)
+        self.assertGreaterEqual(chosen.call_count, 2,
+                                "the rescue never ran, so this exercised "
+                                "nothing")
+
     def test_ambiguity_is_not_adjudicated_by_the_refinement(self):
         # Constraint pin, green by construction before and after the wiring:
         # when two ball-shaped objects are genuinely in frame, refinement

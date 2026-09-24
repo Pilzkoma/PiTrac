@@ -26,10 +26,19 @@ import tempfile
 import cv2
 import numpy as np
 
-from sp1_vision import (ball_pair, calibration_capture, ground_plane,
+from sp1_vision import (ball_pair, calibration_capture, frame_analysis,
+                        ground_plane,
                         stereo_geometry, triangulate)
 
 RUN_MANIFEST = "run.json"
+
+# --refiner for --analyse. One method for a whole run: on run 6
+# (2026-09-24), falling back per shot from one to the other moved the
+# fitted scale from 0.961 to 0.931.
+REFINERS = {
+    "canny": frame_analysis.refine_ball,
+    "contrast": frame_analysis.refine_ball_by_contrast,
+}
 
 
 def _ask_float(prompt):
@@ -335,7 +344,7 @@ def _report_completeness(shots):
 NOMINAL_WORKING_DISTANCE_M = 0.50
 
 
-def _measure_shot(rig, run_dir, shot):
+def _measure_shot(rig, run_dir, shot, refine=None):
     """Return (xyz_m, worst_reprojection_px) or (None, reason).
 
     What belongs here is the file layer: read both frames, refuse a frame at
@@ -368,13 +377,14 @@ def _measure_shot(rig, run_dir, shot):
                 n, size[0], size[1], rig.image_size[0], rig.image_size[1])
         frames[n] = frame
 
-    ball, reason = ball_pair.find_ball_pair(rig, frames[1], frames[2])
+    ball, reason = ball_pair.find_ball_pair(rig, frames[1], frames[2],
+                                            refine=refine)
     if ball is None:
         return None, reason
     return ball.xyz_m, ball.reprojection_px
 
 
-def run_analysis(run_dir, extrinsics_path, config_path):
+def run_analysis(run_dir, extrinsics_path, config_path, refine=None):
     try:
         rig = stereo_geometry.load_rig(extrinsics_path, config_path)
         stereo_geometry.validate_rig(rig)
@@ -383,6 +393,10 @@ def run_analysis(run_dir, extrinsics_path, config_path):
         return 1
     print("rig: baseline {:.3f} mm, fx {:.1f} / {:.1f}".format(
         rig.baseline_m * 1000.0, rig.k1[0, 0], rig.k2[0, 0]))
+    # Which method measured every row below. Two runs analysed with
+    # different refiners are not comparable row for row.
+    print("  outline refiner: {} (every shot)".format(
+        (refine or frame_analysis.refine_ball).__name__))
     # Printed here, above the table, because it is the tolerance the operator
     # needs while reading the deviations in it: one pixel of disparity error
     # is worth this many millimetres of depth, so a triangulated Z within
@@ -405,7 +419,7 @@ def run_analysis(run_dir, extrinsics_path, config_path):
             print("{:<12} {:>62}".format(
                 shot["name"], "unknown series " + repr(shot.get("series"))))
             continue
-        xyz, info = _measure_shot(rig, run_dir, shot)
+        xyz, info = _measure_shot(rig, run_dir, shot, refine=refine)
         if xyz is None:
             # info is a rejection reason - distinct text for a missing
             # file, a missed detection, a residual over threshold, and a
@@ -710,6 +724,13 @@ def main(argv=None):
                         help="golf_sim_config.json: the camera matrices and "
                              "distortion vectors (default: %(default)s). Read "
                              "only - this tool never writes to it")
+    parser.add_argument("--refiner", choices=sorted(REFINERS),
+                        default="canny",
+                        help="outline refiner for --analyse, applied to "
+                             "EVERY shot (default: %(default)s, the one "
+                             "capture uses). 'contrast' is for scenes whose "
+                             "surround is bright, where canny loses far "
+                             "balls; never mix the two within a run")
     args = parser.parse_args(argv)
 
     if args.analyse and args.shots:
@@ -718,7 +739,8 @@ def main(argv=None):
         return run_shots(args.shots, args.out, args.exposure,
                          args.extrinsics, args.config)
     if args.analyse:
-        return run_analysis(args.analyse, args.extrinsics, args.config)
+        return run_analysis(args.analyse, args.extrinsics, args.config,
+                            refine=REFINERS[args.refiner])
     parser.error("give either --shots N or --analyse RUNDIR")
 
 

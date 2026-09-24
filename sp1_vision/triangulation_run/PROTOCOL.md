@@ -1,6 +1,6 @@
 # Messlauf Triangulation — Anleitung für das Gerät
 
-Stand 2026-09-23. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `35ca2db`
+Stand 2026-09-24. Gilt für `sp1_vision/cli_triangulate.py` ab Commit `35ca2db`
 — **nicht davor**: bis dahin zeigte jede Aufnahme den Ball an der Marke der
 VORIGEN Aufnahme (der Treiber hielt ein Bild zurück). Alle Läufe vor dem
 2026-09-23 sind davon betroffen. Die Ergebnisse stehen in `README.md` daneben.
@@ -17,10 +17,12 @@ VORIGEN Aufnahme (der Treiber hielt ein Bild zurück). Alle Läufe vor dem
 **Was der Lauf beantworten soll**
 
 1. Stimmt die Triangulation gegen ein unabhängiges Längenmaß — und auf wie viel
-   Prozent genau lässt sich das sagen? **Offen.** Lauf 5 kam auf
-   1,029 ± 0,017, weil der Ball in seiner Szene kaum Kontrast hatte (s. u.).
+   Prozent genau lässt sich das sagen? **Offen.** Lauf 5 hatte zu wenig
+   Kontrast (s. u.); Lauf 6 hatte Kontrast, aber **keine Marken** — der Ball
+   wurde nach Augenmaß um 5 cm weitergelegt, und dann misst der Lauf die
+   Schrittlänge des Bedieners statt der Geometrie.
 2. Wie sitzt das Gerät gegenüber dem Boden? Nicken, Rollen, Montagehöhe.
-   **Vorläufig** aus Lauf 5.
+   **Gemessen** in Lauf 6 (−1,56° / −0,50° / 116,6 mm).
 3. Welches Vorzeichen hat `yaw_from_target_line` physikalisch? **Beantwortet
    2026-09-23: positiv = Ziellinie rechts.** Die Aufnahmen 23/24 bleiben
    trotzdem im Lauf, sie kosten nichts.
@@ -166,6 +168,13 @@ Kameras.** Lauf 5 hatte 12 (cam1) und 1,3 (cam2) — damit ist der Maßstab
 nicht zu entscheiden, egal wie sorgfältig abgelesen wird. Liegt der Wert
 darunter: Lampe näher oder anders ausrichten, erneut probeschießen.
 
+Die Prüfung meldet auch die **Helligkeit des Tuchs**. Schwarzer Stoff ist im
+nahen Infrarot oft hellgrau — das Handtuch aus Lauf 6 lag bei ~115. Das ist
+kein Hindernis, solange der Kontrast stimmt, aber es entscheidet die
+Auswertung: bei einem Tuch über etwa 90 Graustufen verliert der
+Standard-Detektor die fernen Bälle, und ausgewertet wird dann mit
+`--refiner contrast` (Abschnitt 7).
+
 Achte auch auf `skew`: bei gutem Licht um 3 ms. Werte um 15–19 ms (Lauf 5)
 heißen, die automatische Belichtung ist bei 40 ms angekommen und die Kameras
 laufen nur noch mit ~25 statt 120 Bildern pro Sekunde — ein Zeichen für zu
@@ -183,6 +192,12 @@ funktioniert hat, merkst du dir für den echten Lauf.
 ## 4. Ablesen — die eine Sache, die den Maßstab entscheidet
 
 **Ab Lauf 6: Marken setzen, Lineal weg, Ball an die Marke.**
+
+> **Ohne Marken beantwortet der Lauf die Maßstabsfrage nicht.** Lauf 6 wurde
+> ohne Marken gemessen, der Ball jeweils „5 cm" weitergelegt; die Auswertung
+> kam auf 0,961, also 48 statt 50 mm pro Schritt. Das ist ein Schätzfehler,
+> kein Geometriefehler, und von außen nicht zu unterscheiden. Der Lauf war
+> für Lage und Höhe trotzdem gut — für den Maßstab nicht.
 
 1. Lineal flach aufs Tuch, Nullende an der Frontfläche.
 2. An jeder Sollmarke (300, 350, … 640) einen kurzen Klebestreifen **quer**
@@ -428,6 +443,13 @@ Lauf, weil Gieren die heutige Aufstellung beschreibt und jedes Mal neu ist.
 cd ~/JetsonLM
 python3 -m sp1_vision.cli_triangulate --analyse sp1_vision/triangulation_run
 ```
+
+War das Tuch bei der Kontrastprüfung hell (über etwa 90 Graustufen), dazu
+`--refiner contrast`. Das vermisst **jede** Aufnahme des Laufs mit der
+kontrastbasierten Umrissverfeinerung; der Kopf der Ausgabe nennt, welche lief.
+Nie zwei Auswertungen mit verschiedenen Refinern Zeile für Zeile mischen —
+jede Methode hat ihren eigenen kleinen Versatz, und wechselt er mit der
+Entfernung, ist das ein Maßstabsfehler (Lauf 6: 0,961 gegen 0,931).
 
 Bevor du irgendeiner Zahl glaubst, diese vier Zeilen prüfen:
 

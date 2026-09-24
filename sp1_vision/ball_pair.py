@@ -276,7 +276,7 @@ def _verdict(survivors, rejected_on_size, solved_behind, solved_at_all,
     return best, None
 
 
-def _outline_measured(frame, candidates):
+def _outline_measured(frame, candidates, refine):
     """Every candidate re-measured on its outline, raw where that refuses.
 
     The fallback to the raw circle is not a convenience: a candidate whose
@@ -286,13 +286,13 @@ def _outline_measured(frame, candidates):
     """
     measured = []
     for u, v, r in candidates:
-        fit = frame_analysis.refine_ball(frame, u, v, r)
+        fit = refine(frame, u, v, r)
         measured.append((float(fit[0]), float(fit[1]), float(fit[2]))
                         if fit is not None else (u, v, r))
     return measured
 
 
-def _refined_pair(rig, frame1, frame2, best):
+def _refined_pair(rig, frame1, frame2, best, refine):
     """The selected pair re-measured on its outlines, or None.
 
     Both circles or neither: the two images must be measured by the same
@@ -304,8 +304,8 @@ def _refined_pair(rig, frame1, frame2, best):
     refinements unconditionally, and ruined pairs Hough had right.
     """
     _, _, uv1, uv2, r1, r2, worst, _ = best
-    fit1 = frame_analysis.refine_ball(frame1, uv1[0], uv1[1], r1)
-    fit2 = frame_analysis.refine_ball(frame2, uv2[0], uv2[1], r2)
+    fit1 = refine(frame1, uv1[0], uv1[1], r1)
+    fit2 = refine(frame2, uv2[0], uv2[1], r2)
     if fit1 is None or fit2 is None:
         return None
     try:
@@ -334,8 +334,16 @@ def _to_ball_pair(survivor):
                     radius_error=error)
 
 
-def find_ball_pair(rig, frame1, frame2):
+def find_ball_pair(rig, frame1, frame2, refine=None):
     """Return (BallPair, None), or (None, reason) saying why not.
+
+    `refine` is the outline refiner for BOTH phases below; None means
+    frame_analysis.refine_ball. The analysis passes
+    frame_analysis.refine_ball_by_contrast to measure a whole run with that
+    one instead. Choosing per shot is deliberately not offered: on run 6
+    (2026-09-24), switching method where the first one refused moved the
+    fitted scale from 0.961 to 0.931, because each method's small bias
+    then changes with distance.
 
     The reason is written for whoever is standing at the device holding a
     ball, because that is who has to act on it. "no ball" and "23 circles,
@@ -364,6 +372,8 @@ def find_ball_pair(rig, frame1, frame2):
     rescued - refinement is precision, and precision must not adjudicate
     which of two ball-shaped objects is the ball.
     """
+    if refine is None:
+        refine = frame_analysis.refine_ball
     low, high = radius_bounds_px(rig)
     candidates1 = frame_analysis.ball_candidates(frame1, low, high)
     candidates2 = frame_analysis.ball_candidates(frame2, low, high)
@@ -380,8 +390,8 @@ def find_ball_pair(rig, frame1, frame2):
                             len(candidates1), len(candidates2))
 
     if best is None and not survivors:
-        rescue1 = _outline_measured(frame1, candidates1)
-        rescue2 = _outline_measured(frame2, candidates2)
+        rescue1 = _outline_measured(frame1, candidates1, refine)
+        rescue2 = _outline_measured(frame2, candidates2, refine)
         rescued, r_on_size, r_behind, r_at_all = _consistent_pairs(
             rig, rescue1, rescue2)
         rescue_best, _ = _verdict(rescued, r_on_size, r_behind, r_at_all,
@@ -396,5 +406,5 @@ def find_ball_pair(rig, frame1, frame2):
     if best is None:
         return None, reason
 
-    refined = _refined_pair(rig, frame1, frame2, best)
+    refined = _refined_pair(rig, frame1, frame2, best, refine)
     return _to_ball_pair(refined if refined is not None else best), None

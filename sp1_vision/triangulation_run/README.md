@@ -3,20 +3,22 @@
 Anleitung: `PROTOCOL.md` daneben. Rohdaten liegen **nicht** in git (je ~35 MB),
 sondern datiert unter `sp1_vision/` auf dem Jetson und auf dem Windows-Rechner.
 
-## Stand 2026-09-23
+## Stand 2026-09-24
 
 | Frage | Antwort | Belastbarkeit |
 |---|---|---|
-| Maßstab gegen das Maßband | 1,029 ± 0,017 | **nicht entschieden** — 1 liegt innerhalb 2σ, Budget war ~0,45 % |
-| Nicken / Rollen gegen die Auflagefläche | −1,19° / +0,45° | vorläufig |
-| Höhe cam1 über der Auflagefläche | 112,8 mm (Annahme 115) | vorläufig |
-| Vorzeichen `yaw_from_target_line` | **positiv = Ziellinie rechts** | entschieden |
+| Maßstab gegen das Maßband | — | **offen.** Lauf 5: Kontrast zu gering. Lauf 6: keine Marken gesetzt, Ball nach Augenmaß um „5 cm" verschoben — 0,961 misst die Schrittlänge, nicht die Geometrie |
+| Nicken / Rollen gegen den **Boden** | −1,56° / −0,50° | Lauf 6, `--refiner contrast`, Ebene 2,1 mm rms |
+| Höhe cam1 über dem Boden | 116,6 mm (Annahme 115) | Lauf 6 |
+| Vorzeichen `yaw_from_target_line` | **positiv = Ziellinie rechts** | entschieden (Lauf 5) |
 
-Alle Werte aus Lauf 5, Schreibtischplatte (Holz) als Auflage, nicht der Boden.
-Vorläufig heißt: Lauf 4 ergibt bei **unverändert stehendem Gerät** −1,58° /
-+0,20° / 117,0 mm. 4 mm und 0,4° sind mehr, als die Ebenenanpassung
-(1,1 mm rms) hergeben sollte. Ungeklärt; Verdacht: Hough-Mitten verschieben
-sich mit dem Licht, und Lauf 4 lief bei anderem Licht.
+Lauf 6 stand auf dem Boden, Läufe 4/5 auf der Schreibtischplatte — ein
+anderes Rollen ist deshalb kein Widerspruch. Nicken und Höhe von Lauf 6
+treffen Lauf 4 (−1,58°, 117,0 mm); Lauf 5 (−1,19°, 112,8 mm) war der Ausreißer,
+und seine Hough-Mitten auf kontrastloser Szene sind die naheliegende Erklärung.
+
+**Für den Maßstab fehlt ein Lauf mit geklebten Marken** (PROTOCOL.md
+Abschnitt 4). Szene, Licht und Auswertung aus Lauf 6 können bleiben.
 
 ## Die Läufe
 
@@ -27,6 +29,7 @@ sich mit dem Licht, und Lauf 4 lief bei anderem Licht.
 | 3 | 2026-08-11 | `2026-08-11_run3_aborted/` | eine Aufnahme; deren Bild ist Fixture `lit_from_one_side` |
 | 4 | 2026-09-23 | `2026-09-23_run4_stale_frames/` | **jedes Bild eine Aufnahme zu spät**; umgeordnet auswertbar, Gieren fehlt |
 | 5 | 2026-09-23 | `2026-09-23_run5_backlit/` | Zuordnung richtig; Maßstab am Kontrast gescheitert |
+| 6 | 2026-09-24 | `2026-09-24_run6_towel/` | Kontrast gut; Lage und Höhe gemessen; ohne Marken kein Maßstab |
 
 ### Der Pufferfehler (behoben in `35ca2db`)
 
@@ -91,3 +94,35 @@ Lineal am Ball — PROTOCOL.md Abschnitt 2 Punkte 5–7).
 Die Kameras liefen damit mit ~25 statt 120 Bildern pro Sekunde, daher der
 Kameraversatz von 15–19 ms statt 3 ms. Für ruhende Bälle egal, für den
 fliegenden Ball nicht.
+
+### Lauf 6 — dunkles Tuch, das im Infrarot hell ist
+
+Schwarzes Handtuch auf dem Boden, Lampe seitlich vor dem Gerät, keine
+`--exposure`-Option (skew 10,8 ms). Kontrastprüfung am Probeschuss:
++66 / +70 Graustufen (Ziel > 40; Lauf 5: −19 / −5). 20 von 24 Aufnahmen
+gefunden. **Keine Marken:** der Ball wurde von 300 bis 650 jeweils nach
+Augenmaß um 5 cm weitergelegt, die eingetippten Werte sind Sollwerte.
+
+**Der Detektor hat die ferne Hälfte nicht vermessen.** Das Handtuch ist für
+die Kameras hellgrau (~115). `refine_ball` setzt seine Canny-Schwellen aus
+der Helligkeit (≈ 75/150), die Randkante eines Balls bei 650 mm hat ≈ 50 —
+ab 550 mm gab die Verfeinerung in jeder Aufnahme auf, es blieben rohe
+Hough-Kreise, teils 4 px daneben (#7: Sollwert 600, Z 581). Neu:
+`refine_ball_by_contrast` und `--analyse … --refiner contrast`, das einen
+ganzen Lauf mit einer Methode vermisst. Pro Aufnahme zwischen den Methoden
+zu wechseln, wurde gemessen und verworfen (Maßstab 0,961 → 0,931: jede
+Methode hat ihren eigenen kleinen Versatz, und der wechselt dann mit der
+Entfernung).
+
+| | Canny (Standard) | `--refiner contrast` |
+|---|---|---|
+| Tiefenreihe, Residuum | 13,4 mm | **4,4 mm** |
+| Wiederholstreuung | 15,9 mm | 5,4 mm |
+| Ebene rms (conditioning) | 3,1 mm (0,57) | 2,1 mm (0,60) |
+| Nicken / Rollen | −1,95° / −0,72° | −1,56° / −0,50° |
+| Höhe cam1 | 120,4 mm | 116,6 mm |
+| Maßstab gegen Sollwerte | 0,961 ± 0,029 | 0,961 ± 0,010 |
+
+Nicht gefunden: #10, #16 (kein passendes Paar), #20/#22 (rechts seitlich,
+Größentor), #23 (Logo erzeugt einen zweiten Kreis → `ambiguous`; damit fehlt
+auch das Gieren). #20 ist als Serie `d` statt `s` eingetragen.

@@ -124,13 +124,18 @@ default. Test for staleness by changing exposure between grabs, not by comparing
 frames of a static scene.
 
 ## Current task
-0. **Measurement run 6** per `sp1_vision/triangulation_run/PROTOCOL.md`, waiting on a
-   dark matt cloth. Run 5 settled the yaw sign (positive = target line right) but
-   not the scale (1.029 ± 0.017): the ball had 1.3 grey levels of contrast in cam2,
-   so `refine_ball` was accepted nowhere and raw Hough centres (1 px grid) set the
-   precision. Run a contrast check on the probe shot (>40 grey levels in both
-   cameras) before letting the operator lay out anything. Results so far:
-   `sp1_vision/triangulation_run/README.md`.
+0. **Measurement run 7** per `sp1_vision/triangulation_run/PROTOCOL.md`, for the
+   scale alone. Run 6 (2026-09-24) measured the attitude against the floor
+   (pitch −1.56°, roll −0.50°, cam1 116.6 mm up) but not the scale: the operator
+   set **no marks** and moved the ball "5 cm" by eye, so its 0.961 is step length.
+   Make sure the tape strips are actually laid before shot 1.
+   Run a contrast check on the probe shot first (>40 grey levels in both cameras;
+   script `contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`).
+   Black cloth is light grey in the IR (the run-6 towel read ~115); on a bright
+   surround `refine_ball`'s brightness-scaled Canny loses every ball beyond
+   ~550 mm, so analyse with `--analyse ... --refiner contrast`. Never mix
+   refiners within a run — a per-shot fallback moved the scale 0.961 → 0.931.
+   Results so far: `sp1_vision/triangulation_run/README.md`.
 
 Next SP1 items, in this order:
 1. **World geometry.** Three live constants still hold PiTrac's numbers, and they are

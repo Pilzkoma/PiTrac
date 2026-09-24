@@ -17,7 +17,7 @@ import unittest
 import cv2
 import numpy as np
 
-from sp1_vision import ball_pair, stereo_geometry
+from sp1_vision import ball_pair, frame_analysis, stereo_geometry
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -129,6 +129,43 @@ class RealFrameTest(unittest.TestCase):
                         "the ~115 mm camera height puts the ball centre "
                         "about 94 mm below the axis, not {:.0f}".format(y_mm))
         self.assertLess(pair.reprojection_px, 1.0)
+
+    def test_a_far_ball_on_a_bright_cloth_is_measured_on_its_outline(self):
+        # Run 6, 2026-09-24, shot 17: the untouched ball at the 650 mark on a
+        # black towel that the cameras see as light grey (dyes go
+        # transparent in the near infrared). The outline refinement took its
+        # Canny thresholds from the ROI's median BRIGHTNESS, 0.66x/1.33x of
+        # about 115, while this ball's silhouette gradient is about 50 - so
+        # the silhouette vanished, only the logo was left, and every shot
+        # beyond 550 mm fell back to raw Hough. Those circles sat up to 4 px
+        # off in one camera: 13.4 mm residual in the run's depth fit, 4.4 mm
+        # once every shot was measured by the contrast refiner.
+        #
+        # The contrast refiner is the analysis-time answer
+        # (cli_triangulate --analyse --refiner contrast). The live default
+        # still returns the raw Hough pair here: r 27.9 / 26.2 px, 6.5%
+        # apart - that is pinned too, so this fixture stops being evidence
+        # the day refine_ball changes and somebody should look again.
+        raw, _ = self._find("far_ball_on_towel")
+        self.assertGreater(abs(raw.radius1_px / raw.radius2_px - 1.0), 0.05,
+                           "the default path now measures this ball on its "
+                           "outline - revisit whether the fallback is needed")
+        pair, reason = ball_pair.find_ball_pair(
+            self.rig, *load_pair("far_ball_on_towel"),
+            refine=frame_analysis.refine_ball_by_contrast)
+        self.assertIsNotNone(pair, reason)
+        # Both circles on the silhouette: the radius ratio is inside what
+        # the trimmed fit's common bias leaves (a few percent), the pair
+        # agrees to a fraction of a pixel, and the depth is the 650 mark
+        # plus the ball radius and lens offset that run's near shots show.
+        ratio = pair.radius1_px / pair.radius2_px
+        self.assertLess(abs(ratio - 1.0), 0.05,
+                        "radii {:.1f} / {:.1f} px".format(
+                            pair.radius1_px, pair.radius2_px))
+        self.assertLess(pair.reprojection_px, 0.5)
+        z_mm = pair.xyz_m[2] * 1000.0
+        self.assertGreater(z_mm, 630.0)
+        self.assertLess(z_mm, 690.0)
 
 
 if __name__ == "__main__":

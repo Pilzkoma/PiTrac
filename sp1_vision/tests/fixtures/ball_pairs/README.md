@@ -89,3 +89,30 @@ A small residual means the two cameras agree with each other. It has never
 meant they are looking at a ball. Whatever this pair returns must be a
 resting ball or nothing at all: below the optical axis, inside the
 measurement volume, the right size for its own range.
+
+## `far_ball_on_towel/` — a bright surround hides the outline from Canny
+
+2026-09-24 (run 6, `gs_17`): the ball resting untouched at the 650 mm mark on
+a black bath towel, lit by a lamp beside the unit. The towel is black to the
+eye and **light grey to the cameras** (about 115 grey levels) — textile dyes
+go transparent in the near infrared, and so will most "black" cloth under
+the 850 nm strobe.
+
+`refine_ball` takes its Canny thresholds from the ROI's median brightness
+(0.66× / 1.33× of ~115, so ~75 / 150). This ball's silhouette gradient is
+~50: the outline vanishes, only logo and highlights survive (a fit of
+r ≈ 11 px), and the refinement refuses in both cameras. Every shot of run 6
+beyond 550 mm fell back to raw Hough — here r 27.9 / 26.2 px, 6.5 % apart,
+with circles up to 4 px off in one camera on neighbouring shots.
+
+`refine_ball_by_contrast` measures it on the silhouette (r ≈ 26 / 27 px,
+0.3 px residual). The test pins both halves: the default path still
+returning the raw pair, so the fixture stops being evidence the day
+`refine_ball` changes, and the contrast refiner finding the outline.
+
+Why the contrast refiner is an **analysis option** and not a fallback:
+applied per shot where Canny refused, it moved run 6's fitted scale from
+0.961 to 0.931 — each method has its own small bias, and switching method
+with distance turns that into a bias that grows with depth. And it cannot
+replace Canny either: on `lit_from_one_side` the brightness-scaled
+thresholds are what let only the lit arc through.
