@@ -134,7 +134,7 @@ frames of a static scene.
 ## Current task
 0. **Next session opens with the strobe on the perfboard.** The owner is
    soldering the 2026-05-12-tested circuit onto a perfboard (wire list in the
-   LOGBOOK entry of 2026-09-24) and expects it built when he returns. Start
+   LOGBOOK entry of 2026-09-24) and it should be built by then. Start
    with `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` (flashes
    visible through a phone camera, PSU ammeter twitches), then the first
    strobe-lit captures. If the bypass test fails, check the wiring against
