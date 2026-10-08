@@ -1978,8 +1978,16 @@ BallPhysics C# to GDScript, validating GPU can handle simultaneous vision pipeli
 > Verified with `pitrac_lm --system_mode test_sim_message --gspro_host_address <PC> --msg_broker_address=tcp://127.0.0.1:61616`
 > against Golfinator's capture tool: heartbeats ~2 s apart, both dummy shots arrived. golf_sim_config.json unchanged
 > (the GSPro address comes from the command line). Merge into main = owner's call.
-> Note: the test run exits with SIGSEGV (139) after "shutting down normally" - gdb: null `producer_thread_` owner in
-> `GolfSimMessageProducer::Shutdown` via `GolfSimIpcSystem::ShutdownIPCSystem` (gs_ipc_system.cpp:203), not the timer.
+> Fix round (same day): when the simulator closed the socket, the next send (now: the timer within 2 s) called
+> `GsSimSocketInterface::DeInitialize`, which pthread_cancel'ed the receiver and dropped a still joinable `std::thread`
+> (`std::terminate`). DeInitialize now shuts the socket down, joins the receiver (detach if it runs on the receiver
+> itself) and closes it. The heartbeat timer also reconnects every 2 s while an interface is not connected (first failed
+> retry logged once at warning, then trace), connect is bounded to 3 s (a closed Windows port drops the SYN and used to
+> block for ~2 min), the timer holds the send mutex around scan and send and no longer writes the stored heartbeat state
+> back. Starting pitrac_lm before the simulator is up still aborts in `InitializeSims` (FSM init fails) - unchanged.
+> `test_sim_message` used to exit 139: `GolfSimIpcSystem::ShutdownIPCSystem` dereferenced the null `producer_`
+> (gs_ipc_system.cpp:203; test mode never initializes IPC) and then called `shutdownLibrary()` without
+> `initializeLibrary()`; it now returns early when IPC was never initialized, exit code 0.
 
 **2026-03-14**
 
