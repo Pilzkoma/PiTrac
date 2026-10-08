@@ -299,11 +299,22 @@ namespace golf_sim {
         if (heartbeat_timer_running_.exchange(true)) {
             return;
         }
-        // A test mode returns from main without DeInitializeSims: stop and join the timer before static destruction.
+        // A test mode returns from main without DeInitializeSims: stop the timer and the connections before static destruction.
         static bool exit_hook_registered = false;
         if (!exit_hook_registered) {
             exit_hook_registered = true;
-            std::atexit([]() { StopHeartbeatTimer(); });
+            std::atexit([]() {
+                StopHeartbeatTimer();
+                // Test modes return from main without DeInitializeSims: close the connections too, so that no
+                // receiver thread is still logging while the logging statics are destroyed.
+                if (sims_initialized_) {
+                    for (auto interface : interfaces_) {
+                        if (interface != nullptr) {
+                            interface->DeInitialize();
+                        }
+                    }
+                }
+            });
         }
         heartbeat_thread_ = std::thread([]() {
             int waited_ms = 0;
