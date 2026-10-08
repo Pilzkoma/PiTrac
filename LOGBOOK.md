@@ -1984,7 +1984,10 @@ BallPhysics C# to GDScript, validating GPU can handle simultaneous vision pipeli
 > itself) and closes it. The heartbeat timer also reconnects every 2 s while an interface is not connected (first failed
 > retry logged once at warning, then trace), connect is bounded to 3 s (a closed Windows port drops the SYN and used to
 > block for ~2 min), the timer holds the send mutex around scan and send and no longer writes the stored heartbeat state
-> back. Starting pitrac_lm before the simulator is up still aborts in `InitializeSims` (FSM init fails) - unchanged.
+> back. Start-up is now tolerant: if the
+> first connect fails, `InitializeSims` keeps the interface, starts the timer and logs one warning ("no simulator yet ...,
+> retrying every 2 s"); only the timer connects (shots and FSM heartbeats never wait for a connect: they fail fast while
+> not connected, and the timer connects without holding the send mutex).
 > `test_sim_message` used to exit 139: `GolfSimIpcSystem::ShutdownIPCSystem` dereferenced the null `producer_`
 > (gs_ipc_system.cpp:203; test mode never initializes IPC) and then called `shutdownLibrary()` without
 > `initializeLibrary()`; it now returns early when IPC was never initialized, exit code 0.
