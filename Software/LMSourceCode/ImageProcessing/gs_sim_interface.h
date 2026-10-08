@@ -7,6 +7,9 @@
 
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
+#include <atomic>
+#include <thread>
 
 
 #include "logging_tools.h"
@@ -84,6 +87,12 @@ namespace golf_sim {
         static void SendHeartbeat(bool ball_detected);
         static inline void ResetHeartbeatState() {}
 
+        // Repeats the last heartbeat every kHeartbeatIntervalMs while a simulator interface is initialized, so the
+        // simulator can tell "connected and waiting" from "gone" (Golfinator greys its status after 5 s of silence).
+        static void StartHeartbeatTimer();
+        static void StopHeartbeatTimer();
+        static constexpr int kHeartbeatIntervalMs = 2000;
+
     protected:
 
         // Typical derived-class behavior will be to convert the results into a
@@ -104,6 +113,15 @@ namespace golf_sim {
         static bool sims_initialized_;
 
         static long shot_counter_;
+
+        // Last state sent in a heartbeat; the timer repeats it.
+        static std::atomic<bool> last_heartbeat_ball_detected_;
+        static std::atomic<bool> heartbeat_timer_running_;
+        static std::thread heartbeat_thread_;
+
+        // Shots and heartbeats now come from two threads: one sender at a time. Recursive because a send can
+        // re-initialize the socket interface, and that sends a heartbeat itself.
+        static boost::recursive_mutex send_mutex_;
 
         // True if all THIS sim has been initialized
         bool initialized_;
