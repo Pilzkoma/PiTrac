@@ -97,6 +97,7 @@ namespace golf_sim {
             }
 
             receive_thread_exited_ = false;
+            teardown_requested_ = false;
             receiver_thread_ = std::unique_ptr<std::thread>(new std::thread(&GsSimSocketInterface::ReceiveSocketData, this));
 
             // GS_LOG_TRACE_MSG(trace, "Thread was created.  Thread id: " + std::string(receiver_thread_.get()->get_id()) );
@@ -105,6 +106,7 @@ namespace golf_sim {
         }
         catch (std::exception& e)
         {
+            last_connect_error_ = e.what();
             if (quiet_connect_failures_) {
                 GS_LOG_TRACE_MSG(trace, "Failed TestSimSocketMessage - Error was: " + std::string(e.what()));
             }
@@ -161,7 +163,12 @@ namespace golf_sim {
             }
 
             if (len == 0) {
-                GS_LOG_MSG(warning, "Received 0-length message from server. Will attempt to re-initialize");
+                if (teardown_requested_) {
+                    GS_LOG_TRACE_MSG(trace, "GsSimSocketInterface receiver ends: connection closed on request.");
+                }
+                else {
+                    GS_LOG_MSG(warning, "Received 0-length message from server. The simulator closed the connection; the heartbeat timer will reconnect.");
+                }
                 /// TBD - Are we sure we want to exit?
                 receive_thread_exited_ = true;
                 return; 
@@ -204,6 +211,7 @@ namespace golf_sim {
         try {
 
             if (receiver_thread_ != nullptr) {
+                teardown_requested_ = true;
                 // Unblock the receiver (a shutdown makes the blocking read_some return), then join it.
                 if (socket_ != nullptr && socket_->is_open()) {
                     boost::system::error_code ignored;
@@ -273,19 +281,10 @@ namespace golf_sim {
 
     bool GsSimSocketInterface::SendResults(const GsResults& results) {
 
-        if (!initialized_) {
-            GS_LOG_MSG(error, "GsSimSocketInterface::SendResults called before the interface was intialized.");
+        // Only the heartbeat timer (re)connects; a send never waits for a connect.
+        if (!IsConnected()) {
+            GS_LOG_MSG(error, "GsSimSocketInterface::SendResults - no simulator connection, nothing sent (the heartbeat timer is reconnecting).");
             return false;
-        }
-
-        if (receive_thread_exited_) {
-            GS_LOG_MSG(error, "GsSimSocketInterface::SendResults called before the interface was intialized - trying to re-initialize.");
-            // If we ended the receive thread, try re-initializing the connection
-            DeInitialize();
-            if (!Initialize()) {
-                GS_LOG_MSG(error, "GsSimSocketInterface::SendResults could not re-intialize thew interface.");
-            return false;
-            }
         }
 
         GS_LOG_TRACE_MSG(trace, "Sending GsSimSocketInterface::SendResult results input message:\n" + results.Format());

@@ -97,7 +97,8 @@ namespace golf_sim {
 
         initialized_ = true;
 
-        // Send an initial "I'm alive" message
+        // Send an initial "I'm alive" message (one sender at a time)
+        boost::lock_guard<boost::recursive_mutex> send_lock(send_mutex_);
         GsGSProResults keep_alive_results;
         keep_alive_results.result_message_is_keepalive_ = true;
 
@@ -136,20 +137,10 @@ namespace golf_sim {
 
     bool GsGSProInterface::SendResults(const GsResults& input_results) {
 
-        if (!initialized_) {
-            GS_LOG_MSG(error, "GsGSProInterface::SendResults called before the interface was intialized.");
+        // Only the heartbeat timer (re)connects; a send never waits for a connect.
+        if (!IsConnected()) {
+            GS_LOG_MSG(error, "GsGSProInterface::SendResults - no simulator connection, nothing sent (the heartbeat timer is reconnecting).");
             return false;
-        }
-
-        if (receive_thread_exited_) {
-            GS_LOG_MSG(error, "GsGSProInterface::SendResults called before the interface was intialized.");
-
-            // If we ended the receive thread, try re-initializing the connection
-            DeInitialize();
-            if (!Initialize()) {
-                GS_LOG_MSG(error, "GsGSProInterface::SendResults called before the interface was intialized.");
-            return false;
-            }
         }
 
         GsGSProResults results(input_results);

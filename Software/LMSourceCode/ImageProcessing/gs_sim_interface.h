@@ -65,8 +65,6 @@ namespace golf_sim {
         // True while this interface has a live connection to its simulator (the heartbeat timer reconnects otherwise).
         virtual bool IsConnected();
 
-        // Tears the connection down and builds it up again. Used by the heartbeat timer.
-        virtual bool Reconnect();
 
         // Base class behavior is to simply print out the JSON
         virtual bool SendResults(const GsResults& results);
@@ -123,9 +121,12 @@ namespace golf_sim {
         // Sends the heartbeat message with the given state to every connected interface, without storing the state.
         static void SendHeartbeatState(bool ball_detected);
 
-        // quiet_connect_failures_ is set by the heartbeat timer around a re-connect attempt that follows an earlier
-        // failed one: it keeps the log quiet.
+        // Set while the heartbeat timer (or the first connect in InitializeSims) runs a connect attempt: the attempt
+        // itself stays quiet and the caller logs the outcome once, with the cause in last_connect_error_.
         bool quiet_connect_failures_ = false;
+        std::string last_connect_error_;
+        // True from the first failed connect of an outage until a connect succeeds again (then the next outage logs
+        // its first failure again).
         bool reconnect_failed_before_ = false;
 
         // Last state sent in a heartbeat; the timer repeats it.
@@ -133,12 +134,15 @@ namespace golf_sim {
         static std::atomic<bool> heartbeat_timer_running_;
         static std::thread heartbeat_thread_;
 
-        // Shots and heartbeats now come from two threads: one sender at a time. Recursive because a send can
-        // re-initialize the socket interface, and that sends a heartbeat itself.
+        // Shots and heartbeats come from two threads: one sender at a time. The heartbeat timer is the only one that
+        // connects: it tears a lost connection down under this mutex, connects WITHOUT holding it (a connect may take
+        // seconds) and publishes the finished connection by setting initialized_ last. Senders only use the socket
+        // when initialized_ is set (checked under this mutex), and a teardown cannot run while a sender holds it.
+        // Recursive because a connect sends a heartbeat itself.
         static boost::recursive_mutex send_mutex_;
 
-        // True if all THIS sim has been initialized
-        bool initialized_;
+        // True if THIS sim is connected and its socket is completely set up (published last by Initialize).
+        std::atomic<bool> initialized_{ false };
 
         GolfSimulatorType simulator_type_;
 

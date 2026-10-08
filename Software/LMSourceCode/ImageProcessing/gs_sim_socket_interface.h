@@ -68,6 +68,9 @@ namespace golf_sim {
         // TBD - Is this thread safe?
         std::atomic<bool> receive_thread_exited_{ false };
 
+        // Set while DeInitialize shuts the receiver down, so that its end is not logged as a lost connection.
+        std::atomic<bool> teardown_requested_{ false };
+
         boost::mutex sim_socket_receive_mutex_;
         boost::mutex sim_socket_send_mutex_;
     };

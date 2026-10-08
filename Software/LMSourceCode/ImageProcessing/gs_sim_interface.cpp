@@ -65,9 +65,14 @@ namespace golf_sim {
 
             interfaces_.push_back(gspro_sim);
 
-            if (!gspro_sim->Initialize()) {
-                GS_LOG_MSG(error, "GSPro simulator interface could not be initialized.");
-                return false;
+            // No simulator yet is not an error: the heartbeat timer keeps trying to connect.
+            gspro_sim->quiet_connect_failures_ = true;
+            bool connected = gspro_sim->Initialize();
+            gspro_sim->quiet_connect_failures_ = false;
+            if (!connected) {
+                gspro_sim->reconnect_failed_before_ = true;
+                GS_LOG_MSG(warning, "GSPro: no simulator yet (" + gspro_sim->last_connect_error_ + "), retrying every " +
+                                    std::to_string(kHeartbeatIntervalMs / 1000) + " s.");
             }
         }
 
@@ -84,9 +89,13 @@ namespace golf_sim {
 
             interfaces_.push_back(e6_sim);
 
-            if (!e6_sim->Initialize()) {
-                GS_LOG_MSG(error, "E6 simulator interface could not be initialized.");
-                return false;
+            e6_sim->quiet_connect_failures_ = true;
+            bool connected = e6_sim->Initialize();
+            e6_sim->quiet_connect_failures_ = false;
+            if (!connected) {
+                e6_sim->reconnect_failed_before_ = true;
+                GS_LOG_MSG(warning, "E6: no simulator yet (" + e6_sim->last_connect_error_ + "), retrying every " +
+                                    std::to_string(kHeartbeatIntervalMs / 1000) + " s.");
             }
         }
 #endif
@@ -285,11 +294,6 @@ namespace golf_sim {
         return initialized_;
     }
 
-    bool GsSimInterface::Reconnect() {
-        DeInitialize();
-        return Initialize();
-    }
-
     void GsSimInterface::StartHeartbeatTimer() {
 #ifdef __unix__  // Ignore in Windows environment
         if (heartbeat_timer_running_.exchange(true)) {
@@ -311,44 +315,52 @@ namespace golf_sim {
                 }
                 waited_ms = 0;
 
-                // One sender at a time: the scan of the interfaces, a re-connect and the send happen under the lock.
-                boost::lock_guard<boost::recursive_mutex> send_lock(send_mutex_);
-                bool reconnected = false;
-                bool any_connected = false;
-                for (auto interface : interfaces_) {
-                    if (interface == nullptr) {
-                        continue;
+                // Phase 1, under the send mutex: repeat the stored heartbeat to the connected interfaces and tear
+                // lost connections down (quick: shutdown, join of the finished receiver, close). From here on
+                // senders see initialized_ == false and fail fast.
+                std::vector<GsSimInterface*> to_connect;
+                {
+                    boost::lock_guard<boost::recursive_mutex> send_lock(send_mutex_);
+                    for (auto interface : interfaces_) {
+                        if (interface == nullptr) {
+                            continue;
+                        }
+                        if (!interface->IsConnected()) {
+                            interface->DeInitialize();
+                            to_connect.push_back(interface);
+                        }
                     }
-                    if (interface->IsConnected()) {
-                        any_connected = true;
-                        continue;
-                    }
+                    // The timer repeats the stored state only; it never overwrites it (only SendHeartbeat callers
+                    // store a new one).
+                    SendHeartbeatState(last_heartbeat_ball_detected_);
+                }
 
-                    // The simulator went away (or never answered): try to connect again every interval. Only the first
-                    // failed attempt is logged at warning level, the following ones at trace level.
-                    interface->quiet_connect_failures_ = true;   // the timer logs the outcome itself
-                    bool ok = interface->Reconnect();
+                // Phase 2, WITHOUT the send mutex (a connect may take up to 3 s): nobody else touches an interface
+                // that is not initialized_, and Initialize sets initialized_ only when the socket is complete. A
+                // successful Initialize sends its own heartbeat (taking the mutex briefly).
+                for (auto interface : to_connect) {
+                    if (!heartbeat_timer_running_) {
+                        break;
+                    }
+                    interface->quiet_connect_failures_ = true;
+                    bool ok = interface->Initialize();
                     interface->quiet_connect_failures_ = false;
                     if (ok) {
                         if (interface->reconnect_failed_before_) {
-                            GS_LOG_MSG(info, "GsSimInterface heartbeat timer: simulator connection re-established.");
+                            GS_LOG_MSG(info, "GsSimInterface heartbeat timer: simulator connection established.");
                         }
                         interface->reconnect_failed_before_ = false;
-                        reconnected = true;
                     }
                     else if (!interface->reconnect_failed_before_) {
                         interface->reconnect_failed_before_ = true;
-                        GS_LOG_MSG(warning, "GsSimInterface heartbeat timer: simulator connection lost; retrying every " +
-                                            std::to_string(kHeartbeatIntervalMs) + " ms.");
+                        GS_LOG_MSG(warning, "GsSimInterface heartbeat timer: simulator connection lost (" +
+                                            interface->last_connect_error_ + "); retrying every " +
+                                            std::to_string(kHeartbeatIntervalMs / 1000) + " s.");
                     }
                     else {
-                        GS_LOG_TRACE_MSG(trace, "GsSimInterface heartbeat timer: simulator re-connect failed again.");
+                        GS_LOG_TRACE_MSG(trace, "GsSimInterface heartbeat timer: simulator connect failed again: " +
+                                                interface->last_connect_error_);
                     }
-                }
-                // A successful re-connect sends its own heartbeat. The timer repeats the stored state only; it never
-                // overwrites it (only SendHeartbeat callers store a new one).
-                if (any_connected && !reconnected) {
-                    SendHeartbeatState(last_heartbeat_ball_detected_);
                 }
             }
         });
