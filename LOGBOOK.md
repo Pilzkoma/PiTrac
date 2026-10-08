@@ -1971,6 +1971,16 @@ BallPhysics C# to GDScript, validating GPU can handle simultaneous vision pipeli
 
 ### 📝 Session Notes
 
+**2026-10-08 — SP4: periodic GSPro heartbeat for Golfinator (branch golfinator-heartbeat)**
+> Golfinator (the owner's UE simulator, plan 3b-1) shows a launch-monitor status and greys it after 5 s without a
+> message. Heartbeats went out only on events, so GsSimInterface now repeats the last heartbeat every 2 s while a
+> simulator interface is initialized (timer thread, recursive send mutex; atexit stops it in test modes).
+> Verified with `pitrac_lm --system_mode test_sim_message --gspro_host_address <PC> --msg_broker_address=tcp://127.0.0.1:61616`
+> against Golfinator's capture tool: heartbeats ~2 s apart, both dummy shots arrived. golf_sim_config.json unchanged
+> (the GSPro address comes from the command line). Merge into main = owner's call.
+> Note: the test run exits with SIGSEGV (139) after "shutting down normally" - gdb: null `producer_thread_` owner in
+> `GolfSimMessageProducer::Shutdown` via `GolfSimIpcSystem::ShutdownIPCSystem` (gs_ipc_system.cpp:203), not the timer.
+
 **2026-03-14**
 
 > Architecture designed at high level. Depends on SP1 for real data.
