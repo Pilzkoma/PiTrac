@@ -195,6 +195,13 @@ namespace golf_sim {
     bool GolfSimIpcSystem::ShutdownIPCSystem() {
         GS_LOG_TRACE_MSG(trace, "GolfSimIpcSystem::ShutdownIPC");
 
+        // Test modes skip the IPC initialization: nothing to shut down (and shutting the ActiveMQ library down
+        // without having initialized it crashes).
+        if (consumer_ == nullptr && producer_ == nullptr) {
+            GS_LOG_TRACE_MSG(trace, "GolfSimIpcSystem::ShutdownIPC - IPC was never initialized.");
+            return true;
+        }
+
         // Consumer may be null if test mode skipped initialization
         if (consumer_ != nullptr) {
             consumer_->Shutdown();
