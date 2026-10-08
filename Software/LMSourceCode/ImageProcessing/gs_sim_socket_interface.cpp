@@ -3,7 +3,9 @@
  * Copyright (C) 2022-2025, Verdant Consultants, LLC.
  */
 
+#include <chrono>
 #include <iostream>
+#include <stdexcept>
 
 #ifdef __unix__  // Ignore in Windows environment
 
@@ -75,7 +77,24 @@ namespace golf_sim {
             }
 
 
-            boost::asio::connect(*socket_, endpoints);
+            // Bounded connect: a simulator PC that drops the SYN (closed port behind a firewall) must not block the
+            // caller (the heartbeat timer holds the send mutex) for the kernel's two-minute connect timeout.
+            const std::chrono::seconds kConnectTimeout(3);
+            boost::system::error_code connect_error = boost::asio::error::would_block;
+            boost::asio::async_connect(*socket_, endpoints,
+                [&connect_error](const boost::system::error_code& e, const tcp::endpoint&) { connect_error = e; });
+            io_context_->restart();
+            io_context_->run_for(kConnectTimeout);
+            if (connect_error == boost::asio::error::would_block) {
+                boost::system::error_code ignored;
+                socket_->close(ignored);   // completes the pending handler with operation_aborted
+                io_context_->restart();
+                io_context_->run();
+                throw std::runtime_error("connect timed out");
+            }
+            if (connect_error) {
+                throw boost::system::system_error(connect_error);
+            }
 
             receive_thread_exited_ = false;
             receiver_thread_ = std::unique_ptr<std::thread>(new std::thread(&GsSimSocketInterface::ReceiveSocketData, this));
