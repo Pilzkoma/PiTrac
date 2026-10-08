@@ -326,7 +326,7 @@ namespace golf_sim {
 
                     // The simulator went away (or never answered): try to connect again every interval. Only the first
                     // failed attempt is logged at warning level, the following ones at trace level.
-                    interface->quiet_connect_failures_ = interface->reconnect_failed_before_;
+                    interface->quiet_connect_failures_ = true;   // the timer logs the outcome itself
                     bool ok = interface->Reconnect();
                     interface->quiet_connect_failures_ = false;
                     if (ok) {
