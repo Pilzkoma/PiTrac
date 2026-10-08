@@ -259,7 +259,12 @@ namespace golf_sim {
         }
 
         last_heartbeat_ball_detected_ = ball_detected;
+        SendHeartbeatState(ball_detected);
+#endif
+    }
 
+    void GsSimInterface::SendHeartbeatState(bool ball_detected) {
+#ifdef __unix__  // Ignore in Windows environment
         GsResults heartbeat;
         heartbeat.result_message_is_keepalive_ = true;
         heartbeat.heartbeat_ball_detected_ = ball_detected;
@@ -267,12 +272,22 @@ namespace golf_sim {
 
         boost::lock_guard<boost::recursive_mutex> send_lock(send_mutex_);
         for (auto interface : interfaces_) {
-            if (interface == nullptr) {
+            // An interface that lost its simulator is brought back by the heartbeat timer, not by a send.
+            if (interface == nullptr || !interface->IsConnected()) {
                 continue;
             }
             interface->SendResults(heartbeat);
         }
 #endif
+    }
+
+    bool GsSimInterface::IsConnected() {
+        return initialized_;
+    }
+
+    bool GsSimInterface::Reconnect() {
+        DeInitialize();
+        return Initialize();
     }
 
     void GsSimInterface::StartHeartbeatTimer() {
@@ -295,16 +310,45 @@ namespace golf_sim {
                     continue;
                 }
                 waited_ms = 0;
-                // Only while a simulator is connected: a failed re-connect leaves initialized_ false, and then the
-                // timer must not fill the log with "called before the interface was initialized" every 2 s.
-                bool any_initialized = false;
+
+                // One sender at a time: the scan of the interfaces, a re-connect and the send happen under the lock.
+                boost::lock_guard<boost::recursive_mutex> send_lock(send_mutex_);
+                bool reconnected = false;
+                bool any_connected = false;
                 for (auto interface : interfaces_) {
-                    if (interface != nullptr && interface->initialized_) {
-                        any_initialized = true;
+                    if (interface == nullptr) {
+                        continue;
+                    }
+                    if (interface->IsConnected()) {
+                        any_connected = true;
+                        continue;
+                    }
+
+                    // The simulator went away (or never answered): try to connect again every interval. Only the first
+                    // failed attempt is logged at warning level, the following ones at trace level.
+                    interface->quiet_connect_failures_ = interface->reconnect_failed_before_;
+                    bool ok = interface->Reconnect();
+                    interface->quiet_connect_failures_ = false;
+                    if (ok) {
+                        if (interface->reconnect_failed_before_) {
+                            GS_LOG_MSG(info, "GsSimInterface heartbeat timer: simulator connection re-established.");
+                        }
+                        interface->reconnect_failed_before_ = false;
+                        reconnected = true;
+                    }
+                    else if (!interface->reconnect_failed_before_) {
+                        interface->reconnect_failed_before_ = true;
+                        GS_LOG_MSG(warning, "GsSimInterface heartbeat timer: simulator connection lost; retrying every " +
+                                            std::to_string(kHeartbeatIntervalMs) + " ms.");
+                    }
+                    else {
+                        GS_LOG_TRACE_MSG(trace, "GsSimInterface heartbeat timer: simulator re-connect failed again.");
                     }
                 }
-                if (any_initialized) {
-                    SendHeartbeat(last_heartbeat_ball_detected_);
+                // A successful re-connect sends its own heartbeat. The timer repeats the stored state only; it never
+                // overwrites it (only SendHeartbeat callers store a new one).
+                if (any_connected && !reconnected) {
+                    SendHeartbeatState(last_heartbeat_ball_detected_);
                 }
             }
         });

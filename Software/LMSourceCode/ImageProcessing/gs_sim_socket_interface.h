@@ -7,6 +7,9 @@
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
+#include <atomic>
+#include <memory>
+#include <thread>
 
 #include "gs_results.h"
 #include "gs_sim_interface.h"
@@ -32,6 +35,9 @@ namespace golf_sim {
 
         // Deals with, for example, shutting down any socket connection
         virtual void DeInitialize();
+
+        // Connected and the receive thread is still alive.
+        virtual bool IsConnected();
 
         virtual bool SendResults(const GsResults& results);
 
@@ -60,7 +66,7 @@ namespace golf_sim {
         std::unique_ptr<std::thread> receiver_thread_ = nullptr;
 
         // TBD - Is this thread safe?
-        bool receive_thread_exited_ = false;
+        std::atomic<bool> receive_thread_exited_{ false };
 
         boost::mutex sim_socket_receive_mutex_;
         boost::mutex sim_socket_send_mutex_;

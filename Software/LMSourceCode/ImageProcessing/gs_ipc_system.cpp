@@ -200,7 +200,10 @@ namespace golf_sim {
             consumer_->Shutdown();
         }
 
-        producer_->Shutdown();
+        // Producer may be null as well if test mode skipped initialization
+        if (producer_ != nullptr) {
+            producer_->Shutdown();
+        }
 
         // TBD - Give other threads a moment to shut down
         sleep(4);

@@ -84,7 +84,9 @@ namespace golf_sim {
         GolfSimConfiguration::SetConstant("gs_config.golf_simulator_interfaces.GSPro.kGSProConnectPort", socket_connect_port_);
 
         if (!GsSimSocketInterface::Initialize()) {
-            GS_LOG_MSG(error, "GsGSProInterface could not Initialize.");
+            if (!quiet_connect_failures_) {
+                GS_LOG_MSG(error, "GsGSProInterface could not Initialize.");
+            }
             return false;
         }
 

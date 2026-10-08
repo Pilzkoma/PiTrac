@@ -62,6 +62,12 @@ namespace golf_sim {
         // De-initialize and destroy and sim interfaces that are configured
         virtual void DeInitialize();
 
+        // True while this interface has a live connection to its simulator (the heartbeat timer reconnects otherwise).
+        virtual bool IsConnected();
+
+        // Tears the connection down and builds it up again. Used by the heartbeat timer.
+        virtual bool Reconnect();
+
         // Base class behavior is to simply print out the JSON
         virtual bool SendResults(const GsResults& results);
 
@@ -113,6 +119,14 @@ namespace golf_sim {
         static bool sims_initialized_;
 
         static long shot_counter_;
+
+        // Sends the heartbeat message with the given state to every connected interface, without storing the state.
+        static void SendHeartbeatState(bool ball_detected);
+
+        // quiet_connect_failures_ is set by the heartbeat timer around a re-connect attempt that follows an earlier
+        // failed one: it keeps the log quiet.
+        bool quiet_connect_failures_ = false;
+        bool reconnect_failed_before_ = false;
 
         // Last state sent in a heartbeat; the timer repeats it.
         static std::atomic<bool> last_heartbeat_ball_detected_;

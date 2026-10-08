@@ -77,6 +77,7 @@ namespace golf_sim {
 
             boost::asio::connect(*socket_, endpoints);
 
+            receive_thread_exited_ = false;
             receiver_thread_ = std::unique_ptr<std::thread>(new std::thread(&GsSimSocketInterface::ReceiveSocketData, this));
 
             // GS_LOG_TRACE_MSG(trace, "Thread was created.  Thread id: " + std::string(receiver_thread_.get()->get_id()) );
@@ -85,7 +86,17 @@ namespace golf_sim {
         }
         catch (std::exception& e)
         {
-            GS_LOG_MSG(error, "Failed TestSimSocketMessage - Error was: " + std::string(e.what()));
+            if (quiet_connect_failures_) {
+                GS_LOG_TRACE_MSG(trace, "Failed TestSimSocketMessage - Error was: " + std::string(e.what()));
+            }
+            else {
+                GS_LOG_MSG(error, "Failed TestSimSocketMessage - Error was: " + std::string(e.what()));
+            }
+            // No receiver thread exists yet: drop the half-built socket so the next attempt starts clean.
+            delete socket_;
+            socket_ = nullptr;
+            delete io_context_;
+            io_context_ = nullptr;
             return false;
         }
 
@@ -106,8 +117,6 @@ namespace golf_sim {
     }
 
     void GsSimSocketInterface::ReceiveSocketData() {
-
-        receive_thread_exited_ = false;
 
         static std::array<char, 2000> buf;
         boost::system::error_code error;
@@ -162,6 +171,7 @@ namespace golf_sim {
 
             if (!ProcessReceivedData(received_data_string)) {
                 GS_LOG_MSG(error, "Failed GsSimSocketInterface::ReceiveSocketData - Could process data: " + received_data_string);
+                receive_thread_exited_ = true;
                 return;
             }
         }
@@ -175,18 +185,26 @@ namespace golf_sim {
         try {
 
             if (receiver_thread_ != nullptr) {
-                /***  TBD - Was locking up
-                GS_LOG_TRACE_MSG(trace, "Waiting for join of receiver_thread_.");
-                receiver_thread_->join();
-                receiver_thread_.release();
-                delete receiver_thread_.get();
-                */
-                GS_LOG_TRACE_MSG(trace, "GsSimSocketInterface::DeInitialize() killing receive thread.");
+                // Unblock the receiver (a shutdown makes the blocking read_some return), then join it.
+                if (socket_ != nullptr && socket_->is_open()) {
+                    boost::system::error_code ignored;
+                    socket_->shutdown(tcp::socket::shutdown_both, ignored);
+                }
 
-#ifdef __unix__  // Ignore in Windows environment
-                pthread_cancel(receiver_thread_.get()->native_handle());
-#endif
-                receiver_thread_ = nullptr;
+                if (receiver_thread_->get_id() == std::this_thread::get_id()) {
+                    // Called from the receiver itself: joining would deadlock.
+                    receiver_thread_->detach();
+                }
+                else if (receiver_thread_->joinable()) {
+                    GS_LOG_TRACE_MSG(trace, "GsSimSocketInterface::DeInitialize() joining the receive thread.");
+                    receiver_thread_->join();
+                }
+                receiver_thread_.reset();
+            }
+
+            if (socket_ != nullptr && socket_->is_open()) {
+                boost::system::error_code ignored;
+                socket_->close(ignored);
             }
 
             // TBD - not sure how to deinitialize the TCP socket stuff
@@ -203,6 +221,10 @@ namespace golf_sim {
         }
 
         initialized_ = false;
+    }
+
+    bool GsSimSocketInterface::IsConnected() {
+        return initialized_ && !receive_thread_exited_;
     }
 
     int GsSimSocketInterface::SendSimMessage(const std::string& message) {
