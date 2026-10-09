@@ -1991,6 +1991,9 @@ BallPhysics C# to GDScript, validating GPU can handle simultaneous vision pipeli
 > `test_sim_message` used to exit 139: `GolfSimIpcSystem::ShutdownIPCSystem` dereferenced the null `producer_`
 > (gs_ipc_system.cpp:203; test mode never initializes IPC) and then called `shutdownLibrary()` without
 > `initializeLibrary()`; it now returns early when IPC was never initialized, exit code 0.
+> Live acceptance with Golfinator passed (2026-10-09): Golfinator's `Tools/jetsonlm/live_acceptance.py` ran
+> `test_sim_message` against Golfinator in the editor (port 921) - player info "Putter" on connect and "Driver" after
+> the switch arrived here, both dummy shots were played and stored, EXIT=0. Owner OK to merge this branch into main.
 
 **2026-03-14**
 
