@@ -11,6 +11,7 @@
 #include "logging_tools.h"
 
 #include "gs_gspro_results.h"
+#include "gs_sim_interface.h"
 
 namespace golf_sim {
 
@@ -41,7 +42,7 @@ namespace golf_sim {
         boost::property_tree::ptree shot_data_options_child;
 
         // Root-level values
-        root.put("DeviceID", "PiTrac LM 0.1");
+        root.put("DeviceID", GsSimInterface::GetLaunchMonitorIdString());
         root.put("Units", "Yards");
         // The shot number should be increased with each shot
         root.put("ShotNumber", shot_number_);

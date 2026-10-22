@@ -21,7 +21,7 @@ namespace golf_sim {
     bool GsSimInterface::sim_system_is_armed_ = false;
     boost::mutex GsSimInterface::sim_arming_mutex_;
     */
-    std::string GsSimInterface::launch_monitor_id_string_ = "PiTrac LM 0.1";
+    std::string GsSimInterface::launch_monitor_id_string_ = "JetsonLM";
 
     std::vector<GsSimInterface*> GsSimInterface::interfaces_;
     bool GsSimInterface::sims_initialized_ = false;

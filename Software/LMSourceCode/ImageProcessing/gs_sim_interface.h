@@ -81,6 +81,9 @@ namespace golf_sim {
         // These static functions operate at the collection level for all interfaces
         static long GetShotCounter() { return shot_counter_; };
 
+        // The DeviceID sent to the simulator (kLaunchMonitorIdString in golf_sim_config.json)
+        static const std::string& GetLaunchMonitorIdString() { return launch_monitor_id_string_; };
+
         // Find the GSPro or E6 or whatever interface (if available) by type
         static GsSimInterface *GetSimInterfaceByType(GolfSimulatorType sim_type);
 

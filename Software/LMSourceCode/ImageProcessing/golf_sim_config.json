@@ -357,7 +357,7 @@
       "GSPro": {
         "kGSProConnectPort": "921"
       },
-      "kLaunchMonitorIdString": "PiTrac LM 0.1",
+      "kLaunchMonitorIdString": "JetsonLM",
       "kSkipSpinCalculation": "0",
       "kWriteSpinAnalysisCsvFiles": "1"
     },
