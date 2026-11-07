@@ -92,9 +92,17 @@ viable and roughly an order of magnitude more accurate at these distances.
    Resolved by design — the bypass in `gs_fsm.cpp` is permanent, not a stub.
    The IR array is event-driven, so stabilization frames are always ambient-lit.
 
-## Calibration — done, 2026-08-09. Do not redo it.
+## Calibration — being redone, 2026-11-07
+**The 2026-08-09 calibration below no longer describes the hardware.** The
+camera plate moved as one piece into a reprinted enclosure, but the owner
+re-aimed the individual cameras on their screws, so the extrinsics are stale.
+That set now lives in `sp1_vision/calibration_images/2026-08-08_bolted/`;
+`cam1/` and `cam2/` take the new capture. Intrinsics and extrinsics are
+re-solved together from it (rules below, `--square-mm 24.27`), then the numbers
+in this section are replaced. Until then the figures below are the old solve.
+
 Both intrinsics and extrinsics come from **one** 24-pair set in
-`sp1_vision/calibration_images/cam1|cam2`, captured after the mount rebuild.
+`sp1_vision/calibration_images/2026-08-08_bolted/cam1|cam2`, captured after the mount rebuild.
 Intrinsics are in `golf_sim_config.json` (2.701 / 2.700 mm, fx 900.38 / 899.99,
 cy 420.05 / 421.09, sensor 3.840 x 2.400 mm), extrinsics in
 `sp1_vision/calibration_results/stereo_extrinsics.json`. Verified reaching the

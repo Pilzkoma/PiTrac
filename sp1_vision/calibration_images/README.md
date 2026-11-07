@@ -1,10 +1,22 @@
 # Calibration capture sets
 
 ```
-cam1/, cam2/           the current set, 2026-08-08, 24 pairs — the source of
-                       both the intrinsics and the extrinsics in use
+cam1/, cam2/           the 2026-11 recapture, in progress (see below)
+2026-08-08_bolted/     24 pairs — the source of both the intrinsics and the
+                       extrinsics in use until the recapture is solved
 2026-08-06_springs/    archived set, superseded (see its own README)
 ```
+
+> **2026-11-07: the 2026-08-08 set moved to `2026-08-08_bolted/`.** The camera
+> plate went into a reprinted enclosure as one piece, but the owner turned the
+> screws of the individual cameras to align them better, so the pair's
+> relative pose changed and the extrinsics no longer describe the hardware.
+> Intrinsics and extrinsics are re-solved together from the new set (same-solve
+> rule, see CLAUDE.md). Until that solve lands, the numbers in
+> `golf_sim_config.json` and `stereo_extrinsics.json` are the 2026-08-08 ones
+> and are wrong for the extrinsics. The section "The current set — 2026-08-08"
+> below describes what is now `2026-08-08_bolted/`; to re-run its solve, set
+> `SET=../../sp1_vision/calibration_images/2026-08-08_bolted`.
 
 `cam1/gs_NN.png` and `cam2/gs_NN.png` with the same NN are one simultaneous
 pair, captured behind a `threading.Barrier` at under 1 ms skew. Matching
