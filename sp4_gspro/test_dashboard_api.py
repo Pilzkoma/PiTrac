@@ -89,6 +89,9 @@ class DashboardApiTest(unittest.TestCase):
             body = r.get_data(as_text=True)
             self.assertIn("Herunterfahren", body)
             self.assertIn("/api/system/shutdown", body)
+            # The button asks first; the request is only sent from the dialog.
+            self.assertIn("Herunterfahren?", body)
+            self.assertIn('id="lm-off-cancel"', body)
 
     def test_player_filtered_exports(self):
         # These queries had a broken "s.(response_code ...)" clause before.

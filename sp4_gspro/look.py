@@ -100,6 +100,8 @@ HEAD = r"""
   .lm-off > div { max-width: 520px; padding: 36px 40px; border-radius: 22px; background: var(--glass);
                   text-align: center; display: flex; flex-direction: column; gap: 14px; }
   .lm-off p { margin: 0; color: var(--muted); line-height: 1.5; }
+  .lm-off p:empty { display: none; }
+  .lm-off-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
 
   @media (max-width: 720px) {
     .lm-header { border-radius: 22px; padding: 10px 12px 10px 18px; gap: 10px; }
@@ -129,11 +131,15 @@ def header_html(active):
   <span class="lm-status"><span class="lm-dot"></span>bereit</span>
   <button type="button" class="pill lm-power" id="lm-power">{icon}Herunterfahren</button>
 </header>
-<div class="lm-off" id="lm-off" role="alertdialog" aria-live="assertive">
+<div class="lm-off" id="lm-off" role="alertdialog" aria-modal="true" aria-labelledby="lm-off-head">
   <div>
     <div class="title">Jetson<i>LM</i></div>
-    <div class="section" id="lm-off-head">Fährt herunter</div>
-    <p id="lm-off-text">Gib ihm etwa 30 Sekunden, bevor du ihm den Strom nimmst.</p>
+    <div class="section" id="lm-off-head">Herunterfahren?</div>
+    <p id="lm-off-text">Wieder an geht er danach nur über das Netzteil.</p>
+    <div class="lm-off-actions" id="lm-off-actions">
+      <button type="button" class="pill" id="lm-off-cancel">Abbrechen</button>
+      <button type="button" class="pill primary" id="lm-off-go">Herunterfahren</button>
+    </div>
   </div>
 </div>
 """.format(stats=nav("stats", "/", "Statistik"),
@@ -143,24 +149,40 @@ def header_html(active):
 
 HEADER_SCRIPT = r"""
 <script>
-document.getElementById('lm-power').onclick = async (e) => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  const off = document.getElementById('lm-off');
-  try {
-    const r = await fetch('/api/system/shutdown', {method: 'POST', headers: {'X-JetsonLM': '1'}});
-    const d = await r.json();
-    if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    off.classList.add('on');
-  } catch (err) {
-    document.getElementById('lm-off-head').textContent = 'Herunterfahren fehlgeschlagen';
-    document.getElementById('lm-off-text').textContent = String(err.message || err);
-    off.classList.add('on');
-    off.onclick = () => { off.classList.remove('on'); btn.disabled = false;
-      document.getElementById('lm-off-head').textContent = 'Fährt herunter';
-      document.getElementById('lm-off-text').textContent =
-        'Gib ihm etwa 30 Sekunden, bevor du ihm den Strom nimmst.'; };
-  }
-};
+// The power button asks first: a stray tap on a phone must not switch the
+// Jetson off. Ask -> working -> done, or back to asking with the reason.
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const off = $('lm-off'), head = $('lm-off-head'), text = $('lm-off-text');
+  const actions = $('lm-off-actions'), go = $('lm-off-go'), cancel = $('lm-off-cancel');
+  let busy = false, done = false;
+  const ask = (h, t) => {
+    head.textContent = h; text.textContent = t;
+    actions.style.display = ''; go.disabled = false; cancel.disabled = false;
+    off.classList.add('on'); cancel.focus();
+  };
+  const close = () => { if (!busy && !done) off.classList.remove('on'); };
+  $('lm-power').onclick = () => ask('Herunterfahren?', 'Wieder an geht er danach nur über das Netzteil.');
+  cancel.onclick = close;
+  off.onclick = (e) => { if (e.target === off) close(); };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  go.onclick = async () => {
+    busy = true; go.disabled = true; cancel.disabled = true;
+    head.textContent = 'Fährt herunter …'; text.textContent = '';
+    try {
+      const r = await fetch('/api/system/shutdown', {method: 'POST', headers: {'X-JetsonLM': '1'}});
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      done = true;
+      actions.style.display = 'none';
+      head.textContent = 'Fährt herunter';
+      text.textContent = 'Gib ihm etwa 30 Sekunden, bevor du ihm den Strom nimmst.';
+    } catch (err) {
+      busy = false;
+      ask('Herunterfahren fehlgeschlagen', String(err.message || err));
+    }
+    busy = false;
+  };
+})();
 </script>
 """
