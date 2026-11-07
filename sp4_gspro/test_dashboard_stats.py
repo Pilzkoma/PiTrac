@@ -142,6 +142,22 @@ class AveragesTest(unittest.TestCase):
         three = two + [shot(1, 3, carry=160, side=0)]
         self.assertIsNotNone(ds.averages_by_club(three)[0]["ellipse"])
 
+    def test_per_player_rows_sit_together(self):
+        shots = [shot(1, 1, "7I", player_id=1, player_name="Max"),
+                 shot(2, 1, "7I", player_id=2, player_name="Lasse"),
+                 shot(2, 2, "DR", player_id=2, player_name="Lasse")]
+        rows = ds.averages_by_club(shots, player_order=[2, 1])
+        self.assertEqual([(a["club"], a["player_name"]) for a in rows],
+                         [("DR", "Lasse"), ("7I", "Lasse"), ("7I", "Max")])   # no "DR, Max" row
+
+    def test_without_order_one_row_per_club(self):
+        shots = [shot(1, 1, "7I", player_id=1, player_name="Max"),
+                 shot(2, 1, "7I", player_id=2, player_name="Lasse")]
+        rows = ds.averages_by_club(shots)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["n"], 2)
+        self.assertIsNone(rows[0]["player_id"])
+
     def test_single_shot_has_no_spread(self):
         a = ds.averages_by_club([shot(1, 1)])[0]
         self.assertIsNone(a["spread_length_m"])

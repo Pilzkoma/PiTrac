@@ -54,7 +54,7 @@ class DashboardApiTest(unittest.TestCase):
     def test_default_is_newest_session_with_shots(self):
         d = self.client.get("/api/stats").get_json()
         # The empty session is newer but has nothing to show.
-        self.assertEqual(d["player_id"], self.kathi)
+        self.assertEqual(d["player_ids"], [self.kathi])
         self.assertEqual(d["period"], "session")
         self.assertEqual(d["session_id"], self.s2)
         self.assertEqual([s["id"] for s in d["sessions"]], [self.s2])
@@ -74,9 +74,35 @@ class DashboardApiTest(unittest.TestCase):
         self.assertEqual({s["club"] for s in d["shots"]}, {"7I"})
         self.assertEqual([c["club"] for c in d["clubs_in_period"]], ["DR", "7I"])
 
-    def test_all_players_all_shots(self):
-        d = self.client.get("/api/stats?player_id=0&period=all").get_json()
+    def test_compare_players(self):
+        url = "/api/stats?player_ids={},{}&period=session".format(self.max, self.kathi)
+        d = self.client.get(url).get_json()
+        self.assertTrue(d["comparing"])
+        # In the order of the player list (by name), whatever order was asked.
+        self.assertEqual(d["player_ids"], [self.kathi, self.max])
+        # A session belongs to one player: a comparison shows everything instead.
+        self.assertEqual(d["period"], "all")
+        self.assertEqual(d["sessions"], [])
         self.assertEqual(len(d["shots"]), 4)
+        self.assertEqual({s["player_name"] for s in d["shots"]}, {"Max", "Kathi"})
+        rows = [(a["club"], a["player_name"]) for a in d["averages"]]
+        self.assertEqual(rows, [("DR", "Max"), ("7I", "Max"), ("PW", "Kathi")])
+
+    def test_one_player_has_no_player_rows(self):
+        d = self.client.get("/api/stats?player_ids={}".format(self.max)).get_json()
+        self.assertFalse(d["comparing"])
+        self.assertTrue(all(a["player_id"] is None for a in d["averages"]))
+        self.assertEqual({s["player_name"] for s in d["shots"]}, {"Max"})
+
+    def test_unknown_players_fall_back_to_newest(self):
+        d = self.client.get("/api/stats?player_ids=999,abc").get_json()
+        self.assertEqual(d["player_ids"], [self.kathi])
+
+    def test_export_for_compared_players(self):
+        r = self.client.get("/api/export/club_averages?player_ids={},{}".format(self.max, self.kathi))
+        lines = r.get_data(as_text=True).strip().splitlines()
+        self.assertTrue(lines[0].startswith("player,club,"))
+        self.assertEqual(len(lines), 1 + 3)   # Kathi PW, Max DR, Max 7I
 
     def test_unknown_session_falls_back(self):
         d = self.client.get("/api/stats?player_id={}&session_id=9999".format(self.max)).get_json()

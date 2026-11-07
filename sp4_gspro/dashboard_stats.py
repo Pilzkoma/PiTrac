@@ -129,6 +129,8 @@ def shot_view(row):
         "carry_m": None if carry_yd is None else carry_yd * YARDS_TO_M,
         "side_m": None if flight is None else flight["offline_yards"] * YARDS_TO_M,
         "apex_m": None if flight is None else flight["apex_yards"] * YARDS_TO_M,
+        "player_id": row.get("player_id"),
+        "player_name": row.get("player_name"),
     }
 
 
@@ -196,11 +198,26 @@ def clubs_in(shots):
     return sorted({s["club"] for s in shots}, key=club_sort_key)
 
 
-def averages_by_club(shots):
-    """One row per club in bag order: count, means and the two spreads."""
-    rows = []
+def averages_by_club(shots, player_order=None):
+    """One row per club in bag order: count, means and the two spreads.
+
+    With player_order (player ids), one row per club and player instead,
+    the players of a club next to each other in that order, so a comparison
+    reads down the table. Players without shots of a club get no row.
+    """
+    groups = []
     for cid in clubs_in(shots):
-        mine = [s for s in shots if s["club"] == cid]
+        of_club = [s for s in shots if s["club"] == cid]
+        if player_order is None:
+            groups.append((cid, None, of_club))
+            continue
+        for pid in player_order:
+            mine = [s for s in of_club if s["player_id"] == pid]
+            if mine:
+                groups.append((cid, pid, mine))
+
+    rows = []
+    for cid, pid, mine in groups:
         ball, _ = moments(s["ball_kmh"] for s in mine)
         carry, carry_sd = moments(s["carry_m"] for s in mine)
         apex, _ = moments(s["apex_m"] for s in mine)
@@ -213,6 +230,8 @@ def averages_by_club(shots):
             "club": cid,
             "club_name": club_name(cid),
             "color": club_color(cid),
+            "player_id": pid,
+            "player_name": mine[0].get("player_name") if pid is not None else None,
             "n": len(mine),
             "ball_kmh": ball,
             "vla": vla,
