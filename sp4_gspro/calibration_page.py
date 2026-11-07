@@ -21,6 +21,8 @@ import time
 import cv2
 from flask import Blueprint, Response, jsonify, render_template_string
 
+import look
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -36,6 +38,11 @@ IMAGE_ROOT = os.path.join(_REPO_ROOT, "sp1_vision", "calibration_images")
 # The analysis scripts, run as subprocesses from their own directory.
 CALIB_DIR = os.path.join(_REPO_ROOT, "Software", "CalibrateCameraDistortions")
 
+# The printed board's square, measured with a ruler over 8 and 5 squares on
+# 2026-09-24. It scales the stereo translation and so sets the baseline; the
+# solver's own default is the 24.0 mm that was 1.1 % short.
+SQUARE_MM = 24.27
+
 # Generous: twenty pairs of 1280x800 through calibrateCamera plus a stereo
 # solve is slow on a Jetson, and a spurious timeout mid-run would be worse
 # than waiting.
@@ -47,62 +54,52 @@ STREAM_FPS = 15
 
 CALIBRATION_HTML = r"""
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Jetson LM — Calibration</title>
+<title>Jetson LM — Kalibrierung</title>
+{{ head|safe }}
 <style>
-  :root { --bg:#0c1117; --surface:#161b22; --line:#26303d;
-          --text:#e6edf3; --muted:#8b949e; --ok:#3fb950; --bad:#f85149; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-         font-family: 'DM Sans', system-ui, sans-serif; padding:24px; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  p.sub { color:var(--muted); margin:0 0 24px; font-size:14px; max-width:70ch; }
-  a.back { color:var(--muted); text-decoration:none; font-size:14px; }
+  p.sub { color:var(--muted); margin:12px 0 24px; font-size:14px; line-height:1.55; max-width:80ch; }
   .cams { display:flex; gap:16px; flex-wrap:wrap; }
-  .cam { background:var(--surface); border:1px solid var(--line);
-         border-radius:10px; padding:12px; flex:1 1 420px; }
-  .cam img { width:100%; border-radius:6px; display:block; background:#000; }
-  .score { font-family:'JetBrains Mono', monospace; font-size:22px;
-           margin-top:8px; }
-  .score small { color:var(--muted); font-size:12px; font-family:inherit; }
+  .cam { background:var(--chip); border:1px solid var(--line);
+         border-radius:16px; padding:12px; flex:1 1 420px; min-width:0; }
+  .cam img { width:100%; border-radius:10px; display:block; background:#000; aspect-ratio:16/10; }
+  .score { font:600 26px var(--serif); margin-top:10px; font-variant-numeric:tabular-nums lining-nums; }
+  .score small { color:var(--muted); font:400 11px var(--sans); letter-spacing:0.2em; text-transform:uppercase; }
   .bar { height:6px; background:var(--line); border-radius:3px;
          margin-top:6px; overflow:hidden; }
-  .bar > div { height:100%; background:var(--ok); width:0%; transition:width .2s; }
+  .bar > div { height:100%; background:var(--sage); width:0%; transition:width .2s; }
   .controls { margin-top:24px; display:flex; gap:12px; align-items:center;
               flex-wrap:wrap; }
-  button { background:#238636; color:#fff; border:0; border-radius:6px;
-           padding:10px 18px; font-size:14px; cursor:pointer; }
-  button.secondary { background:var(--surface); border:1px solid var(--line);
-                     color:var(--text); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  #log { margin-top:20px; background:var(--surface); border:1px solid var(--line);
-         border-radius:10px; padding:14px; font-family:'JetBrains Mono', monospace;
+  #count { color:var(--muted); font-size:13px; }
+  #log { margin-top:20px; background:rgba(0,0,0,0.25); border:1px solid var(--line);
+         border-radius:16px; padding:14px; font-family:ui-monospace, 'JetBrains Mono', Consolas, monospace;
          font-size:13px; max-height:420px; overflow-y:auto; white-space:pre-wrap; }
-  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); }
+  .ok { color:var(--sage); } .bad { color:var(--alert); } .muted { color:var(--muted); }
 </style>
 </head>
 <body>
-<a class="back" href="/">&larr; Dashboard</a>
-<h1>Camera Calibration</h1>
-<p class="sub">Focus each lens until its score peaks, then capture around 20 board pairs.
-Hold the board at working distance, reaching the image corners as well as the centre,
-in ordinary room light. Retake any pair that does not report a board in both cameras —
-a pair is only useful if both halves found it.
-Switch away from this tab and the previews stop, so the cameras are handed back
-after two idle minutes rather than running hot for as long as the page is open.</p>
+{{ header|safe }}
+<main class="sheet">
+<h1 class="title">Kalibrierung <i>Kameras</i></h1>
+<p class="sub">Jedes Objektiv drehen, bis sein Wert am höchsten ist, dann rund 24 Brettpaare aufnehmen:
+Brett aufgestellt oder angelehnt, nicht in der Hand, Abstände über 30–90 cm verteilt, 20–45° gekippt,
+das untere Bilddrittel mit abgedeckt. Ein Paar, bei dem nicht beide Kameras das Brett finden, neu aufnehmen —
+nur Paare mit Brett in beiden Hälften zählen.
+Wechselst du den Tab, halten die Vorschauen an; die Kameras werden dann nach zwei Minuten
+freigegeben, statt heiß zu laufen, solange die Seite offen ist.</p>
 
 <div class="cams">
   <div class="cam">
-    <img src="/calibration/stream/1" alt="camera 1">
-    <div class="score">cam 1 &nbsp; <span id="s1">—</span> <small>sharpness</small></div>
+    <img src="/calibration/stream/1" alt="Kamera 1">
+    <div class="score">cam 1 &nbsp; <span id="s1">—</span> <small>Schärfe</small></div>
     <div class="bar"><div id="b1"></div></div>
   </div>
   <div class="cam">
-    <img src="/calibration/stream/2" alt="camera 2">
-    <div class="score">cam 2 &nbsp; <span id="s2">—</span> <small>sharpness</small></div>
+    <img src="/calibration/stream/2" alt="Kamera 2">
+    <div class="score">cam 2 &nbsp; <span id="s2">—</span> <small>Schärfe</small></div>
     <div class="bar"><div id="b2"></div></div>
   </div>
 </div>
@@ -110,13 +107,14 @@ after two idle minutes rather than running hot for as long as the page is open.<
 <p id="mode" style="margin:14px 0 0; font-size:14px">&nbsp;</p>
 
 <div class="controls">
-  <button id="cap">Capture pair</button>
-  <button id="run" class="secondary">Run calibration</button>
-  <button id="rel" class="secondary">Release cameras</button>
-  <span id="count" style="color:var(--muted)"></span>
+  <button id="cap" class="pill primary">Paar aufnehmen</button>
+  <button id="run" class="pill">Kalibrierung rechnen</button>
+  <button id="rel" class="pill">Kameras freigeben</button>
+  <span id="count"></span>
 </div>
 
-<div id="log">ready</div>
+<div id="log">bereit</div>
+</main>
 
 <script>
 const log = (msg, cls) => {
@@ -159,7 +157,7 @@ document.addEventListener('visibilitychange', () => {
   setStreams(!document.hidden);
   if (!document.hidden) poll();
   document.getElementById('mode').innerHTML = document.hidden
-    ? '<span class="muted">paused — tab hidden</span>' : '&nbsp;';
+    ? '<span class="muted">angehalten — Tab im Hintergrund</span>' : '&nbsp;';
 });
 
 let peak = {1: 1, 2: 1};
@@ -174,9 +172,9 @@ async function poll() {
       lastMode = d.on_board;
     }
     document.getElementById('mode').innerHTML = d.on_board
-      ? '<span class="ok">measuring the board</span>'
-      : '<span class="bad">no board in view — measuring the frame centre, '
-        + 'which is the room, not your lens</span>';
+      ? '<span class="ok">misst das Brett</span>'
+      : '<span class="bad">kein Brett im Bild — gemessen wird die Bildmitte, '
+        + 'also der Raum, nicht dein Objektiv</span>';
     for (const n of [1, 2]) {
       const v = d['cam' + n];
       if (v === null) continue;
@@ -193,7 +191,7 @@ poll();
 async function refreshCount() {
   const r = await fetch('/calibration/status');
   const d = await r.json();
-  document.getElementById('count').textContent = d.pairs + ' pairs captured';
+  document.getElementById('count').textContent = d.pairs + (d.pairs === 1 ? ' Paar' : ' Paare') + ' aufgenommen';
 }
 refreshCount();
 
@@ -202,11 +200,11 @@ document.getElementById('cap').onclick = async (e) => {
   try {
     const r = await fetch('/calibration/capture', {method: 'POST'});
     const d = await r.json();
-    if (d.error) log('capture failed: ' + d.error, 'bad');
-    else log('pair ' + d.index + ':  cam1 ' + (d.found1 ? 'board' : '  --  ') +
-             '   cam2 ' + (d.found2 ? 'board' : '  --  ') +
-             '   skew ' + d.skew_ms.toFixed(1) + ' ms' +
-             (d.found1 && d.found2 ? '' : '   <- move the board and retry'),
+    if (d.error) log('Aufnahme fehlgeschlagen: ' + d.error, 'bad');
+    else log('Paar ' + d.index + ':  cam1 ' + (d.found1 ? 'Brett' : '  --  ') +
+             '   cam2 ' + (d.found2 ? 'Brett' : '  --  ') +
+             '   Versatz ' + d.skew_ms.toFixed(1) + ' ms' +
+             (d.found1 && d.found2 ? '' : '   <- Brett verschieben und neu aufnehmen'),
              d.found1 && d.found2 ? 'ok' : 'bad');
     await refreshCount();
   } finally {
@@ -216,15 +214,15 @@ document.getElementById('cap').onclick = async (e) => {
 
 document.getElementById('run').onclick = async (e) => {
   e.target.disabled = true;
-  log('\nrunning calibration - this takes a while, the page is not stuck...');
+  log('\nKalibrierung läuft - das dauert, die Seite hängt nicht...');
   try {
     const r = await fetch('/calibration/run', {method: 'POST'});
     const d = await r.json();
     if (d.report) log(d.report);
     if (d.error) log(d.error, 'bad');
-    else log('done', 'ok');
+    else log('fertig', 'ok');
   } catch (err) {
-    log('calibration request failed: ' + err, 'bad');
+    log('Anfrage fehlgeschlagen: ' + err, 'bad');
   } finally {
     e.target.disabled = false;
   }
@@ -232,9 +230,10 @@ document.getElementById('run').onclick = async (e) => {
 
 document.getElementById('rel').onclick = async () => {
   await fetch('/calibration/release', {method: 'POST'});
-  log('cameras released - pitrac_lm can open them again');
+  log('Kameras freigegeben - pitrac_lm kann sie wieder öffnen');
 };
 </script>
+{{ header_script|safe }}
 </body>
 </html>
 """
@@ -275,7 +274,9 @@ def _run_script(name, args):
 
 @calibration_bp.route("/calibration")
 def calibration_page():
-    return render_template_string(CALIBRATION_HTML)
+    return render_template_string(CALIBRATION_HTML, head=look.HEAD,
+                                  header=look.header_html("calibration"),
+                                  header_script=look.HEADER_SCRIPT)
 
 
 @calibration_bp.route("/calibration/stream/<int:camera_number>")
@@ -393,6 +394,7 @@ def calibration_run():
         "--cam2-npz", "/tmp/cam2.npz",
         "--cam1-images", cam1,
         "--cam2-images", cam2,
+        "--square-mm", str(SQUARE_MM),
     ]))
 
     parts.append(
