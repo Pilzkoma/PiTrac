@@ -58,6 +58,10 @@ db = None  # initialized in main()
 # simulation each, so its view is computed once per process.
 _shot_views = {}
 
+DOWNLOAD_ICON = ('<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                 '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>')
+
 # A shot counts unless the simulator rejected it.
 ACCEPTED = "(s.response_code IS NULL OR s.response_code = 200)"
 
@@ -85,9 +89,9 @@ STATS_HTML = r"""
                 background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 24 24' fill='none' stroke='%23ECE5D8' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
                 background-repeat: no-repeat; background-position: right 6px center; }
   select.bare option { background: #1b231d; color: var(--cream); }
-  .exports { margin-left: auto; display: flex; gap: 14px; font-size: 12px; letter-spacing: 0.14em;
-             text-transform: uppercase; color: var(--muted); }
-  .exports a { text-decoration: none; }
+  .exports { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+  .exports a.pill { text-decoration: none; }
+  .exports a.pill:hover { color: var(--cream); }
 
   .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin: 20px 0;
              padding: 14px 18px; border-radius: 16px; background: var(--chip); }
@@ -151,9 +155,9 @@ STATS_HTML = r"""
 <main class="sheet">
   <div class="stats-head">
     <h1 class="title">Statistik <i id="period-title">&nbsp;</i></h1>
-    <div class="exports"><span>CSV</span>
-      <a id="csv-shots" href="/api/export/all_shots">Schüsse</a>
-      <a id="csv-clubs" href="/api/export/club_averages">Durchschnitte</a></div>
+    <div class="exports">
+      <a class="pill" id="csv-shots" href="/api/export/all_shots" download>{{ download_icon|safe }}Schüsse · CSV</a>
+      <a class="pill" id="csv-clubs" href="/api/export/club_averages" download>{{ download_icon|safe }}Durchschnitte · CSV</a></div>
   </div>
 
   <div class="filters">
@@ -470,7 +474,8 @@ setInterval(() => { if (!document.hidden) load(false); }, 5000);
 def index():
     return render_template_string(STATS_HTML, head=look.HEAD,
                                   header=look.header_html("stats"),
-                                  header_script=look.HEADER_SCRIPT)
+                                  header_script=look.HEADER_SCRIPT,
+                                  download_icon=DOWNLOAD_ICON)
 
 
 # ---------------------------------------------------------------------------
