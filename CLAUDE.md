@@ -152,30 +152,33 @@ default. Test for staleness by changing exposure between grabs, not by comparing
 frames of a static scene.
 
 ## Current task
-0. **Next session opens with the strobe on the perfboard.** The owner is
-   soldering the 2026-05-12-tested circuit onto a perfboard (wire list in the
-   LOGBOOK entry of 2026-09-24) and it should be built by then. Start
-   with `sudo python3 Hardware/teensy_strobe/test_strobe_bypass.py` (flashes
-   visible through a phone camera, PSU ammeter twitches), then the first
-   strobe-lit captures. If the bypass test fails, check the wiring against
-   that list before touching any software.
+Done since 2026-09-24: the strobe circuit is soldered on the perfboard in the
+finished enclosure (bypass test passed 2026-11, both arrays fire); the Jetson
+runs on WiFi at 192.168.178.43; the dashboard was rebuilt in the Golfinator
+look with a power-off button (Golfinator asks on quit); the pair was
+recalibrated (see Calibration).
 
-   **The ambient-lit measurement runs are closed.** The scale they chased was
-   settled with a ruler on the calibration board (see Calibration). Run 6
-   (2026-09-24, corrected scale) gives the attitude against the floor: pitch
-   −1.55°, roll −0.50°, cam1 117.5 mm up. Run 7 was dropped on purpose: the
-   owner found the static ambient-lit protocol needlessly complicated, and it
-   tests conditions the device never works in. **Next is the IR strobe** —
-   real strobe-lit frames are where detector work pays off, and the only
-   honest test of garage conditions (direct sun is a known open question for
-   any 850 nm system). If a static run is ever needed again: contrast check
-   first (`contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`),
-   and on a surround brighter than ~90 grey levels analyse with
-   `--refiner contrast`; never mix refiners within a run.
-   Results: `sp1_vision/triangulation_run/README.md`.
+**The ambient-lit measurement runs are closed.** Run 6 (2026-09-24) gave the
+attitude against the floor (pitch −1.55°, roll −0.50°, cam1 117.5 mm up), but
+that was the old enclosure and the old calibration — re-measure before relying
+on it. If a static run is ever needed again: contrast check first
+(`contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`), and on a
+surround brighter than ~90 grey levels analyse with `--refiner contrast`; never
+mix refiners within a run. Results: `sp1_vision/triangulation_run/README.md`.
 
 Next SP1 items, in this order:
-1. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
+1. **Strobe-lit captures** — first run done 2026-11-10, see
+   `sp1_vision/strobe_runs/README.md` (tool: `sp1_vision/strobe_capture.py`).
+   The flash puts ~50–100× more light on the ball than room lamps; at 1 ms
+   exposure the room is black and the ball white. Fire → frame arrival 11–20 ms.
+   8 ms exposure catches every flash; short exposures only by chance, and **the
+   two cameras are not in phase**, so a short exposure often shows the flash in
+   one camera only. cam1 clips on a 0.5 ms pulse, cam2 gets about half.
+   Open before relying on it: remove the arrays' photocells (they cut the LEDs
+   in daylight), re-solder the Pin 29 → Teensy Pin 2 line (dropped out twice),
+   balance the arrays, test in garage daylight, and check that the 2026-11-10
+   calibration reaches the C++ in a trace run.
+2. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
    not equally important:
    - `kCameraNPositionsFromExpectedBallMeters` (cam1 `[-0.200, -0.234, 0.54]`, cam2
      `[0.0, -0.051, 0.45]`). **Note the name** — `kCameraNPositionsFromOriginMeters`
@@ -195,11 +198,15 @@ Next SP1 items, in this order:
      camera stacking. Ours sit side by side at 80.47 mm, so until this is changed the
      delta path carries a 19 cm offset that does not exist. Note the axis permutation
      at 701-703: `position_deltas_ball_perspective_` takes offset `[2],[1],[0]`.
-2. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
+3. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
    still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.49 mm
    of depth per pixel of disparity error (~1.8 mm at half-pixel matching), which is
    the largest accuracy gain available.
-3. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false.
+4. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false. The UVC cameras
+   have no trigger pin, so this needs its own mechanism. Item 1 settled the
+   constraint: the cameras free-run out of phase with each other, so both only
+   see the same flash with a long exposure (~8 ms) or a pulse train spanning a
+   frame period.
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike

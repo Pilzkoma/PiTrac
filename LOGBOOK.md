@@ -1715,6 +1715,32 @@ PiTrac's key techniques:
 > sieht die Blitze, Stromanzeige am Netzteil zuckt. Danach die ersten
 > Aufnahmen mit Blitz.
 
+**2026-11-10 — Neu kalibriert, und der erste Blitz im Bild.**
+
+> **Kalibrierung** nach dem neuen Gehäuse (Kameras an den Schrauben neu
+> ausgerichtet): 32 Paare, fx 916,9 / 918,7, Basislinie 80,47 mm, Nicken
+> −0,44°, Gieren +0,58°, Rollen +0,28°. Ein erster Satz am selben Tag war
+> unbrauchbar, weil das Brett beim Anlehnen ~3 mm durchhing (fx 951); er liegt
+> als Beleg in `2026-11-10_bent_board/`. Prüfung neu: Teilmengen durch die
+> ganze Kette lösen und die triangulierten Positionen vergleichen (Median
+> 1–5 mm, der Augustsatz 10–12 mm). (`73b99de`)
+>
+> **Erster Blitz.** `sp1_vision/strobe_capture.py`: beide Kameras streamen,
+> der Teensy feuert einen Puls, jedes Bild wird mit Ankunftszeit und
+> Helligkeitsanstieg protokolliert. Der Blitz ist am Ball 50–100× heller als
+> das Raumlicht; vom Auslösen bis zum Bild 11–20 ms; bei 8 ms Belichtung
+> landet jeder Blitz, bei kurzer nur zufällig, und die beiden Kameras laufen
+> nicht im gleichen Takt. Einzelheiten: `sp1_vision/strobe_runs/README.md`.
+>
+> **Drei Hardwarefehler unterwegs**, die den Blitz erst unsichtbar oder
+> zufällig machten: Wackelkontakt im Zweipolstecker der LED-Versorgung
+> (ersetzt durch Einzelcrimps), die Fotowiderstände der Cenpek-Boards
+> (dimmen bei Raumlicht, abgedeckt, sollen raus) und die Auslöseleitung
+> Pin 29 → Teensy Pin 2 (zweimal ausgefallen, nachlöten). Der Jetson-Pin
+> selbst schaltet sauber 0 ↔ 3,3 V. Lehre: Blitzhelligkeit nur bei leerer
+> Szene beurteilen — Hand und Brett nah an der Linse täuschen bis +85
+> Graustufen vor.
+
 \---
 
 \---
