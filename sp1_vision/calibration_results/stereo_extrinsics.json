@@ -1,6 +1,7 @@
 {
   "method": "cv.stereoCalibrate with CALIB_FIX_INTRINSIC",
   "pairs_used": [
+    "gs_01.png",
     "gs_02.png",
     "gs_03.png",
     "gs_04.png",
@@ -12,6 +13,9 @@
     "gs_10.png",
     "gs_11.png",
     "gs_12.png",
+    "gs_13.png",
+    "gs_14.png",
+    "gs_15.png",
     "gs_16.png",
     "gs_17.png",
     "gs_18.png",
@@ -19,39 +23,46 @@
     "gs_20.png",
     "gs_21.png",
     "gs_22.png",
-    "gs_23.png"
+    "gs_23.png",
+    "gs_24.png",
+    "gs_25.png",
+    "gs_27.png",
+    "gs_28.png",
+    "gs_29.png",
+    "gs_30.png",
+    "gs_31.png",
+    "gs_32.png"
   ],
   "square_mm": 24.27,
-  "square_mm_note": "Measured 2026-09-24 on the printed board with a ruler: 194.5 mm over 8 squares (24.31) and 121.0 mm over 5 (24.20), 315.5 mm over 13 = 24.27 mm. The solve ran with 24.0; the square size scales ONLY the translation, so translation_mm and baseline_mm were multiplied by 24.27/24.0 = 1.01125. Rotation, rms and the intrinsics in golf_sim_config.json do not depend on it.",
-  "rms_px": 0.8458383644738413,
-  "baseline_mm": 79.6351526482401,
+  "rms_px": 0.8053315147000428,
+  "baseline_mm": 80.47302429570527,
   "cad_baseline_mm": 80.0,
   "translation_mm": [
-    79.59589650904053,
-    -0.2817349608189615,
-    -2.4842346190452975
+    80.42927954755609,
+    0.9094951067149277,
+    2.4922779558283445
   ],
   "rotation_matrix": [
     [
-      0.9998768379999031,
-      0.014330895320616073,
-      0.006397989576820911
+      0.9999375178511783,
+      -0.004894379363440239,
+      0.010050146480088317
     ],
     [
-      -0.014434173109043678,
-      0.9997613360531411,
-      0.016398950573024065
+      0.004816634759145513,
+      0.9999584038734067,
+      0.007745356837856774
     ],
     [
-      -0.006161450963346622,
-      -0.016489280534573676,
-      0.9998450580712386
+      -0.010087637147592718,
+      -0.007696465006447685,
+      0.9999194987613669
     ]
   ],
   "rotation_deg": {
-    "pitch_about_x": -0.942259575369039,
-    "yaw_about_y": 0.3598324601750028,
-    "roll_about_z": -0.8241294910424971
+    "pitch_about_x": -0.44238921925031,
+    "yaw_about_y": 0.5769227534358179,
+    "roll_about_z": 0.2782086206624637
   },
   "frame": "X right along the baseline, Y down, Z forward. Camera 1 is the left module facing the unit."
 }

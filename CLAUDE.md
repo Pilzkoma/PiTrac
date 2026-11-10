@@ -13,19 +13,17 @@ hardware, they get changed.
 ## Target hardware
 - NVIDIA Jetson Xavier NX (JetPack 5.1.6, Ubuntu 20.04, CUDA 11.4, OpenCV 4.5.4)
 - 2x Arducam B0332 OV9281 mono global shutter, **USB 2.0 UVC**, 70°(H) low-distortion
-  M12 lens (**measured 2.701 / 2.700 mm**, interchangeable but staying, focus adjustable
+  M12 lens (**calibrated 2.751 / 2.756 mm**, interchangeable but staying, focus adjustable
   by screwing the lens). 1280x800 @ 120 FPS MJPG measured. The cameras USB-autosuspend
   when idle (`control=auto`, 2 s) and the dashboard hands the V4L2 nodes back after
   120 s idle — they are not powered up between uses.
-- Cameras mounted **side by side, calibrated baseline 79.64 mm** (CAD says 80.00;
-  the −1.6 % once blamed on print shrinkage was mostly a 24.0 mm square size for a
-  board printed at 24.27 — see Calibration), optical axes parallel to within pitch −0.92°, yaw +0.43°,
-  roll −0.85°. **The mount is no longer adjustable:** the 3-point spring/screw kinematic
-  mount was stripped of its springs on 2026-08-08 and the plate bolted down solid. That
-  rebuild *inverted* pitch and roll rather than nulling them, and only improved yaw;
-  all three are far under the 3° where rectification starts costing frame height, so
-  they stay as they are. Changing the aim is now a rework, not a turn of a screw —
-  and it invalidates the stereo extrinsics, so it drags a recalibration with it.
+- Cameras mounted **side by side, calibrated baseline 80.47 mm** (CAD says 80.00),
+  optical axes parallel to within pitch −0.44°, yaw +0.58°, roll +0.28°
+  (2026-11-10, see Calibration). The camera plate is bolted solid (springs removed
+  2026-08-08); the individual cameras can still be turned on their screws, which the
+  owner did when moving to the reprinted enclosure. Any re-aim invalidates the
+  stereo extrinsics and drags a full recalibration with it. All three angles are far
+  under the 3° where rectification starts costing frame height.
 - The unit sits on the floor. The lower image corners cannot be reached with a
   calibration board and are not worth reaching; see
   `sp1_vision/calibration_images/README.md`.
@@ -92,30 +90,42 @@ viable and roughly an order of magnitude more accurate at these distances.
    Resolved by design — the bypass in `gs_fsm.cpp` is permanent, not a stub.
    The IR array is event-driven, so stabilization frames are always ambient-lit.
 
-## Calibration — being redone, 2026-11-07
-**The 2026-08-09 calibration below no longer describes the hardware.** The
-camera plate moved as one piece into a reprinted enclosure, but the owner
-re-aimed the individual cameras on their screws, so the extrinsics are stale.
-That set now lives in `sp1_vision/calibration_images/2026-08-08_bolted/`;
-`cam1/` and `cam2/` take the new capture. Intrinsics and extrinsics are
-re-solved together from it (rules below, `--square-mm 24.27`), then the numbers
-in this section are replaced. Until then the figures below are the old solve.
+## Calibration — 2026-11-10, reprinted enclosure
+The camera plate moved as one piece into a reprinted enclosure and the owner
+re-aimed the individual cameras on their screws, so the pair was recalibrated.
+Both intrinsics and extrinsics come from **one** 32-pair set in
+`sp1_vision/calibration_images/cam1|cam2` (board glued flat on a rigid plate,
+28–100 cm, leans to ~60°, all thirds of the frame covered), solved with
+`--square-mm 24.27` straight from the tools, no hand correction:
+- Intrinsics in `golf_sim_config.json`: fx 916.85 / 918.70, fy 912.07 / 915.19,
+  cx 638.3 / 641.2, cy 386.6 / 389.7 (2.751 / 2.756 mm, sensor 3.840 x 2.400 mm),
+  RMS 0.60 / 0.58 px on 29 / 28 images.
+- Extrinsics in `sp1_vision/calibration_results/stereo_extrinsics.json`: baseline
+  80.47 mm, pitch −0.442°, yaw +0.577°, roll +0.278°, stereo RMS 0.81 px on 31 pairs.
+- Not yet verified reaching the C++ in a trace run.
 
-Both intrinsics and extrinsics come from **one** 24-pair set in
-`sp1_vision/calibration_images/2026-08-08_bolted/cam1|cam2`, captured after the mount rebuild.
-Intrinsics are in `golf_sim_config.json` (2.701 / 2.700 mm, fx 900.38 / 899.99,
-cy 420.05 / 421.09, sensor 3.840 x 2.400 mm), extrinsics in
-`sp1_vision/calibration_results/stereo_extrinsics.json`. Verified reaching the
-C++ in a live trace run.
+How far to trust it, by the test that matters: each half/odd/even subset
+re-solved end to end (both intrinsics + stereo) moves triangulated board
+positions by a median 1–5 mm (≤1 % of depth) against the full set; one weak
+half (the frontal sweep and tilts only) moves 11 mm. The 2026-08-08 set, put
+through the same test, moves 10–12 mm. **Individual parameters still wander
+across subsets** (fx 913–934, cy 367–414, pitch −0.65…+0.06°) — they trade off
+against each other while the geometry they produce stays put. The old set
+wandered as much (fx 895–935, pitch −0.26…−1.08°); its documented "stable"
+spreads were measured with the intrinsics held fixed, which hides exactly this.
 
-**Square size corrected 2026-09-24:** the board's squares are **24.27 mm**
-(ruler over 8 and 5 squares), not the 24.0 the solve used. The square size
-scales the stereo translation and nothing else, so `translation_mm` and
-`baseline_mm` were multiplied by 1.01125 in place (baseline 78.75 → 79.64 mm);
-rotation and intrinsics are untouched and still from the same solve. Any
-re-solve must pass `--square-mm 24.27`.
+**The board must be flat.** A first attempt the same day (32 pairs, archived in
+`2026-11-10_bent_board/`, do not solve against it) had the print clipped onto a
+backing that bowed ~3 mm across its width when leaned back. It drove fx to 951,
+which is physically impossible for a lens focused sharp at 50 cm (refocusing
+30 cm↔∞ moves the image distance under 1 %). Test: a flat board fits an exact
+homography in the image centre where distortion is negligible; the bowed shots
+left 1.8–2.3 px against 0.2 px for good ones, identical in both cameras.
 
-Two rules that cost a session to learn:
+The previous set (2026-08-08, fx ≈ 900, baseline 79.64 mm after the 24.27 mm
+square correction of 2026-09-24) is in `2026-08-08_bolted/` as a record.
+
+Rules that cost sessions to learn:
 - **Intrinsics and extrinsics must come from the same solve.** `CALIB_FIX_INTRINSIC`
   makes the stereo step absorb whatever error the camera matrices carry into R and T,
   so the pair is only self-consistent together. Mixing sources is the one combination
@@ -123,7 +133,9 @@ Two rules that cost a session to learn:
 - **A low RMS does not mean the answer is determined.** Two intrinsic sets gave pitch
   −0.745° and −1.834° at an identical RMS of 0.90, because `cy` was unconstrained.
   To test whether a number is real, re-solve on subsets and against a second
-  intrinsics source — not by reading the residual.
+  intrinsics source — not by reading the residual. Re-solve the **whole chain**
+  per subset and compare triangulated positions; comparing single parameters
+  with the intrinsics held fixed overstates the stability.
 
 `2026-08-06_springs/` is a superseded archive, kept as the record of the pre-rebuild
 geometry. It is worse on every figure. Do not solve against it.
@@ -180,7 +192,7 @@ Next SP1 items, in this order:
      so they are the ones that actually matter.
    - `kCamera2OffsetFromCamera1OriginMeters` = `[0.00, -0.19, 0.0]`, added at
      `gs_camera.cpp:700-703` and `lm_main.cpp:865`. This is PiTrac's **vertical** 19 cm
-     camera stacking. Ours sit side by side at 79.64 mm, so until this is changed the
+     camera stacking. Ours sit side by side at 80.47 mm, so until this is changed the
      delta path carries a 19 cm offset that does not exist. Note the axis permutation
      at 701-703: `position_deltas_ball_perspective_` takes offset `[2],[1],[0]`.
 2. **Triangulation.** Nothing consumes the extrinsics yet; the ball-position path is
