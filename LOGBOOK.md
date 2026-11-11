@@ -1752,6 +1752,17 @@ PiTrac's key techniques:
 > (Dashboard geöffnet) setzte ihn zurück: wieder +108 / +115. Vor
 > Helligkeitsmessungen also erst auf Automatik einregeln, dann fest stellen.
 > Einzelheiten: `sp1_vision/strobe_runs/README.md`.
+>
+> **Nachtrag, gleicher Abend:** Der Lampeneffekt war nur zum Teil das
+> Hängenbleiben. Auch nach dem Einregeln gab es unter allen Lampen nur
+> +72 / +57. Ursache ist eine feste, gekrümmte Kennlinie der Kameras:
+> Je höher der Ball durch Raumlicht schon liegt, desto weniger Graustufen
+> bringt derselbe Blitz. Gamma 72 (Minimum) ist die geradeste Einstellung
+> (doppelter Blitz → 1,75-facher Beitrag, bei Gamma 100 → 1,65).
+> `strobe_capture.py` misst jetzt mit Einregeln und Gamma 72.
+> **Kalibrierung im C++ bestätigt:** `pitrac_lm` Trace zeigt Matrix
+> 916,85 / 912,07, Brennweite 2,751 mm. `pitrac_lm` beendet sich nach dem
+> Test nicht von selbst (musste mit `kill -9` gestoppt werden).
 
 \---
 

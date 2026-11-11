@@ -122,18 +122,40 @@ dark patch over the image centre**, near black in the middle — static over 9 s
 so no insect. It vanished within seconds of the dashboard opening the camera
 with auto exposure, and the contribution came back to +115.
 
-So the modules' built-in image processor keeps adapting while exposure is set
-to manual (`exposure_auto=1`, gain 0, all visible controls identical on both
-cameras), and can get stuck in a state that darkens the frame. cam1's halving
-under the lamp is very likely the same mechanism in a milder form.
+Two different things were mixed up in this table, and the first reading
+("the processor keeps adapting") was only half right:
 
-Consequences:
-- **Reset before measuring:** let each camera settle on auto exposure, then
-  switch to manual. Measure strobe brightness only after that, and check both
-  cameras agree.
-- Brightness-based detection must not assume the reported grey levels are a
-  fixed function of the light; garage daylight will push this harder than a
-  room lamp.
-- The adaptive processing is not reachable through the standard V4L2
-  controls. Whether Arducam's vendor (UVC extension unit) controls can switch
-  it off is open.
+1. **cam2's dark patch was a stuck state** in the module's image processor —
+   static, with every visible V4L2 control identical to cam1, cleared by one
+   auto-exposure pass. Cause unknown.
+2. **The lamp effect is a fixed, compressive tone curve, not adaptation.**
+   Even after an auto-exposure reset, all lamps on gave +72 / +57 against
+   +120 / +118 in the dim room. A gamma sweep under the lamps shows why
+   (cam1, 8 ms exposure, ball centre; cam2 alike):
+
+   | gamma | ambient on ball | 0.1 ms flash | 0.2 ms flash | ratio (linear = 2.0) |
+   |---|---|---|---|---|
+   | **72** (minimum) | 43 | +61 | +107 | **1.75** |
+   | 100 (default) | 72 | +62 | +103 | 1.65 |
+   | 200 | 138 | +49 | +75 | 1.53 |
+   | 500 | 202 | +26 | +39 | 1.47 |
+
+   The higher the ambient puts the ball on the curve, the fewer grey levels
+   the same flash adds. Raising `gain` shows the same compression (gain
+   0 → 32: ambient above black ×1.8, flash contribution ×1.46).
+
+Consequences, now built into `strobe_capture.py`:
+- **Settle on auto exposure before every switch to manual** (against 1).
+- **Measure at gamma 72**, the straightest curve the control offers; 100 is
+  restored afterwards. With all lamps on: 0.1 ms +65, 0.2 ms +115.
+- Grey-level differences are not proportional to light. Comparing flash
+  energy across runs needs the same ambient level, or an inverse of the curve
+  measured with a pulse series. Detection only needs the ball to stand out,
+  which it does.
+- Production capture (`V4L2Capture` in `pitrac_lm`) does not set gamma and so
+  runs at 100. Worth switching to 72 there too when strobe frames go into
+  the C++ path.
+- Vendor controls: the modules are Sonix bridges (`0c45:6366`) with two UVC
+  extension units, one of them Sonix's undocumented register interface. Not
+  touched — nothing above needs it, and writing blind registers can brick a
+  module.

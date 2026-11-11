@@ -175,15 +175,16 @@ Next SP1 items, in this order:
    two cameras are not in phase**, so a short exposure often shows the flash in
    one camera only. 2026-11-11, photocells removed and trigger line
    re-soldered: 12/12 flashes arrive, both cameras see the ball within 1–2 %,
-   0.1 ms already puts it mid-range and 0.3 ms clips. **The modules' own image
-   processor keeps adapting in manual exposure** and once stuck cam2 with a dark
-   patch over the image centre (flash contribution +114 → +18) until an
-   auto-exposure pass reset it; bright lamps also halved cam1's contribution.
-   Before any brightness measurement, settle on auto exposure, then go manual,
-   and check the cameras agree (details in the strobe README). Still open:
-   whether vendor (UVC XU) controls can switch that adaptation off, garage
-   daylight, and checking that the 2026-11-10 calibration reaches the C++ in a
-   trace run.
+   0.1 ms already puts it mid-range and 0.3 ms clips. Two camera traps
+   (details in the strobe README): the module's image processor once **stuck
+   cam2 with a dark patch** over the image centre until an auto-exposure pass
+   reset it, and the output follows a **compressive tone curve**, so the same
+   flash adds fewer grey levels on a brighter background (all lamps on: +72
+   instead of +120). `strobe_capture.py` therefore settles on auto exposure
+   before going manual and measures at **gamma 72** (the straightest curve
+   offered; `pitrac_lm` still runs at the default 100). The 2026-11-10
+   calibration reaches the C++ (trace 2026-11-11: matrix 916.85…, focal
+   2.751 mm). Still open: garage daylight.
 2. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
    not equally important:
    - `kCameraNPositionsFromExpectedBallMeters` (cam1 `[-0.200, -0.234, 0.54]`, cam2

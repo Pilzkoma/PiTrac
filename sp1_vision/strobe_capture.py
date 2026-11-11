@@ -35,6 +35,7 @@ summary.
 import argparse
 import csv
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -53,6 +54,15 @@ FIRE_PIN_BOARD = 29
 DASHBOARD_RELEASE = "http://127.0.0.1:5000/calibration/release"
 
 PRE_S = 0.25            # streaming before the fire
+AUTO_SETTLE_S = 3.0     # streaming on auto exposure before going manual
+
+# The modules' output follows a compressive tone curve: the higher the ambient
+# level on the ball, the fewer grey levels the same flash adds. gamma=72, the
+# control's minimum, is the straightest curve on offer (a doubled flash gives
+# 1.75x the grey levels, against 1.65x at the default 100 and 1.47x at 500;
+# 2026-11-11). Measurements run at 72; the default is restored afterwards.
+MEASURE_GAMMA = 72
+DEFAULT_GAMMA = 100
 POST_S = 0.25           # streaming after it
 SETTLE_S = 0.6          # after an exposure change, before the first run
 TEENSY_BAUD_UNIT = 10000  # BAUD 10000 -> ON_BITS counts 100 us steps
@@ -60,6 +70,10 @@ TEENSY_BAUD_UNIT = 10000  # BAUD 10000 -> ON_BITS counts 100 us steps
 # A frame counts as flash-lit when the 99th percentile of (frame - baseline)
 # exceeds the same figure between two ambient frames by this many grey levels.
 LIT_THRESHOLD = 8.0
+
+# Half-size of the square patch at the ball centre used for its brightness
+# (the ball's radius is ~45 px at the working distance).
+BALL_PATCH = 18
 
 
 # ----------------------------------------------------------------- hardware
@@ -145,6 +159,33 @@ def open_cameras():
     return caps
 
 
+def set_gamma(caps, value):
+    for _, dev in caps.values():
+        try:
+            subprocess.run(["v4l2-ctl", "--device={}".format(dev),
+                            "--set-ctrl=gamma={}".format(int(value))],
+                           check=False, capture_output=True, timeout=5)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+
+def settle_on_auto(caps, seconds=AUTO_SETTLE_S):
+    """Let each module's image processor re-converge on auto exposure.
+
+    The modules keep adapting internally with exposure on manual and can get
+    stuck: on 2026-11-11 cam2 sat with a dark patch over the image centre and
+    reported a sixth of the flash, while every visible V4L2 control was
+    identical to cam1. One auto-exposure pass reset it. So every switch to
+    manual is preceded by a few seconds of streaming on auto.
+    """
+    for _, dev in caps.values():
+        set_manual_exposure(dev, None)
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        for cap, _ in caps.values():
+            cap.read()
+
+
 # ------------------------------------------------------------------ capture
 
 def stream(cap, stop, out):
@@ -224,6 +265,15 @@ def analyse(run_id, exposure_units, pulse_us, t_fire, got, outdir, rows):
             cv2.imwrite(os.path.join(outdir, name + "_flash.png"), peak[2])
             diff = cv2.subtract(peak[2], base_img)
             cv2.imwrite(os.path.join(outdir, name + "_diff.png"), diff)
+            # The ball is the most flash-lit compact spot: it is white and the
+            # nearest thing to the arrays. Its centre patch gives the flash's
+            # contribution on the ball (flash minus ambient).
+            blur = cv2.GaussianBlur(diff.astype(np.float32), (0, 0), 25)
+            by, bx = np.unravel_index(int(np.argmax(blur)), blur.shape)
+            y0, y1 = max(0, by - BALL_PATCH), by + BALL_PATCH
+            x0, x1 = max(0, bx - BALL_PATCH), bx + BALL_PATCH
+            ball_ambient = float(base_img[y0:y1, x0:x1].mean())
+            ball_flash = float(peak[2][y0:y1, x0:x1].mean())
             summary[n] = {
                 "frames": len(stats), "gaps": gaps,
                 "lit": len(lit),
@@ -233,6 +283,9 @@ def analyse(run_id, exposure_units, pulse_us, t_fire, got, outdir, rows):
                 "flash_mean": peak[3],
                 "diff_p999": float(np.percentile(diff, 99.9)),
                 "diff_max": int(diff.max()),
+                "ball_xy": (int(bx), int(by)),
+                "ball_ambient": ball_ambient,
+                "ball_flash": ball_flash,
             }
         else:
             summary[n] = {"frames": len(stats), "gaps": gaps, "lit": 0,
@@ -249,6 +302,9 @@ def main():
     ap.add_argument("--repeats", type=int, default=6)
     ap.add_argument("--out", default=None, help="output directory (default /tmp/strobe_<time>)")
     ap.add_argument("--label", default="", help="free text stored with the run, e.g. 'lights off'")
+    ap.add_argument("--gamma", type=int, default=MEASURE_GAMMA,
+                    help="V4L2 gamma during the run, 72..500 (default %(default)s, the most "
+                         "linear); " + str(DEFAULT_GAMMA) + " is restored afterwards")
     args = ap.parse_args()
 
     exposures = [int(x) for x in args.exposures.split(",") if x]
@@ -264,7 +320,9 @@ def main():
     results = []
     run_id = 0
     try:
+        set_gamma(caps, args.gamma)
         for e in exposures:
+            settle_on_auto(caps)
             for _, dev in caps.values():
                 set_manual_exposure(dev, e)
             time.sleep(SETTLE_S)
@@ -281,15 +339,17 @@ def main():
                         if "error" in d:
                             line += "| cam%d %s " % (n, d["error"])
                         elif d["lit"]:
-                            line += ("| cam%d lit %d at %s ms rise %s  diff p99.9 %3.0f max %3d  gaps %d "
+                            line += ("| cam%d lit %d at %s ms  ball %3.0f->%3.0f (%+4.0f) at %s  gaps %d "
                                      % (n, d["lit"], ",".join("%.1f" % x for x in d["delays_ms"]),
-                                        "/".join("%.0f" % r for r in d["rises"]),
-                                        d["diff_p999"], d["diff_max"], d["gaps"]))
+                                        d["ball_ambient"], d["ball_flash"],
+                                        d["ball_flash"] - d["ball_ambient"],
+                                        "%d,%d" % d["ball_xy"], d["gaps"]))
                         else:
                             line += "| cam%d NOT LIT  base %3.0f  gaps %d " % (n, d["base_p999"], d["gaps"])
                     print(line, flush=True)
                     time.sleep(0.2)
     finally:
+        set_gamma(caps, DEFAULT_GAMMA)
         for cap, dev in caps.values():
             cap.release()
             set_manual_exposure(dev, None)
