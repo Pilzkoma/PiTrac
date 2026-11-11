@@ -233,8 +233,12 @@ Next SP1 items, in this order:
    0.1 ms gave +115; the biggest v1 risk, 15 minutes to settle; (b) chips, to
    build the per-flash matching of several ball images per frame (same image
    row in both cameras, order along the path, an irregular flash pattern);
-   (c) full swings; then the live version in `pitrac_lm` watching a window
-   round the rest ball. One pattern must serve putts (images overlap at 1 ms)
+   (c) full swings - **not possible indoors for now** (no garage for a while,
+   nothing to catch the ball): short chips only, plus throws across the view
+   onto a blanket (~10-15 m/s); spread the flash interval (e.g. 4 ms) to make
+   a chip's images as far apart as a fast ball's. Full swings once there is a
+   garage or a net/blanket to hit into; then the live version in `pitrac_lm`
+   watching a window round the rest ball. One pattern must serve putts (images overlap at 1 ms)
    and drives (7.5 cm apart): mixed intervals or a fast/slow switch as
    PiTrac has. The
    power LED blinks fast while recording (`sp4_gspro/jetsonlm-led`); slow
