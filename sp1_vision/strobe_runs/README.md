@@ -31,9 +31,10 @@ room light ~2. At 1 ms exposure the room is near black and the ball white.
 Even at 8 ms exposure the flash is ~8× the ambient on the ball. Direct sun in
 the garage is still untested.
 
-**cam1 saturates on the shortest pulse; cam2 gets about half.** The right-hand
-array is weaker or aimed differently. Real measurement runs must choose pulse
-length (or gain) so neither camera clips.
+**cam1 saturates on the shortest pulse; cam2 gets about half** — in this run.
+It was not the arrays: the right-hand board's photocell was still dimming it
+through the tape. With the photocells removed the two cameras agree to 1–2 %
+(next section).
 
 ### Where the flash lands
 
@@ -75,3 +76,64 @@ All three made the flash look absent or random before this run:
 A flash that comes back from a hand or the calibration board held near the
 lens reads up to +85 grey levels on the whole frame, so judge strobe
 brightness only with an empty scene.
+
+## 2026-11-11 — after the fixes
+
+Photocells desoldered from both boards, trigger line re-soldered. Same scene,
+8 ms exposure, 12 runs (raw data only on the Jetson, `/tmp/strobe_run3`).
+Both cameras run identical V4L2 settings (gain 0, gamma 100, contrast 32).
+
+- **Trigger: 12/12 flashes arrived, in both cameras.**
+- Ball centre (dark level ≈ 24):
+
+  | flash | cam1 | cam2 |
+  |---|---|---|
+  | 0.1 ms | 140 | 138–139 |
+  | 0.3 ms | 238–239 | 237 (once 141) |
+  | 0.5 ms | 244 (saturated) | 244 (saturated) |
+
+- **The cameras agree to 1–2 %**; the arrays need no balancing.
+- **0.1 ms is already enough** — mid-range on the ball; 0.3 ms clips. Short
+  is what a moving ball needs anyway (6 mm of travel per 0.1 ms at 60 m/s).
+- The one 141 at 0.3 ms is a flash straddling the ~0.33 ms gap between an
+  8.0 ms exposure and the 8.33 ms frame period — about one flash in twenty
+  loses part of its light that way.
+
+## 2026-11-11 — the cameras' own processing changes what they report
+
+Brighter room lamps (one lighting the ball from the right, one from above),
+same flash, ball in the same place to 5 px. The flash's **contribution** on the
+ball — flash frame minus ambient frame, which more ambient light must not
+change — dropped:
+
+| 0.1 ms flash, 8 ms exposure | cam1 | cam2 |
+|---|---|---|
+| dim room (above) | +116 | +114 |
+| both lamps on | +53 | +19 |
+| lamps off again | +110 | +18 |
+| right lamp only | +61 | +19 |
+| top lamp only | +93 | +18 |
+| after the dashboard ran the cameras on auto exposure | **+108** | **+115** |
+
+Not the arrays (photocells desoldered, both look equal on a phone camera),
+not backlight compensation (on/off: no change), not cabling or focus
+(re-plugging cam2 did not help). cam2 meanwhile showed a **fixed, soft, round
+dark patch over the image centre**, near black in the middle — static over 9 s,
+so no insect. It vanished within seconds of the dashboard opening the camera
+with auto exposure, and the contribution came back to +115.
+
+So the modules' built-in image processor keeps adapting while exposure is set
+to manual (`exposure_auto=1`, gain 0, all visible controls identical on both
+cameras), and can get stuck in a state that darkens the frame. cam1's halving
+under the lamp is very likely the same mechanism in a milder form.
+
+Consequences:
+- **Reset before measuring:** let each camera settle on auto exposure, then
+  switch to manual. Measure strobe brightness only after that, and check both
+  cameras agree.
+- Brightness-based detection must not assume the reported grey levels are a
+  fixed function of the light; garage daylight will push this harder than a
+  room lamp.
+- The adaptive processing is not reachable through the standard V4L2
+  controls. Whether Arducam's vendor (UVC extension unit) controls can switch
+  it off is open.

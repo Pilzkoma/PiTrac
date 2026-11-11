@@ -1741,6 +1741,18 @@ PiTrac's key techniques:
 > Szene beurteilen — Hand und Brett nah an der Linse täuschen bis +85
 > Graustufen vor.
 
+**2026-11-11 — Fotowiderstände ausgelötet, Auslöseleitung nachgelötet.**
+
+> 12/12 Blitze kommen an, beide Kameras sehen den Ball auf 1–2 % gleich hell;
+> 0,1 ms Blitz reicht schon. Dann der Fallstrick: Unter hellen Zimmerlampen
+> sank der Blitzbeitrag (Kamera 1 +116 → +53, Kamera 2 → +18), Kamera 2 zeigte
+> einen festen, runden dunklen Fleck in der Bildmitte. Weder Arrays noch Kabel
+> noch Fokus — der eingebaute Bildprozessor der Kameras regelt trotz fester
+> Belichtung weiter und blieb hängen. Ein Durchlauf mit Belichtungsautomatik
+> (Dashboard geöffnet) setzte ihn zurück: wieder +108 / +115. Vor
+> Helligkeitsmessungen also erst auf Automatik einregeln, dann fest stellen.
+> Einzelheiten: `sp1_vision/strobe_runs/README.md`.
+
 \---
 
 \---

@@ -173,11 +173,17 @@ Next SP1 items, in this order:
    exposure the room is black and the ball white. Fire → frame arrival 11–20 ms.
    8 ms exposure catches every flash; short exposures only by chance, and **the
    two cameras are not in phase**, so a short exposure often shows the flash in
-   one camera only. cam1 clips on a 0.5 ms pulse, cam2 gets about half.
-   Open before relying on it: remove the arrays' photocells (they cut the LEDs
-   in daylight), re-solder the Pin 29 → Teensy Pin 2 line (dropped out twice),
-   balance the arrays, test in garage daylight, and check that the 2026-11-10
-   calibration reaches the C++ in a trace run.
+   one camera only. 2026-11-11, photocells removed and trigger line
+   re-soldered: 12/12 flashes arrive, both cameras see the ball within 1–2 %,
+   0.1 ms already puts it mid-range and 0.3 ms clips. **The modules' own image
+   processor keeps adapting in manual exposure** and once stuck cam2 with a dark
+   patch over the image centre (flash contribution +114 → +18) until an
+   auto-exposure pass reset it; bright lamps also halved cam1's contribution.
+   Before any brightness measurement, settle on auto exposure, then go manual,
+   and check the cameras agree (details in the strobe README). Still open:
+   whether vendor (UVC XU) controls can switch that adaptation off, garage
+   daylight, and checking that the 2026-11-10 calibration reaches the C++ in a
+   trace run.
 2. **World geometry.** Three live constants still hold PiTrac's numbers, and they are
    not equally important:
    - `kCameraNPositionsFromExpectedBallMeters` (cam1 `[-0.200, -0.234, 0.54]`, cam2
