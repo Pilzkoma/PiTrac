@@ -1,0 +1,68 @@
+{
+  "shots": [
+    {
+      "name": "gs_01.png",
+      "tape_mm": 300.0,
+      "series": "depth",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    },
+    {
+      "name": "gs_02.png",
+      "tape_mm": 400.0,
+      "series": "depth",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    },
+    {
+      "name": "gs_03.png",
+      "tape_mm": 500.0,
+      "series": "depth",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    },
+    {
+      "name": "gs_04.png",
+      "tape_mm": 600.0,
+      "series": "depth",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72,
+      "note": "typed 500, ball was at 600 (owner confirmed)"
+    },
+    {
+      "name": "gs_05.png",
+      "tape_mm": 700.0,
+      "series": "depth",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    },
+    {
+      "name": "gs_06.png",
+      "tape_mm": 500.0,
+      "series": "spread",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    },
+    {
+      "name": "gs_07.png",
+      "tape_mm": 500.0,
+      "series": "spread",
+      "found": true,
+      "strobe_pulse_us": 200,
+      "exposure_us": 8000,
+      "gamma": 72
+    }
+  ]
+}

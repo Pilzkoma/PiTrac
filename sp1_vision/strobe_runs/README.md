@@ -1,5 +1,10 @@
 # Strobe-lit captures
 
+Contents:
+- `2026-11-10_first_flash/` — where a flash lands, how bright (below).
+- `2026-11-11_triangulation/` — first stereo measurement under the flash
+  (last section).
+
 Measured with `sp1_vision/strobe_capture.py`: both cameras stream at 120 fps,
 the Teensy fires one pulse from Pin 29 mid-stream, and every frame is logged
 with its arrival time after the fire and how far it rose above the run's
@@ -159,3 +164,39 @@ Consequences, now built into `strobe_capture.py`:
   extension units, one of them Sonix's undocumented register interface. Not
   touched — nothing above needs it, and writing blind registers can brick a
   module.
+
+## 2026-11-11 — triangulation under the flash, `2026-11-11_triangulation/`
+
+First stereo measurement with strobe-lit pairs and the 2026-11-10
+calibration. Captured with `sp1_vision/strobe_pair.py` (one position per
+call: 8 ms exposure, 0.2 ms flash, gamma 72, auto-exposure pass first),
+analysed unchanged with `python3 -m sp1_vision.cli_triangulate --analyse`.
+The shot images in `cam1/`, `cam2/` are **flash minus ambient**, linearly
+stretched; `raw/` keeps the flash and ambient frames. The difference is what
+makes the detector work: on the plain flash frame with room lamps on, the
+patterned carpet gave two "ball-shaped objects".
+
+Layout: a rule on the floor straight out from the unit, zero at camera 1's
+lens end, ball centred between the cameras; tape read at the ball's near
+edge. Depth line 300–700 mm, plus one position ~16 cm left and one ~14 cm
+right at 500 mm. gs_04 was typed as 500 and corrected to 600 in `run.json`
+(the ball was at 600; the owner confirmed, and Z says so).
+
+| tape (near edge) mm | 300 | 400 | 500 | 600 | 700 |
+|---|---|---|---|---|---|
+| Z (ball centre) mm | 361.0 | 462.6 | 558.6 | 659.4 | 762.7 |
+
+- **Scale 1.0003 ± 0.0067**, residual 1.64 mm over 300–700 mm — the
+  calibration's metric scale holds under the flash (implied baseline
+  80.45 ± 0.54 mm against the file's 80.47). Reprojection 0.01–0.55 px, all
+  7 positions found in both cameras.
+- **Attitude in the reprinted enclosure:** pitch **+1.60°** (nose up; the old
+  enclosure was −1.55°), roll +0.36°, camera 1 **111.9 mm** above the floor;
+  plane rms 0.51 mm. The depth line rises +1.61° in camera coordinates,
+  echoing the pitch, so the floor is level. Yaw not measured (no target-line
+  shots — it describes a session's placement, not the unit).
+- Lens-plane offset +60.7 mm. 21.3 mm of that is the ball radius (near-edge
+  reading), leaving ~39 mm between the tape's zero and camera 1's optical
+  centre — more than an M12 lens suggests. Unresolved whether the zero sat
+  exactly at the lens end; it does not affect the scale.
+- No repeats, so the scale's stderr is from scatter only.

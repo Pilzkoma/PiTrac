@@ -158,10 +158,14 @@ runs on WiFi at 192.168.178.43; the dashboard was rebuilt in the Golfinator
 look with a power-off button (Golfinator asks on quit); the pair was
 recalibrated (see Calibration).
 
-**The ambient-lit measurement runs are closed.** Run 6 (2026-09-24) gave the
-attitude against the floor (pitch −1.55°, roll −0.50°, cam1 117.5 mm up), but
-that was the old enclosure and the old calibration — re-measure before relying
-on it. If a static run is ever needed again: contrast check first
+**Attitude against the floor, reprinted enclosure (2026-11-11, strobe-lit
+triangulation, `sp1_vision/strobe_runs/2026-11-11_triangulation/`):** pitch
+**+1.60°** (nose up), roll +0.36°, camera 1 **111.9 mm** above the floor; scale
+against the tape 1.0003 ± 0.0067, residual 1.6 mm over 300–700 mm. Capture a
+position with `python3 -m sp1_vision.strobe_pair --out RUNDIR --tape MM
+--series d|s|t`, analyse with `cli_triangulate --analyse RUNDIR`. The
+ambient-lit runs (up to run 6, old enclosure: pitch −1.55°, 117.5 mm) are
+closed and superseded. If a static run is ever needed again: contrast check first
 (`contrast_check.py` in the gitignored `.superpowers/sdd/...block1/`), and on a
 surround brighter than ~90 grey levels analyse with `--refiner contrast`; never
 mix refiners within a run. Results: `sp1_vision/triangulation_run/README.md`.

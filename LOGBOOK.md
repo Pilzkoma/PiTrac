@@ -1763,6 +1763,13 @@ PiTrac's key techniques:
 > **Kalibrierung im C++ bestätigt:** `pitrac_lm` Trace zeigt Matrix
 > 916,85 / 912,07, Brennweite 2,751 mm. `pitrac_lm` beendet sich nach dem
 > Test nicht von selbst (musste mit `kill -9` gestoppt werden).
+>
+> **Erste Triangulation unter Blitz** (`sp1_vision/strobe_pair.py`, eine
+> Position pro Aufruf, gesucht wird im Differenzbild Blitz minus Raumlicht):
+> 7 Positionen, alle in beiden Kameras gefunden. Maßstab gegen das Maßband
+> **1,0003 ± 0,0067**, Rest 1,6 mm über 300–700 mm — die neue Kalibrierung
+> stimmt. Lage im neuen Gehäuse: Nicken **+1,60°**, Rollen +0,36°, Kamera 1
+> **111,9 mm** über dem Boden. Einzelheiten: `sp1_vision/strobe_runs/README.md`.
 
 \---
 
