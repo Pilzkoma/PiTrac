@@ -222,9 +222,21 @@ Next SP1 items, in this order:
    positive difference → stereo → robust constant-velocity fit. Offline tools
    `sp1_vision/strobe_shot.py` (record) and `strobe_event.py` (find, measure);
    three putts at 1.06-1.39 m/s, rms 7-9 mm (`sp1_vision/strobe_runs/README.md`).
-   Next: chips and faster shots (short pulses, flash-pattern identification of
-   the ball images since the cameras' frames are up to 4 ms apart), then the
-   live version in `pitrac_lm` watching a window round the rest ball. The
+   **Drivers are in scope for v1, and the approach carries them:** with the
+   strobe on, the FLASH is the shutter - a ball image's instant is its flash,
+   the same for both cameras whatever their frame phase - so stereo pairs
+   ball image to ball image by flash, not frame to frame (the 4 ms frame
+   offset only limits today's whole-frame pairing), and time resolution is
+   the flash rate, not 120 fps. Next session, in this order: (a) short-pulse
+   brightness on a static ball, 20/30/50 µs - at 75 m/s a 0.1 ms flash
+   smears 7.5 mm, spin marks need ~25 µs, which gives ~+30 grey levels where
+   0.1 ms gave +115; the biggest v1 risk, 15 minutes to settle; (b) chips, to
+   build the per-flash matching of several ball images per frame (same image
+   row in both cameras, order along the path, an irregular flash pattern);
+   (c) full swings; then the live version in `pitrac_lm` watching a window
+   round the rest ball. One pattern must serve putts (images overlap at 1 ms)
+   and drives (7.5 cm apart): mixed intervals or a fast/slow switch as
+   PiTrac has. The
    power LED blinks fast while recording (`sp4_gspro/jetsonlm-led`); slow
    blink for "ball ready" comes with the live version.
 
