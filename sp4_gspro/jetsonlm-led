@@ -1,0 +1,39 @@
+#!/bin/bash
+# jetsonlm-led - the carrier's power LED as the unit's status light.
+#
+#   jetsonlm-led on     steady on (the power-on default: unit idle)
+#   jetsonlm-led slow   slow blink (ball found, ready to hit)
+#   jetsonlm-led fast   fast blink (recording under the strobe)
+#   jetsonlm-led off
+#
+# /sys/class/leds/pwr is writable by root only and offers no kernel blink
+# trigger on this carrier, so blinking is a small background loop whose PID
+# is kept in /run. Installed root-owned to /usr/local/sbin by
+# install_system_permissions.sh, which also lets `brain` run it via sudo
+# without a password - it accepts these four words and nothing else.
+set -eu
+
+LED=/sys/class/leds/pwr/brightness
+PIDFILE=/run/jetsonlm-led.pid
+
+stop_blink() {
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE")" 2>/dev/null || true
+        rm -f "$PIDFILE"
+    fi
+}
+
+blink() {
+    stop_blink
+    setsid bash -c "while true; do echo 255 > $LED; sleep $1; echo 0 > $LED; sleep $2; done" \
+        >/dev/null 2>&1 < /dev/null &
+    echo $! > "$PIDFILE"
+}
+
+case "${1:-}" in
+    on)   stop_blink; echo 255 > "$LED" ;;
+    off)  stop_blink; echo 0 > "$LED" ;;
+    slow) blink 0.5 0.5 ;;
+    fast) blink 0.1 0.1 ;;
+    *)    echo "usage: jetsonlm-led on|off|slow|fast" >&2; exit 2 ;;
+esac

@@ -17,6 +17,23 @@
 //   READY?                          → READY | WAITING_SETUP
 //   STATUS                          → multi-field state dump
 //   TEST_FIRE                       → FIRED  (manual fire without Jetson GPIO)
+//   RUN[,max_ms]                    → OK | ERR <reason>   continuous strobe
+//   STOP                            → OK <pulses fired>
+//
+// Continuous strobe (added 2026-11-11). The UVC cameras free-run without a
+// trigger input and deliver frames 11-20 ms late, so reacting to a hit is
+// impossible; instead the strobe runs continuously while armed, both cameras
+// expose nearly the whole frame period, and the shot is found afterwards in a
+// ring buffer (sp1_vision/strobe_runs/README.md). RUN repeats the ACTIVE
+// mode's interval list cyclically - each entry is ON for on_pulse_us, then off
+// for the interval - until STOP or max_ms (default 60 s, cap 10 min). A
+// trailing 0 (the end marker of a one-shot train) is ignored; other zero
+// intervals are refused, as is a duty cycle above MAX_RUN_DUTY. While running,
+// the FIRE pin and TEST_FIRE are ignored and the status LED is off.
+// Timing is polled in loop(): the pulse width is a blocking
+// delayMicroseconds (exact), the schedule accumulates without drift, and the
+// serial handling between pulses costs at most a few microseconds of jitter
+// on the start of a pulse.
 //
 // Flash via Arduino IDE + Teensyduino add-on. Pin map below.
 
@@ -31,7 +48,11 @@ constexpr size_t SERIAL_BUF_SIZE  = 512;
 constexpr uint32_t BOOT_WAIT_MS   = 1000;
 constexpr uint32_t BLINK_PERIOD_MS = 500;
 
-enum class State : uint8_t { WAITING_SETUP, READY, FIRING };
+constexpr uint32_t RUN_DEFAULT_MAX_MS = 60000;
+constexpr uint32_t RUN_CAP_MAX_MS     = 600000;
+constexpr float    MAX_RUN_DUTY       = 0.25f;   // CCTV illuminators, rated continuous
+
+enum class State : uint8_t { WAITING_SETUP, READY, FIRING, RUNNING };
 enum class Mode  : uint8_t { FAST, SLOW };
 
 volatile State current_state = State::WAITING_SETUP;
@@ -56,7 +77,19 @@ size_t serial_buf_pos = 0;
 
 uint32_t last_blink_ms = 0;
 
+// Continuous strobe state (RUN / STOP).
+const float* run_intervals = nullptr;
+size_t   run_n          = 0;
+size_t   run_idx        = 0;
+uint32_t run_next_us    = 0;
+uint32_t run_started_ms = 0;
+uint32_t run_max_ms     = RUN_DEFAULT_MAX_MS;
+uint32_t run_pulses     = 0;
+
 // Forward decls
+void runStep();
+void startRun(char* args);
+void stopRun();
 void onFire();
 void executePulseTrain();
 void handleLine(char* line);
@@ -98,6 +131,11 @@ void loop() {
             sendErr("line too long");
             serial_buf_pos = 0;
         }
+    }
+
+    if (current_state == State::RUNNING) {
+        runStep();
+        return;
     }
 
     const uint32_t now = millis();
@@ -194,19 +232,28 @@ void handleLine(char* line) {
         current_state = State::READY;
         attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
         Serial.println("FIRED");
+    } else if (strcmp(line, "RUN") == 0) {
+        startRun(args);
+    } else if (strcmp(line, "STOP") == 0) {
+        const uint32_t fired = run_pulses;
+        stopRun();
+        Serial.print("OK ");
+        Serial.println(fired);
     } else if (strcmp(line, "STATUS") == 0) {
         Serial.print("STATE=");
         switch (current_state) {
             case State::WAITING_SETUP: Serial.print("WAITING_SETUP"); break;
             case State::READY:         Serial.print("READY");         break;
             case State::FIRING:        Serial.print("FIRING");        break;
+            case State::RUNNING:       Serial.print("RUNNING");       break;
         }
         Serial.print(" MODE=");        Serial.print(active_mode == Mode::FAST ? "FAST" : "SLOW");
         Serial.print(" ON_BITS=");     Serial.print(on_bits);
         Serial.print(" BAUD=");        Serial.print(baud_rate);
         Serial.print(" ON_PULSE_US="); Serial.print(on_pulse_us);
         Serial.print(" N_FAST=");      Serial.print(num_pulse_intervals_fast);
-        Serial.print(" N_SLOW=");      Serial.println(num_pulse_intervals_slow);
+        Serial.print(" N_SLOW=");      Serial.print(num_pulse_intervals_slow);
+        Serial.print(" RUN_PULSES=");  Serial.println(run_pulses);
     } else {
         sendErr("unknown command");
     }
@@ -255,6 +302,65 @@ void updateState() {
     const bool ready = on_bits_received && baud_received
                        && (fast_received || slow_received) && on_pulse_us > 0;
     current_state = ready ? State::READY : State::WAITING_SETUP;
+}
+
+// --- continuous strobe -----------------------------------------------------
+
+void startRun(char* args) {
+    if (current_state == State::RUNNING) { sendErr("already running"); return; }
+    if (current_state != State::READY)   { sendErr("not READY"); return; }
+    const float* iv = (active_mode == Mode::FAST) ? pulse_intervals_fast_ms
+                                                  : pulse_intervals_slow_ms;
+    size_t n = (active_mode == Mode::FAST) ? num_pulse_intervals_fast
+                                           : num_pulse_intervals_slow;
+    if (n > 0 && iv[n - 1] == 0.0f) n--;          // one-shot end marker
+    if (n == 0) { sendErr("no intervals"); return; }
+    float on_total_us = 0.0f, cycle_us = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+        if (iv[i] <= 0.0f) { sendErr("zero interval in a RUN pattern"); return; }
+        on_total_us += (float)on_pulse_us;
+        cycle_us    += (float)on_pulse_us + iv[i] * 1000.0f;
+    }
+    if (on_total_us / cycle_us > MAX_RUN_DUTY) { sendErr("duty cycle above limit"); return; }
+
+    uint32_t max_ms = RUN_DEFAULT_MAX_MS;
+    if (args) {
+        long v = atol(args);
+        if (v < 1) { sendErr("RUN max_ms must be > 0"); return; }
+        max_ms = (uint32_t)v;
+    }
+    if (max_ms > RUN_CAP_MAX_MS) max_ms = RUN_CAP_MAX_MS;
+
+    run_intervals  = iv;
+    run_n          = n;
+    run_idx        = 0;
+    run_pulses     = 0;
+    run_max_ms     = max_ms;
+    run_started_ms = millis();
+    run_next_us    = micros();
+    detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
+    digitalWriteFast(STATUS_LED, LOW);
+    current_state = State::RUNNING;
+    sendOk();
+}
+
+void runStep() {
+    if (millis() - run_started_ms >= run_max_ms) { stopRun(); return; }
+    if ((int32_t)(micros() - run_next_us) < 0) return;
+    digitalWriteFast(LED_GATE, HIGH);
+    delayMicroseconds(on_pulse_us);
+    digitalWriteFast(LED_GATE, LOW);
+    run_pulses++;
+    run_next_us += on_pulse_us + (uint32_t)(run_intervals[run_idx] * 1000.0f);
+    run_idx = (run_idx + 1) % run_n;
+}
+
+void stopRun() {
+    if (current_state != State::RUNNING) return;
+    digitalWriteFast(LED_GATE, LOW);
+    current_state = State::READY;
+    updateState();
+    attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
 }
 
 void sendOk()  { Serial.println("OK"); }

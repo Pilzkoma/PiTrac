@@ -213,11 +213,26 @@ Next SP1 items, in this order:
    still PiTrac's monocular radius method. At 50 cm the stereo pair resolves 3.49 mm
    of depth per pixel of disparity error (~1.8 mm at half-pixel matching), which is
    the largest accuracy gain available.
-4. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false. The UVC cameras
-   have no trigger pin, so this needs its own mechanism. Item 1 settled the
-   constraint: the cameras free-run out of phase with each other, so both only
-   see the same flash with a long exposure (~8 ms) or a pulse train spanning a
-   frame period.
+4. `WaitForCam2Trigger`, still a `JETSON_STUB` returning false. **Mechanism
+   decided and proven on putts (2026-11-12):** reacting to a hit is impossible
+   (frames arrive 11-20 ms late, the trigger helper costs 100-200 ms), so the
+   Teensy strobes continuously while armed (`RUN`/`STOP`, new firmware), both
+   cameras expose ~8 ms of every frame into a ring buffer, and the shot is
+   found afterwards: rest ball → impact → reference just before → ball in the
+   positive difference → stereo → robust constant-velocity fit. Offline tools
+   `sp1_vision/strobe_shot.py` (record) and `strobe_event.py` (find, measure);
+   three putts at 1.06-1.39 m/s, rms 7-9 mm (`sp1_vision/strobe_runs/README.md`).
+   Next: chips and faster shots (short pulses, flash-pattern identification of
+   the ball images since the cameras' frames are up to 4 ms apart), then the
+   live version in `pitrac_lm` watching a window round the rest ball. The
+   power LED blinks fast while recording (`sp4_gspro/jetsonlm-led`); slow
+   blink for "ball ready" comes with the live version.
+
+   **v2 idea (owner, 2026-11-11):** MIPI-CSI global-shutter cameras with a
+   hardware trigger input would sync both cameras exactly and allow an
+   exposure as short as the flash (ambient down ~80×, the fix for garage
+   daylight). Needs cameras with a Jetson driver that supports the trigger
+   (the Pi IMX296 has none) and a check of the J202 carrier's CSI ports.
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike

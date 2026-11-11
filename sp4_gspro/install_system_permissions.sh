@@ -7,8 +7,13 @@
 #   systemctl poweroff                       the "Herunterfahren" button and Golfinator
 #   systemctl restart jetson-lm-dashboard    redeploying the dashboard over SSH
 #   systemctl restart jetson-lm-receiver     redeploying the receiver over SSH
+#   /usr/local/sbin/jetsonlm-led             the power LED as status light
+#                                            (on / off / slow / fast)
 #
-# Undo: sudo rm /etc/sudoers.d/jetson-lm
+# The LED helper is copied root-owned into /usr/local/sbin first: a sudoers
+# entry for a script `brain` could edit would hand out root.
+#
+# Undo: sudo rm /etc/sudoers.d/jetson-lm /usr/local/sbin/jetsonlm-led
 
 set -e
 
@@ -20,11 +25,14 @@ fi
 TARGET=/etc/sudoers.d/jetson-lm
 TMP=$(mktemp)
 
+install -m 0755 -o root -g root "$(dirname "$0")/jetsonlm-led" /usr/local/sbin/jetsonlm-led
+
 cat > "$TMP" <<'EOF'
 # Written by JetsonLM sp4_gspro/install_system_permissions.sh
 brain ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff
 brain ALL=(root) NOPASSWD: /usr/bin/systemctl restart jetson-lm-dashboard
 brain ALL=(root) NOPASSWD: /usr/bin/systemctl restart jetson-lm-receiver
+brain ALL=(root) NOPASSWD: /usr/local/sbin/jetsonlm-led
 EOF
 
 # A broken sudoers file can lock sudo out entirely, so check before installing.

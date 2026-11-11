@@ -82,6 +82,10 @@ class Teensy:
     def __init__(self, path):
         import serial
         self.ser = serial.Serial(path, 115200, timeout=2)
+        # A newline first terminates whatever partial line is left in the
+        # firmware's buffer (after a reflash the first command came back
+        # "unknown command"); its reply is then discarded.
+        self.ser.write(b"\n")
         time.sleep(0.3)
         self.ser.reset_input_buffer()
 

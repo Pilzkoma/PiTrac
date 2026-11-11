@@ -1771,6 +1771,20 @@ PiTrac's key techniques:
 > stimmt. Lage im neuen Gehäuse: Nicken **+1,60°**, Rollen +0,36°, Kamera 1
 > **111,9 mm** über dem Boden. Einzelheiten: `sp1_vision/strobe_runs/README.md`.
 
+**2026-11-12 — Dauerblitz, und die ersten Putts sind gemessen.**
+
+> Auf einen Schlag reagieren geht mit den USB-Kameras nicht (Bilder 11–20 ms
+> zu spät, Auslöse-Helfer 100–200 ms). Stattdessen blitzt der Teensy
+> dauerhaft (neue Firmware: `RUN` / `STOP`, Zeitlimit, Einschaltgrenze 25 %),
+> beide Kameras schreiben in einen Ringpuffer, und der Schuss wird hinterher
+> gefunden (`sp1_vision/strobe_shot.py`, `strobe_event.py`). Firmware gebaut
+> mit dem `arduino-cli` der Arduino-IDE auf Windows, geflasht vom Jetson mit
+> PJRCs `teensy_loader_cli` 2.3 (Ubuntus 2.1 kennt den Teensy 4.0 nicht).
+> Drei Putts, Spieler hinter dem Ball: **1,06 / 1,25 / 1,39 m/s**, quer zum
+> Gerät, Streuung 7–9 mm. Die Betriebs-LED blinkt während der Aufnahme
+> (`sp4_gspro/jetsonlm-led`). Idee für v2: MIPI-Global-Shutter-Kameras mit
+> Hardware-Trigger.
+
 \---
 
 \---

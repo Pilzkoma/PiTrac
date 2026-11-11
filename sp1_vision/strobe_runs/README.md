@@ -200,3 +200,56 @@ right at 500 mm. gs_04 was typed as 500 and corrected to 600 in `run.json`
   centre — more than an M12 lens suggests. Unresolved whether the zero sat
   exactly at the lens end; it does not affect the scale.
 - No repeats, so the scale's stderr is from scatter only.
+
+## 2026-11-12 — continuous strobe, first putts measured, `2026-11-12_putts/`
+
+The answer to "how do both cameras see a ball in flight" (CLAUDE.md item 4):
+the cameras free-run out of phase and deliver frames 11-20 ms late, and the
+trigger helper alone costs 100-200 ms, so reacting to a hit - PiTrac's way,
+which relies on the IMX296's hardware trigger - is impossible here. Instead:
+
+- **Teensy firmware `RUN` / `STOP`** (Hardware/teensy_strobe): repeats the
+  active pulse list continuously, safety timeout (default 60 s, cap 10 min)
+  and a 25 % duty limit. Built on the Windows box with the Arduino IDE's
+  bundled `arduino-cli` (fqbn `teensy:avr:teensy40`; compile from a folder
+  holding only the .ino - from the repo folder it fails with "instance is
+  no longer valid"), flashed from the Jetson with `flash_teensy.sh` and
+  PJRC's `teensy_loader_cli` 2.3 built from source (Ubuntu's 2.1 predates the
+  Teensy 4.0; setup in `install_teensy_loader.sh`).
+- **`sp1_vision/strobe_shot.py`**: strobe running (2 ms interval, 0.1 ms
+  pulses here), both cameras at 8 ms exposure stream into memory, every
+  frame saved as the camera's JPEG under `raw/`. The carrier's power LED
+  blinks fast while recording (`sp4_gspro/jetsonlm-led`, sudoers entry from
+  `install_system_permissions.sh`).
+- **`sp1_vision/strobe_event.py`**: finds the shot afterwards - rest ball by
+  the stereo search, impact when its image position stays dark, reference
+  from 0.08-0.25 s before impact, ball in the POSITIVE difference after it,
+  stereo-checked, and a robust constant-velocity fit (≥ 6 positions within
+  15 mm, faster than 0.3 m/s) to reject the circles that feet and putter
+  still sneak past the stereo checks.
+
+What did not work first: a reference from the first half second (player
+still in frame), a whole-recording median (player in frame most of the
+time - "balls" everywhere), and scoring by moving area (the player's legs
+win). With the player in FRONT of the ball one of three putts survived;
+standing behind it, all three did.
+
+Putts, 2026-11-12 (25 s recording, player behind the ball, one ball orange -
+indistinguishable at 850 nm):
+
+| putt | speed | direction | positions on the line | rms |
+|---|---|---|---|---|
+| 1 | 1.06 m/s | across, 4.2° away from the unit | 17 of 29 | 7.4 mm |
+| 2 | 1.25 m/s | across, 3.4° away | 14 of 21 | 8.4 mm |
+| 3 | 1.39 m/s | across, 2.5° away | 15 of 25 | 8.7 mm |
+
+Rest ball at X −117, Y +103, Z 406 mm each time (Y on the measured floor).
+A fourth candidate (0.10 m/s, the ball being put back) was rejected. The
+`shotN.json` files hold every position; the sheets show the accepted frames.
+The raw recording (~500 MB) stays on the Jetson in `/tmp/shot3`.
+
+Open: the analysis is offline Python (5 min for 25 s); the device must
+watch a small window round the rest ball as frames arrive. Frame times are
+arrival times and the two cameras' frames are up to 4 ms apart - fine for a
+putt, not for a drive, where the flash pattern has to identify the ball
+images instead. Short pulses for fast balls (blur) still to be measured.
