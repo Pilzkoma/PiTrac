@@ -267,12 +267,28 @@ Next SP1 items, in this order:
    cameras within 25 µs, jitter < 25 µs, no held-back frame** (measured with
    `sp1_vision/trigger_sweep.py`, firmware v0.2 `TRIG_ARM` / `SHOT`). The
    flash can now be placed inside a known exposure in both cameras at once.
-   Open: a continuous trigger mode (fixed rate, one flash per frame - what
-   chips need: at 4 ms free-running flashes the two ball images per frame
-   overlapped and the circle search rejected them), the maximum trigger
-   rate (Arducam says ~100 fps), short exposures against daylight. Pins 4/5
-   are inputs unless armed, so free-running use is unchanged. MIPI cameras
-   drop down the list.
+   Pins 4/5 are inputs unless armed, so free-running use is unchanged. MIPI
+   cameras drop down the list.
+
+   **Continuous trigger works (same night).** Firmware v0.3 `TRIG_RUN,period_us,
+   delay_us,pulse_us[,max_ms]` (stop with `STOP`); `trigger_rate.py`: both
+   cameras follow **every edge at 100 fps**, at 105 fps and above exactly
+   every other one - so 10 ms is the period. `strobe_shot --trigger`: 0.5 ms
+   exposure (room nearly black), edge every 10 ms, 100 µs flash 0.9 ms after
+   it. Chips recorded that way: 4512 edges, 4512 frames per camera, and the
+   contact sheet shows **one round sharp ball per frame, the ball's print
+   visibly rotating** (free-running at 4 ms the chip was an elongated double
+   image). **Next session, in this order:** (1) make `strobe_event` read
+   triggered recordings - its rest search (tuned to 8 ms frames) found the
+   dimmer rest ball at only 4 of ~180 moments (2 of 3 chips), and its flight
+   search ran 34 min on chip 1 without output and was stopped (unexamined;
+   guess: noise in ball-free positive images scaled up into masses of
+   circles); options: bound the search to a window round the expected path,
+   a longer flash (200-300 µs costs little blur at chip speed) for a
+   brighter rest ball, frame times from the trigger index (10 ms exact)
+   instead of arrival. Recording `/home/brain/strobe_raw/2026-11-12_chips_trigger`.
+   (2) the short-pulse test (a) above; (3) several flashes per frame for
+   fast balls (PiTrac's multi-exposure, now in both cameras at once).
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike

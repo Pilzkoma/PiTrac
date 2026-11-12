@@ -1872,6 +1872,45 @@ PiTrac's key techniques:
 > Takt, ein Blitz pro Bild) für Chips; kurze Belichtung gegen
 > Umgebungslicht; maximale Trigger-Rate messen.
 
+**2026-11-12 (nachts, Teil 2) — Dauer-Trigger, und die Chips sind sauber im Bild.**
+
+> - **Firmware v0.3**: `TRIG_RUN,<takt_us>,<blitz_verzögerung_us>,<blitz_us>[,max_ms]`,
+>   Ende mit `STOP` (meldet die Zahl der Flanken). Schutz wie `RUN`
+>   (60 s, 25 % Einschaltdauer) plus Takt ≥ 5 ms. Befehlstest: alle Grenzen
+>   greifen (`TRIG_RUN,5000,900,1000` lief, 20 % liegen unter der Grenze —
+>   ~1 s Blitzen mit 200 Hz, ungeplant, aber erlaubt).
+> - **Höchste Trigger-Rate** (`sp1_vision/trigger_rate.py`, 0,5 ms
+>   Belichtung, ohne Blitz): bei **100 fps folgt jede Kamera jeder Flanke**
+>   (301/301); bei 105 / 111 / 115 / 120 / 143 / 167 / 200 fps nimmt sie
+>   **genau jede zweite**. Takt also 10 ms.
+> - **`strobe_shot --trigger`**: Trigger-Modus, **0,5 ms Belichtung** (Raum
+>   fast schwarz, Mittel ~17), Flanke alle 10 ms, 100-µs-Blitz 0,9 ms nach
+>   der Flanke. Probe 3 s: 309 Flanken, 309 Bilder je Kamera.
+> - **Drei Chips mit Trigger** (45 s, `/home/brain/strobe_raw/2026-11-12_chips_trigger`,
+>   332 MB statt 1,1 GB — dunkle Bilder komprimieren besser): **4512 Flanken,
+>   4512 Bilder je Kamera.** Kontaktblatt (`strobe_raw/chip_trigger1_sheet.jpg`):
+>   **ein runder, scharfer Ball pro Bild** auf fast schwarzem Grund, im
+>   Differenzbild nur der Ball, **der Aufdruck des Balls dreht sich sichtbar**
+>   von Bild zu Bild. Ohne Trigger war es ein länglicher Doppelfleck.
+> - **Auswertung noch nicht angepasst**: `strobe_event` fand den ruhenden
+>   Ball nur an 4 von ~180 Zeitpunkten (auf die helleren 8-ms-Bilder
+>   abgestimmt) → nur 2 von 3 Chips (4,81 s, 12,74 s); die Flugbahn-Suche
+>   lief an Chip 1 34 min ohne Ausgabe und wurde abgebrochen (nicht
+>   untersucht; Vermutung: Rauschen in ballfreien Differenzbildern wird
+>   hochskaliert → massenhaft Scheinkreise).
+>
+> Zur Frage "passt das zu PiTrac": ja — PiTracs Kern (eine Belichtung,
+> mehrere Blitze mit bekanntem Abstand, Spin aus zwei Ballbildern) geht mit
+> dem Trigger jetzt sauber und in beiden Kameras zugleich; anders bleibt
+> nur, dass wir nicht auf den Schlag reagieren, sondern takten, puffern und
+> hinterher suchen (ersetzt den `WaitForCam2Trigger`-Stub).
+>
+> Nächste Sitzung: (1) `strobe_event` für Trigger-Aufnahmen — Suche auf ein
+> Fenster um die erwartete Bahn begrenzen, evtl. längerer Blitz (200–300 µs)
+> für einen helleren Ruheball, Bildzeiten aus dem Trigger-Index (10 ms
+> exakt) statt aus der Ankunftszeit; (2) Kurzpuls-Test am ruhenden Ball
+> (Dimples sichtbar?); (3) mehrere Blitze pro Bild für schnelle Bälle.
+
 \---
 
 \---

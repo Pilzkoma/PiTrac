@@ -253,3 +253,34 @@ watch a small window round the rest ball as frames arrive. Frame times are
 arrival times and the two cameras' frames are up to 4 ms apart - fine for a
 putt, not for a drive, where the flash pattern has to identify the ball
 images instead. Short pulses for fast balls (blur) still to be measured.
+
+## 2026-11-12 (night) — chips, free-running and hardware-triggered
+
+Raw recordings stay on the Jetson under `/home/brain/strobe_raw/` (no longer
+`/tmp`, which a reboot cleared - the putt recording was lost that way).
+
+**Free-running, 4 ms flash interval** (`2026-11-12_chips`, 45 s, 1.1 GB):
+`strobe_event` needed over 50 min before `b3a3fcc` (find_impacts rescanned
+to the end for every rest sample - quadratic). It then found the rest ball
+(X −78, Z 440 mm) but 11 "impacts" for 3 chips, and on chip 1 the ball in
+two frame pairs only (≈ 4-5 m/s, two points, rough). The contact sheet
+shows why: two flashes fall into each 8 ms frame and at chip speed their
+ball images (~18 mm apart, 43 mm ball) merge into one elongated blob that
+the circle search rejects. Stopped.
+
+**Hardware trigger** (`2026-11-12_chips_trigger`, 45 s, 332 MB): the B0332
+trigger input (pad F, see LOGBOOK / CLAUDE.md) on Teensy pins 4/5,
+firmware v0.3 `TRIG_RUN`, `strobe_shot --trigger`: 0.5 ms exposure, an
+edge every 10 ms (100 fps, the most the cameras follow - at 105 fps they
+take every other edge, `trigger_rate.py`), a 100 µs flash 0.9 ms after
+each edge (exposure starts 0.78 ms after the edge in both cameras within
+25 µs, `trigger_sweep.py`). 4512 edges, 4512 frames per camera; one round,
+sharp ball per frame on a nearly black background, the ball's print
+visibly turning frame to frame.
+
+`strobe_event` is not yet adapted to these frames: its rest search found
+the dimmer rest ball at only 4 of ~180 moments (2 of 3 chips found) and
+its flight search ran 34 min on chip 1 without output (stopped,
+unexamined). Next: bound the flight search to a window round the expected
+path, consider a 200-300 µs flash for the rest ball, frame times from the
+trigger index instead of arrival.
