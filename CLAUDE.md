@@ -259,6 +259,21 @@ Next SP1 items, in this order:
    daylight). Needs cameras with a Jetson driver that supports the trigger
    (the Pi IMX296 has none) and a check of the J202 carrier's CSI ports.
 
+   **The B0332s have that trigger already (2026-11-12, LOGBOOK).** Pad F on
+   the UC-844 board (3.3 V input, ~3 kΩ pull-up; S is dead, L/R are empty
+   mic pads) is wired to Teensy pin 4 (cam1, dashboard left) and pin 5
+   (cam2), G to GND. UVC `exposure_auto_priority=1` = trigger mode: one
+   frame per rising edge, **exposure starts ≈ 0.78 ms after the edge, both
+   cameras within 25 µs, jitter < 25 µs, no held-back frame** (measured with
+   `sp1_vision/trigger_sweep.py`, firmware v0.2 `TRIG_ARM` / `SHOT`). The
+   flash can now be placed inside a known exposure in both cameras at once.
+   Open: a continuous trigger mode (fixed rate, one flash per frame - what
+   chips need: at 4 ms free-running flashes the two ball images per frame
+   overlapped and the circle search rejected them), the maximum trigger
+   rate (Arducam says ~100 fps), short exposures against daylight. Pins 4/5
+   are inputs unless armed, so free-running use is unchanged. MIPI cameras
+   drop down the list.
+
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike
 the dashboard. That is the readout that once hid a 5.4x focus error.
