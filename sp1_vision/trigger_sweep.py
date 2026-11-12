@@ -41,7 +41,7 @@ from sp1_vision.calibration_capture import set_manual_exposure  # noqa: E402
 
 SPACING_S = 0.1          # between shots; frames arrive well within this
 WARMUP_SHOTS = 6         # no-flash shots first, flushing anything held back
-LIT_MIN = sc.LIT_THRESHOLD   # grey levels: below this nothing was seen at all
+LIT_MIN = 1.0            # mean grey levels between noise and flash: below, nothing seen
 REF_SAMPLE = 200
 
 
@@ -89,6 +89,24 @@ def apply_shift(per_shot, s):
     return [per_shot[i + s] if i + s < len(per_shot) else None for i in range(len(per_shot))]
 
 
+def paired_flash_minus_dark(shots, lit):
+    """(delays, flash - dark) for each flash shot and the dark shot after it.
+
+    The pair shares its delay and is 0.1 s apart, so ambient flicker hits
+    both alike and cancels; on 2026-11-12 the room's flicker lit dark shots
+    as brightly as a 50 us flash at random delays and smeared both edges.
+    """
+    delays, vals = [], []
+    for k in range(len(shots) - 1):
+        a, b = shots[k], shots[k + 1]
+        if (a["flash"] and not a["warmup"] and not b["flash"]
+                and a["delay_us"] == b["delay_us"]
+                and lit[k] is not None and lit[k + 1] is not None):
+            delays.append(a["delay_us"])
+            vals.append(lit[k] - lit[k + 1])
+    return delays, vals
+
+
 def exposure_window(delays, lit):
     """Where the flash was seen, from flash shots only.
 
@@ -102,10 +120,11 @@ def exposure_window(delays, lit):
     if not pairs:
         return None
     vals = np.array([v for _, v in pairs], dtype=float)
-    top = float(np.percentile(vals, 99))
-    if top < LIT_MIN:
+    low, thresh = noise_floor(vals)
+    seen = vals[vals > thresh]
+    if not len(seen):
         return None
-    thresh = max(LIT_MIN, 0.5 * top)
+    top = float(np.median(seen))
     by = {}
     for d, v in pairs:
         by.setdefault(d, []).append(v > thresh)
@@ -133,10 +152,31 @@ def exposure_window(delays, lit):
     }
 
 
+def noise_floor(vals):
+    """(noise level, threshold): seen = at least LIT_MIN above the noise.
+
+    The noise level is the median of the lowest 30 % - the window never
+    covers more than ~60 % of a sweep, so those are flash-free shots. Not a
+    percentile of the top and not a two-cluster split: on 2026-11-12 the
+    flash values fell in several groups (+3.4 typical, a cluster near +7,
+    outliers to +22 and +108), and both of those put the threshold between
+    the groups of real flashes instead of below them. Flash-free pairs
+    scatter -0.3 .. +0.6, the dimmest real flash at 50 us was +2.7.
+    """
+    v = np.asarray(vals, dtype=float)
+    low = float(np.median(v[v <= np.percentile(v, 30)]))
+    return low, low + LIT_MIN
+
+
 def lit_metric(img, ref):
-    """99th percentile of how much brighter than the reference: the flash."""
-    d = img.astype(np.float32) - ref
-    return float(np.percentile(d, 99))
+    """Mean brightening over the reference: the flash.
+
+    The frame mean, not a high percentile: the flash lifts the whole scene a
+    little (+4 grey levels at 50 us) and a mean of a whole frame barely
+    scatters, while a single frame's 99th percentile scattered as much as
+    the flash itself.
+    """
+    return float(img.astype(np.float32).mean() - ref.mean())
 
 
 def small(buf):
@@ -263,7 +303,7 @@ def analyse(out):
         lit = apply_shift(lit, shift)
         frames_used = apply_shift(assigned, shift)
         sel = [k for k, s in enumerate(shots) if s["flash"] and not s["warmup"]]
-        window = exposure_window([shots[k]["delay_us"] for k in sel], [lit[k] for k in sel])
+        window = exposure_window(*paired_flash_minus_dark(shots, lit))
         dark = [lit[k] for k, s in enumerate(shots)
                 if not s["flash"] and not s["warmup"] and lit[k] is not None]
         lit_flash = [(lit[k], frames_used[k]) for k in sel if lit[k] is not None]

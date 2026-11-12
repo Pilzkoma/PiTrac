@@ -49,6 +49,8 @@ class HeldBackShift(unittest.TestCase):
 
 
 class ExposureWindow(unittest.TestCase):
+    # Values model the paired mean-brightening metric as measured 2026-11-12:
+    # flash-free pairs -0.3 .. +0.6, flashes +2.7 and up.
     def window(self, start, end, jitter=0.0, step=250, repeats=5, seed=1):
         rng = np.random.default_rng(seed)
         delays, lit = [], []
@@ -56,7 +58,7 @@ class ExposureWindow(unittest.TestCase):
             for _ in range(repeats):
                 s = start + rng.uniform(-jitter, jitter)
                 delays.append(d)
-                lit.append(40.0 if s <= d < s + (end - start) else rng.uniform(0, 2))
+                lit.append(4.0 if s <= d < s + (end - start) else rng.uniform(-0.3, 0.6))
         return ts.exposure_window(delays, lit)
 
     def test_a_sharp_window_is_found_to_the_step(self):
@@ -70,9 +72,58 @@ class ExposureWindow(unittest.TestCase):
         w = self.window(6000, 7000, jitter=600)
         self.assertGreaterEqual(w["start_spread_us"], 500)
 
+    def test_a_fine_sweep_mostly_inside_the_window_with_outliers(self):
+        # 2026-11-12 fine sweep: 0.6-2.2 ms, window ~0.8-2.0 ms, a few frames
+        # at +108 against a typical +17 - the 99th-percentile threshold then
+        # lost the whole window.
+        rng = np.random.default_rng(5)
+        delays, lit = [], []
+        for d in range(600, 2201, 25):
+            for r in range(5):
+                inside = 800 <= d < 2000
+                v = (3.4 + abs(rng.normal(0, 0.3))) if inside else rng.normal(0, 0.2)
+                if inside and r == 0:
+                    v = 7.0 if d % 100 else 22.0      # the brighter groups seen
+                if inside and d < 900 and r == 1:
+                    v = 108.0
+                delays.append(d)
+                lit.append(v)
+        w = ts.exposure_window(delays, lit)
+        self.assertEqual(w["start_us"], 800)
+        self.assertEqual(w["end_us"], 2000)
+
     def test_no_flash_seen_gives_none(self):
-        w = ts.exposure_window([0, 250, 500] * 3, [1.0, 0.5, 1.2] * 3)
+        w = ts.exposure_window([0, 250, 500] * 3, [0.1, -0.2, 0.4] * 3)
         self.assertIsNone(w)
+
+
+class PairedDifference(unittest.TestCase):
+    def test_ambient_flicker_cancels_against_the_following_dark_shot(self):
+        # Shots come in flash / dark pairs at one delay. Ambient flicker that
+        # brightens both shots of a pair (seen 2026-11-12: dark shots as bright
+        # as flash shots at random delays) must not count as a flash.
+        rng = np.random.default_rng(3)
+        shots, lit = [], []
+        for d in list(range(0, 20000, 250)) * 5:
+            amb = rng.choice([2.0, 12.0])            # flicker, shared by the pair
+            seen = 1000 <= d < 2000
+            shots += [{"delay_us": d, "flash": True, "warmup": False},
+                      {"delay_us": d, "flash": False, "warmup": False}]
+            lit += [amb + (18.0 if seen else 0.0), amb]
+        delays, vals = ts.paired_flash_minus_dark(shots, lit)
+        w = ts.exposure_window(delays, vals)
+        self.assertEqual(w["start_us"], 1000)
+        self.assertEqual(w["end_us"], 2000)
+        self.assertEqual(w["start_spread_us"], 0)
+        self.assertEqual(w["end_spread_us"], 0)
+
+    def test_pairs_with_a_missing_frame_are_skipped(self):
+        shots = [{"delay_us": 0, "flash": True, "warmup": False},
+                 {"delay_us": 0, "flash": False, "warmup": False},
+                 {"delay_us": 250, "flash": True, "warmup": False},
+                 {"delay_us": 250, "flash": False, "warmup": False}]
+        self.assertEqual(ts.paired_flash_minus_dark(shots, [5.0, 1.0, None, 1.0]),
+                         ([0], [4.0]))
 
 
 if __name__ == "__main__":

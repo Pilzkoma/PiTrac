@@ -1849,6 +1849,29 @@ PiTrac's key techniques:
 > `sp1_vision/trigger_sweep.py` (`faa349a`); cam1 (Dashboard links, die
 > von Hand getriggerte) an Pin 4, cam2 an Pin 5, GND an beide G.
 
+**2026-11-12 (nachts) — Gelötet, und der Trigger ist exakt.**
+
+> F + G beider Kameras an Teensy-Pins 4 / 5 / GND gelötet (von vorn, im
+> Gehäuse). `trigger_sweep` bei 1 ms Belichtung, 50-µs-Blitz, Blitz- und
+> Dunkel-Schüsse im Wechsel; grob 0–20 ms in 0,25-ms-Schritten (816
+> Schüsse), fein 0,6–2,2 ms in 25-µs-Schritten (656 Schüsse), je 5
+> Wiederholungen. Rohdaten in `/home/brain/strobe_raw/2026-11-12_trigger_*`.
+> - **Ein Bild pro Trigger**, beide Kameras (656/656, grob 815–816/816).
+>   **Kein zurückgehaltenes Bild** im Trigger-Modus (Versatz 0).
+> - **Belichtung ab ≈ 0,78 ms nach der steigenden Flanke**, Dauer ≈ 1,17 ms
+>   bei Einstellung 1 ms (Blitz bei 0,725 ms: 0/5, 0,750: 4/5 bzw. 3/5,
+>   0,775–1,950: 5/5, 1,975: 0/5).
+> - **Beide Kameras gleich auf < 25 µs**, Streuung < 25 µs.
+> Auswertung zweimal nachgebessert: Raum-Flackern hellte Dunkel-Schüsse so
+> stark auf wie der Blitz (jetzt: Blitz minus folgender Dunkel-Schuss,
+> gleiche Verzögerung), und Perzentil- bzw. 2-Gruppen-Schwellen fielen
+> zwischen Gruppen echter Blitze (+3,4 / +7 / +22 / +108); jetzt: mittlere
+> Aufhellung, gesehen = ≥ 1 Graustufe über dem Rauschboden.
+> Damit ist das Phasenproblem gelöst: Blitz zeitlich fest in die
+> Belichtung, beide Kameras zugleich. Nächstes: Dauer-Trigger (fester
+> Takt, ein Blitz pro Bild) für Chips; kurze Belichtung gegen
+> Umgebungslicht; maximale Trigger-Rate messen.
+
 \---
 
 \---
