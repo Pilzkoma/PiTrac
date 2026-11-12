@@ -18,6 +18,13 @@ and prints a motion timeline. Nothing is measured yet.
 The still-scene reference is scaled per frame before subtracting: with the
 strobe free-running against the exposure, each frame catches a whole number
 of flashes that varies by one, so the lit background flickers by that much.
+
+--trigger (2026-11-12) uses the cameras' hardware trigger instead: both in
+UVC trigger mode, the Teensy (firmware v0.3) sends an edge every 10 ms -
+100 fps, the most the B0332s follow; at 105 fps they skip every other edge
+- and one flash 0.9 ms after each edge, inside a 0.5 ms exposure that starts
+0.78 ms after the edge in both cameras within 25 us. One ball image per
+frame, the same instant in both cameras, 16x less ambient than 8 ms.
 """
 
 import argparse
@@ -207,12 +214,20 @@ def main(argv=None):
     ap.add_argument("--interval-ms", type=float, default=2.0,
                     help="time between flashes (default %(default)s)")
     ap.add_argument("--pulse-us", type=int, default=100)
-    ap.add_argument("--exposure", type=int, default=80, help="100 us units")
+    ap.add_argument("--exposure", type=int, default=None,
+                    help="100 us units (default 80 = 8 ms; 5 = 0.5 ms with --trigger)")
+    ap.add_argument("--trigger", action="store_true",
+                    help="hardware-trigger the cameras, one flash per frame")
+    ap.add_argument("--trigger-period-ms", type=float, default=10.0)
+    ap.add_argument("--trigger-delay-us", type=int, default=900,
+                    help="flash after the edge (exposure starts at ~780 us)")
     ap.add_argument("--gamma", type=int, default=sc.MEASURE_GAMMA)
     ap.add_argument("--out", required=True)
     ap.add_argument("--analyse", action="store_true",
                     help="analyse the recording already in --out, record nothing")
     args = ap.parse_args(argv)
+    if args.exposure is None:
+        args.exposure = 5 if args.trigger else 80
     os.makedirs(args.out, exist_ok=True)
 
     if args.analyse:
@@ -227,16 +242,26 @@ def main(argv=None):
     got = {n: [] for n in caps}
     stop = threading.Event()
     try:
-        teensy.cmd("PULSES_FAST,{:g}".format(args.interval_ms))
-        teensy.cmd("ON_BITS,{}".format(int(round(args.pulse_us / 100.0))))
-        teensy.cmd("BAUD,10000")
-        teensy.cmd("MODE,FAST")
+        if args.trigger:
+            teensy.cmd("TRIG_ARM")
+        else:
+            teensy.cmd("PULSES_FAST,{:g}".format(args.interval_ms))
+            teensy.cmd("ON_BITS,{}".format(int(round(args.pulse_us / 100.0))))
+            teensy.cmd("BAUD,10000")
+            teensy.cmd("MODE,FAST")
         sc.set_gamma(caps, args.gamma)
         sc.settle_on_auto(caps)
         for _, dev in caps.values():
             set_manual_exposure(dev, args.exposure)
         time.sleep(sc.SETTLE_S)
-        teensy.cmd("RUN,{}".format(int((args.seconds + 2) * 1000)))
+        max_ms = int((args.seconds + 2) * 1000)
+        if args.trigger:
+            sc.set_trigger_mode(caps, True)
+            teensy.cmd("TRIG_RUN,{},{},{},{}".format(
+                int(round(args.trigger_period_ms * 1000)), args.trigger_delay_us,
+                args.pulse_us, max_ms))
+        else:
+            teensy.cmd("RUN,{}".format(max_ms))
         t0 = time.monotonic()
         threads = [threading.Thread(target=stream, args=(c, stop, got[n]), daemon=True)
                    for n, (c, _) in caps.items()]
@@ -256,6 +281,12 @@ def main(argv=None):
             teensy.cmd("STOP", expect=None)
         except Exception:      # noqa: BLE001
             pass
+        if args.trigger:
+            sc.set_trigger_mode(caps, False)   # free-running: blocked reads return
+            try:
+                teensy.cmd("TRIG_DISARM")
+            except Exception:  # noqa: BLE001
+                pass
         sc.set_gamma(caps, sc.DEFAULT_GAMMA)
         for cap, dev in caps.values():
             cap.release()

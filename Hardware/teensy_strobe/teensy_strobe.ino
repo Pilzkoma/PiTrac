@@ -21,6 +21,17 @@
 //   STOP                            → OK <pulses fired>
 //   TRIG_ARM | TRIG_DISARM          → OK    camera trigger lines driven / released
 //   SHOT,<mask>,<delay_us>,<pulse_us> → OK | ERR <reason>  trigger cameras, flash
+//   TRIG_RUN,<period_us>,<delay_us>,<pulse_us>[,max_ms] → OK | ERR <reason>
+//                                   continuous trigger; STOP → OK <triggers>
+//
+// TRIG_RUN (added 2026-11-12): SHOT repeated on a fixed period - both
+// cameras get an edge every <period_us>, one flash of <pulse_us> (0 = none)
+// follows each edge at <delay_us>. Measured: exposure starts 0.78 ms after
+// the edge, both cameras within 25 us, so a delay of ~0.9 ms puts the flash
+// inside a 0.5 ms exposure. Same guards as RUN: max_ms (default 60 s, cap
+// 10 min), duty <= MAX_RUN_DUTY, and period >= TRIG_RUN_MIN_PERIOD_US.
+// Needs TRIG_ARM first. Schedule accumulates without drift; each period
+// blocks for delay + pulse (~1 ms).
 //
 // Camera trigger (added 2026-11-12). The B0332 boards (UC-844) have a trigger
 // input at pad F: ~3 kOhm pull-up to 3.3 V, a frame per RISING edge once the
@@ -63,6 +74,7 @@ constexpr uint32_t TRIG_LOW_US        = 10;      // camera needs >= 2 us
 constexpr uint32_t SHOT_MAX_DELAY_US  = 100000;
 constexpr uint32_t SHOT_MAX_PULSE_US  = 1000;
 constexpr uint32_t SHOT_MIN_SPACING_US = 5000;   // LED protection between SHOTs
+constexpr uint32_t TRIG_RUN_MIN_PERIOD_US = 5000;
 
 constexpr size_t MAX_INTERVALS    = 64;
 constexpr size_t SERIAL_BUF_SIZE  = 512;
@@ -112,9 +124,19 @@ bool     trig_armed     = false;
 bool     shot_fired     = false;
 uint32_t last_shot_us   = 0;
 
+// Continuous trigger (TRIG_RUN): shares State::RUNNING, run_started_ms,
+// run_max_ms and run_pulses (counted edges) with RUN.
+bool     trig_running   = false;
+uint32_t trun_period_us = 0;
+uint32_t trun_delay_us  = 0;
+uint32_t trun_pulse_us  = 0;
+
 // Forward decls
 void armTrigger(bool on);
 void shot(char* args);
+void fireEdgeAndFlash(uint8_t mask, uint32_t delay_us, uint32_t pulse_us);
+void startTrigRun(char* args);
+void trigRunStep();
 void runStep();
 void startRun(char* args);
 void stopRun();
@@ -140,7 +162,7 @@ void setup() {
     Serial.begin(115200);
     uint32_t t0 = millis();
     while (!Serial && (millis() - t0) < BOOT_WAIT_MS) { /* spin */ }
-    Serial.println("BOOT teensy_strobe firmware v0.2 (camera trigger)");
+    Serial.println("BOOT teensy_strobe firmware v0.3 (camera trigger, TRIG_RUN)");
 
     attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
 }
@@ -164,7 +186,7 @@ void loop() {
     }
 
     if (current_state == State::RUNNING) {
-        runStep();
+        if (trig_running) trigRunStep(); else runStep();
         return;
     }
 
@@ -293,6 +315,8 @@ void handleLine(char* line) {
         sendOk();
     } else if (strcmp(line, "SHOT") == 0) {
         shot(args);
+    } else if (strcmp(line, "TRIG_RUN") == 0) {
+        startTrigRun(args);
     } else {
         sendErr("unknown command");
     }
@@ -397,6 +421,11 @@ void runStep() {
 void stopRun() {
     if (current_state != State::RUNNING) return;
     digitalWriteFast(LED_GATE, LOW);
+    if (trig_running) {
+        digitalWriteFast(CAM1_TRIG, HIGH);    // armed idle level
+        digitalWriteFast(CAM2_TRIG, HIGH);
+        trig_running = false;
+    }
     current_state = State::READY;
     updateState();
     attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
@@ -445,30 +474,74 @@ void shot(char* args) {
         sendErr("too soon after last SHOT"); return;
     }
 
-    const uint32_t cycles_per_us = F_CPU_ACTUAL / 1000000;
     detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
-
-    if (mask & 1) digitalWriteFast(CAM1_TRIG, LOW);
-    if (mask & 2) digitalWriteFast(CAM2_TRIG, LOW);
-    delayMicroseconds(TRIG_LOW_US);
-    digitalWriteFast(CAM1_TRIG, HIGH);
-    digitalWriteFast(CAM2_TRIG, HIGH);
-    const uint32_t c0 = ARM_DWT_CYCCNT;            // t0: the rising edge
-
-    if (pulse_us > 0) {
-        const uint32_t wait = (uint32_t)delay_us * cycles_per_us;
-        while ((ARM_DWT_CYCCNT - c0) < wait) { /* spin */ }
-        digitalWriteFast(LED_GATE, HIGH);
-        delayMicroseconds((uint32_t)pulse_us);
-        digitalWriteFast(LED_GATE, LOW);
-    }
-
+    fireEdgeAndFlash((uint8_t)mask, (uint32_t)delay_us, (uint32_t)pulse_us);
     last_shot_us = micros();
     shot_fired = true;
     if (current_state != State::RUNNING) {
         attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
     }
     sendOk();
+}
+
+// Edge on the cameras in <mask>, then one flash <delay_us> after it.
+void fireEdgeAndFlash(uint8_t mask, uint32_t delay_us, uint32_t pulse_us) {
+    const uint32_t cycles_per_us = F_CPU_ACTUAL / 1000000;
+    if (mask & 1) digitalWriteFast(CAM1_TRIG, LOW);
+    if (mask & 2) digitalWriteFast(CAM2_TRIG, LOW);
+    delayMicroseconds(TRIG_LOW_US);
+    digitalWriteFast(CAM1_TRIG, HIGH);
+    digitalWriteFast(CAM2_TRIG, HIGH);
+    const uint32_t c0 = ARM_DWT_CYCCNT;            // t0: the rising edge
+    if (pulse_us > 0) {
+        const uint32_t wait = delay_us * cycles_per_us;
+        while ((ARM_DWT_CYCCNT - c0) < wait) { /* spin */ }
+        digitalWriteFast(LED_GATE, HIGH);
+        delayMicroseconds(pulse_us);
+        digitalWriteFast(LED_GATE, LOW);
+    }
+}
+
+void startTrigRun(char* args) {
+    if (current_state == State::RUNNING) { sendErr("already running"); return; }
+    if (!trig_armed) { sendErr("not armed"); return; }
+    long period_us, delay_us, pulse_us, max_ms = (long)RUN_DEFAULT_MAX_MS;
+    char* p = args;
+    if (!nextLong(&p, &period_us) || !nextLong(&p, &delay_us) || !nextLong(&p, &pulse_us)) {
+        sendErr("TRIG_RUN needs period_us,delay_us,pulse_us[,max_ms]"); return;
+    }
+    if (p && *p && !nextLong(&p, &max_ms)) { sendErr("bad max_ms"); return; }
+    if (period_us < (long)TRIG_RUN_MIN_PERIOD_US) { sendErr("period below minimum"); return; }
+    if (delay_us < 0 || pulse_us < 0 || pulse_us > (long)SHOT_MAX_PULSE_US) {
+        sendErr("delay/pulse out of range"); return;
+    }
+    if ((long)TRIG_LOW_US + delay_us + pulse_us + 200 > period_us) {
+        sendErr("delay + pulse do not fit the period"); return;
+    }
+    if ((float)pulse_us / (float)period_us > MAX_RUN_DUTY) { sendErr("duty cycle above limit"); return; }
+    if (max_ms < 1) { sendErr("RUN max_ms must be > 0"); return; }
+    if (max_ms > (long)RUN_CAP_MAX_MS) max_ms = RUN_CAP_MAX_MS;
+
+    trun_period_us = (uint32_t)period_us;
+    trun_delay_us  = (uint32_t)delay_us;
+    trun_pulse_us  = (uint32_t)pulse_us;
+    run_pulses     = 0;
+    run_max_ms     = (uint32_t)max_ms;
+    run_started_ms = millis();
+    run_next_us    = micros();
+    detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
+    digitalWriteFast(STATUS_LED, LOW);
+    trig_running   = true;
+    current_state  = State::RUNNING;
+    sendOk();
+}
+
+void trigRunStep() {
+    if (millis() - run_started_ms >= run_max_ms) { stopRun(); return; }
+    if ((int32_t)(micros() - run_next_us) < 0) return;
+    fireEdgeAndFlash(3, trun_delay_us, trun_pulse_us);
+    run_pulses++;
+    run_next_us += trun_period_us;
 }
 
 void sendOk()  { Serial.println("OK"); }

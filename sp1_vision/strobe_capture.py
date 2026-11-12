@@ -173,6 +173,23 @@ def set_gamma(caps, value):
             pass
 
 
+def set_trigger_mode(caps, on):
+    """UVC trigger mode on the B0332s: one frame per rising edge at pad F.
+
+    exposure_auto_priority is this kernel's name for Arducam's
+    exposure_dynamic_framerate. Off, the cameras free-run again (and a read
+    blocked waiting for a trigger returns). Measured 2026-11-12: exposure
+    starts 0.78 ms after the edge, both cameras within 25 us.
+    """
+    for _, dev in caps.values():
+        try:
+            subprocess.run(["v4l2-ctl", "--device={}".format(dev),
+                            "--set-ctrl=exposure_auto_priority={}".format(1 if on else 0)],
+                           check=False, capture_output=True, timeout=5)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+
 def settle_on_auto(caps, seconds=AUTO_SETTLE_S):
     """Let each module's image processor re-converge on auto exposure.
 

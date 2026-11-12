@@ -27,7 +27,6 @@ import argparse
 import json
 import os
 import random
-import subprocess
 import sys
 import threading
 import time
@@ -195,13 +194,6 @@ def build_plan(min_us, max_us, step_us, repeats, seed=0):
     return plan
 
 
-def trigger_mode(caps, on):
-    for _, dev in caps.values():
-        subprocess.run(["v4l2-ctl", "--device={}".format(dev),
-                        "--set-ctrl=exposure_auto_priority={}".format(1 if on else 0)],
-                       check=False, capture_output=True, timeout=5)
-
-
 def reader(cap, stop, out):
     while not stop.is_set():
         ok, buf = cap.read()
@@ -226,7 +218,7 @@ def capture(args):
             set_manual_exposure(dev, args.exposure)
         time.sleep(sc.SETTLE_S)
         teensy.cmd("TRIG_ARM")
-        trigger_mode(caps, True)
+        sc.set_trigger_mode(caps, True)
         threads = [threading.Thread(target=reader, args=(c, stop, got[n]), daemon=True)
                    for n, (c, _) in caps.items()]
         for th in threads:
@@ -246,7 +238,7 @@ def capture(args):
         time.sleep(SPACING_S)
     finally:
         stop.set()
-        trigger_mode(caps, False)          # free-running again: readers return
+        sc.set_trigger_mode(caps, False)          # free-running again: readers return
         for th in threads:
             th.join(timeout=3)
         try:
