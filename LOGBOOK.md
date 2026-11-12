@@ -175,7 +175,7 @@ Next step: solder pins on Teensy when they arrive, wire Jetson Pin 29 ↔ Teensy
 |-|-|-|-|-|-|-|
 |1|SP1|PiTrac is built for Raspberry Pi camera stack (libcamera). Jetson uses a different camera API (Argus / V4L2). Porting will require rewriting camera abstraction layer.|✅ Resolved|☑ Yes|Resolved 2026-03-16 — porting approach confirmed: #ifdef JETSON_BUILD guards throughout libcamera_interface.h, ball_watcher.cpp, motion_detect.h, motion_detect_stage.cpp. New v4l2_interface.h created with JetsonCaptureApp and JetsonCompletedRequest structs replacing RPi types.|2026-03-16|
 |2|SP1|IR strobe pulse timing on RPi uses hardware hacks to the Pi GS camera. Jetson GPIO timing characteristics are different — may need external microcontroller for sub-microsecond strobe control.|🟡 Annoying|☑ Yes|Investigate Jetson GPIO latency vs dedicated Arduino/Teensy strobe controller|2026-03-14|
-|3|SP2|Spin detection requires marked balls. Standard range balls will not work for spin. Must use balls with visible dot pattern (similar to Foresight approach).|🔵 Minor|☑ Yes|Accepted — user confirmed willingness to use marked balls|2026-03-14|
+|3|SP2|~~Spin detection requires marked balls.~~ Korrigiert 2026-11-12: Die Annahme stammte nicht von PiTrac. PiTracs Spin-Auswertung liest die Dimples (Gabor-Filter), Marken stören sie eher. Offen: ob unsere Optik die Dimples auflöst (~7–9 px pro Dimple bei 40–50 cm) und wie kurz der Blitz sein muss.|🔵 Minor|☑ Yes|Überholt — erst Dimples testen (Kurzpuls-Test am ruhenden Ball), Marken nur falls die nicht reichen|2026-11-12|
 |4|SP4|GSPro runs on Windows PC only — it cannot run on the Jetson. The Jetson sends JSON shot data over TCP to a separate Windows PC running GSPro. Firewall and network config required if on different subnets.|🔵 Minor|☑ Yes|Architectural decision logged — Jetson = compute, Windows PC = GSPro host|2026-03-14|
 |5|SP1|LiDAR excluded from v1. Camera-only trigger may log a topped/missed shot as a real shot in rare cases.|🔵 Minor|☑ Yes|Accepted for v1. V2 trigger/speed sensor: open choice between LiDAR (trigger only) and 24 GHz Doppler radar (trigger + ball speed ±0.5% + spin fallback). OpenFlight (github.com/jewbetcha/openflight) validates OPS243-A radar for golf ball Doppler — primary V2 reference.|2026-03-14|
 |6|SP1|pitrac_lm binary is not yet tested with real cameras — all camera functions return stub false values until Group 2 runtime implementations are complete|🟡 Annoying|☑ Yes|Expected — cameras not yet arrived. Will implement V4L2 capture, GPIO strobe when OV9281 cameras arrive|2026-03-19|
@@ -256,7 +256,7 @@ CORE TECHNICAL APPROACH:
 - Base codebase: PiTrac (github.com/PiTracLM/PiTrac) — adapting from RPi to Jetson
 - Camera approach: 2x global shutter cameras + IR strobe (microsecond pulses)
 - Trigger: LiDAR for motion detection
-- Spin: Marked balls (dot pattern) — non-negotiable requirement
+- Spin: PiTrac reads the ball's dimples (Gabor filters) — no marks needed, marks disturb it (corrected 2026-11-12; the old "marked balls, non-negotiable" was never PiTrac's)
 - GSPro: Sends JSON over TCP using GSPro Open Connect API v1
 - Swing video: Separate USB camera, saved locally, uploaded externally for AI analysis
 
@@ -299,7 +299,7 @@ SOFTWARE AND TOOLS:
 KNOWN ISSUES (do not try to fix these — they are logged decisions):
 1. PiTrac uses RPi libcamera stack — Jetson uses Argus/V4L2. Camera abstraction must be rewritten. (Blocking — must solve in SP1 design)
 2. IR strobe timing on Jetson GPIO may be insufficient — may need Arduino/Teensy for strobe control.
-3. Spin requires marked balls — accepted, user confirmed.
+3. ~~Spin requires marked balls~~ — corrected 2026-11-12: PiTrac reads the dimples; open is whether our optics resolve them.
 4. GSPro runs on separate Windows PC — Jetson sends data over TCP. Not a bug, architectural decision.
 
 ACTIVE SUB-PROJECTS:
@@ -1785,13 +1785,56 @@ PiTrac's key techniques:
 > (`sp4_gspro/jetsonlm-led`). Idee für v2: MIPI-Global-Shutter-Kameras mit
 > Hardware-Trigger.
 
+**2026-11-12 (abends) — Die B0332 hat einen Trigger-Eingang, und er funktioniert.**
+
+> Platine **UC-844 Rev.B**. Vorne drei Lötlöcher **G, S, F** (G eckig);
+> die Felder **L / R** mit je 6 Pads sind die unbestückten Mikrofone.
+> F läuft direkt an ein Bein des USB-Bridge-Controllers (Rückseite), S
+> über einen Widerstand. Gemessen im eingebauten Zustand, ohne Ausbau:
+> - **F**: 3,3 V im Ruhezustand, **1 mA** Kurzschlussstrom gegen G (über
+>   das Multimeter im mA-Bereich) → Eingang mit ca. 3 kΩ Pull-up auf 3,3 V.
+>   Der Teensy (3,3 V) darf ihn direkt ansteuern.
+> - **S**: konstant 3,3 V bei 1 ms und bei 8 ms Belichtung, frei laufend →
+>   im Normalbetrieb kein Belichtungssignal (abgeschaltet oder nur im
+>   Trigger-Modus; dort nicht gemessen). S und G kurz berührt: kein Schaden.
+> - **Trigger-Modus** per UVC: `exposure_auto_priority=1` (auf diesem Kernel
+>   der alte Name von Arducams `exposure_dynamic_framerate`), manuelle
+>   Belichtung. Danach liefert die Kamera **nur noch auf Trigger** Bilder.
+>   Test mit `trigger_probe.py` (Scratch, nicht im Repo), F von Hand mit
+>   einem Draht auf G gezogen und losgelassen: `/dev/video0` lieferte Bilder
+>   nur in Gruppen zu den Berührungen (32 Bilder in ~8 Berührungen, Kontakt
+>   prellt → mehrere Flanken), die nicht verdrahtete Kamera kein einziges.
+>   Es sind echte neue Bilder (Größe und Helligkeit ändern sich mit der Hand).
+> - Das Dashboard kann einen Einzeltrigger nicht zeigen: es holt immer beide
+>   Kameras als Paar und verwirft die ersten Bilder (`STALE_FRAMES`).
+>
+> Bedeutung: Beide Kameras können vom Teensy mit derselben Flanke gestartet
+> werden — das Phasenproblem ist ohne neue Kameras lösbar. **Offen und
+> entscheidend:** Verzögerung und Streuung vom Trigger bis zum
+> Belichtungsstart (der Trigger geht durch die Controller-Firmware). Messung
+> geplant: Teensy triggert, blitzt nach einstellbarer Verzögerung; wo der
+> Blitz im Bild auftaucht, ergibt Start, Dauer und Streuung je Kamera.
+> Dafür F + G beider Kameras an den Teensy löten (von vorn, ohne Druck auf
+> die Platinen — ein Verdrehen kostet die Stereo-Kalibrierung).
+> Physikalische Grenze bleibt: für Drives braucht es mehrere Blitze pro
+> Belichtung, also ein Fenster von 2–4 ms; der volle Gewinn gegen
+> Umgebungslicht nur bei Putts, Chips und ruhendem Ball.
+>
+> Recherche v2 nebenbei: VC MIPI (Vision Components) OV9281/IMX296 mit
+> offenem Jetson-Treiber (Xavier NX, L4T bis 35.6.0) und Trigger-Modus
+> `pulsewidth` (Belichtung = Pulslänge) wäre der Favorit, falls der
+> USB-Trigger nicht taugt; Seeed J202 dort nicht gelistet. C-Berry-Display
+> (3,5", RAiO RA8870): admatecs Code nutzt die RPi-only-Bibliothek bcm2835,
+> auf dem Jetson also neu über spidev — denkbar als Statusanzeige (bereit,
+> letzter Schuss, IP, Kamerazustand, Ausrichthilfe).
+
 \---
 
 \---
 
 ## 🔧 Sub-Project 2: Spin Detection
 
-**One-line description:** 3-axis spin rate measurement from marked ball images captured via strobe frames — backspin, sidespin, and spin axis.
+**One-line description:** 3-axis spin rate measurement from ball images (the dimple pattern) captured via strobe frames — backspin, sidespin, and spin axis.
 
 |Field|Value|
 |-|-|
@@ -1807,15 +1850,15 @@ PiTrac's key techniques:
 
 ### 🎯 Goal
 
-After a shot, the system outputs backspin RPM, sidespin RPM, and spin axis in degrees — accurate enough to differentiate a 3000 RPM draw from a 5000 RPM fade. Spin values are plausible when cross-checked against a commercial launch monitor on the same shot. Marked balls are used.
+After a shot, the system outputs backspin RPM, sidespin RPM, and spin axis in degrees — accurate enough to differentiate a 3000 RPM draw from a 5000 RPM fade. Spin values are plausible when cross-checked against a commercial launch monitor on the same shot. Ordinary balls, read by their dimples (marks only if the dimples cannot be resolved).
 
 \---
 
 ### 📐 Design Notes
 
-**Approach:** PiTrac already implements 3-axis spin detection using marked balls. Two strobe frames of the ball in flight are compared — the angular rotation of the dot pattern between frames, combined with the known strobe interval, gives RPM and axis.
+**Approach:** PiTrac already implements 3-axis spin detection — on the **dimples**, not on marks (corrected 2026-11-12). `GetBallRotation` (`ball_image_proc.cpp` ~2871) crops both ball images, Gabor-filters them in 32 directions (threshold regulated to 38–45 % white), masks reflections and the outer 8 %, then searches 3D rotations of image 1 for the best match to image 2. Rotation over the known strobe interval gives RPM and axis.
 
-**Ball marking:** Needs a consistent, repeatable dot pattern. Research what pattern PiTrac recommends and whether commercial marked balls (like Foresight practice balls) are usable or if self-marking is required.
+**Ball marking:** Not needed by PiTrac — the code comment at 2969–2971 says dark registration marks create large areas in the Gabor image and disturb it; the author on Hackaday: spin "without requiring any registration marks". No stencil exists upstream. Open for us: dimples are ~7–9 px across at 40–50 cm (ball radius 39–48 px) — marginal; and the flash must be short (100 µs smears 3 mm at 30 m/s). If dimples fail, marks become our own method, in IR-dark ink (carbon: Indian ink, pencil, toner — many felt-pen dyes are transparent at 850 nm). Foam balls have no dimples.
 
 **Key challenge from PiTrac logs:** HoughCircles detection on overlapping ball images is unreliable at low resolution. Higher-resolution cameras than the RPi GS camera will help — this is one of the Jetson advantages.
 
@@ -1828,6 +1871,7 @@ After a shot, the system outputs backspin RPM, sidespin RPM, and spin axis in de
 |Date|Decision|Why I Made It|Alternatives Considered|
 |-|-|-|-|
 |2026-03-14|Marked balls — non-negotiable|Unmärked ball spin from vision alone is not reliably achievable at DIY camera resolutions|Radar-based spin (requires Doppler radar hardware, different approach entirely)|
+|2026-11-12|**Supersedes the row above:** spin from the dimples, PiTrac's way; no marks unless the dimples cannot be resolved|The March assumption was never PiTrac's — its spin code reads dimples and marks disturb it (`ball_image_proc.cpp` 2969–2971, Hackaday log). Test first: short pulses on a static ball, are the dimples visible?|Painting balls with a stencil (only if dimples fail, then IR-dark ink and a mark-based method of our own)|
 
 \---
 

@@ -81,7 +81,16 @@ viable and roughly an order of magnitude more accurate at these distances.
 - V4L2 — built into Linux kernel, headers via libv4l-dev
 
 ## Known issues — do not try to fix these
-1. Spin requires marked balls — accepted, non-negotiable
+1. ~~Spin requires marked balls~~ — **corrected 2026-11-12, the old assumption was
+   never PiTrac's.** PiTrac's spin (`GetBallRotation`, `ball_image_proc.cpp` ~2871)
+   reads the **dimples**: Gabor filters in 32 directions, threshold regulated to
+   38–45 % white, then a 3D rotation search matching image 1 onto image 2. Marks
+   *disturb* it (code comment at 2969–2971; the author on Hackaday: spin "without
+   requiring any registration marks"). Open: whether our optics resolve the
+   dimples (~7–9 px per dimple at 40–50 cm, ball radius 39–48 px) and how short
+   the flash must be (100 µs smears 3 mm at 30 m/s, about one dimple). Marks only
+   if the dimples fail - then as our own method, in IR-dark ink (many felt-pen
+   inks are transparent at 850 nm). Foam balls have no dimples.
 2. GSPro is Windows-only — Jetson sends data over TCP, not a bug
 3. Issue #22: libgpiod chardev does not drive Pin 29 on the Seeed J202 carrier.
    `pulse_strobe_jetson.cpp` shells out to `fire_trigger.py` (Jetson.GPIO) instead.
@@ -229,7 +238,7 @@ Next SP1 items, in this order:
    offset only limits today's whole-frame pairing), and time resolution is
    the flash rate, not 120 fps. Next session, in this order: (a) short-pulse
    brightness on a static ball, 20/30/50 µs - at 75 m/s a 0.1 ms flash
-   smears 7.5 mm, spin marks need ~25 µs, which gives ~+30 grey levels where
+   smears 7.5 mm, the dimples (what the spin reads, see Known issues 1) need ~25 µs, which gives ~+30 grey levels where
    0.1 ms gave +115; the biggest v1 risk, 15 minutes to settle; (b) chips, to
    build the per-flash matching of several ball images per frame (same image
    row in both cameras, order along the path, an irregular flash pattern);

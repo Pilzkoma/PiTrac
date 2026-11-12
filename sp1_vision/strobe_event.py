@@ -96,16 +96,34 @@ def find_rest_balls(rig, got):
     return found
 
 
+def next_same_spot(rest, i):
+    """Time of the next rest detection at the same image position, or None."""
+    (u, v), r = rest[i][1].uv1, rest[i][1].radius1_px
+    for t, b in rest[i + 1:]:
+        if (b.uv1[0] - u) ** 2 + (b.uv1[1] - v) ** 2 <= r * r:
+            return t
+    return None
+
+
 def find_impacts(got, rest):
-    """[(t_impact, BallPair at rest)]: for each rest position, when it emptied."""
+    """[(t_impact, BallPair at rest)]: for each rest position, when it emptied.
+
+    Each search stops shortly after the next rest detection at the same spot:
+    the ball was still there then, so that detection's own search covers
+    everything later. Without the stop every sample of a ball that never
+    leaves rescans to the end of the recording (quadratic - over half an
+    hour for 45 s of chips, 2026-11-12).
+    """
     impacts = []
     used_until = -1.0
-    for t_rest, ball in rest:
+    for i, (t_rest, ball) in enumerate(rest):
         if t_rest < used_until:
             continue
         u, v = ball.uv1
         r = ball.radius1_px
-        frames = [(t, b) for t, b in got[1] if t >= t_rest]
+        t_next = next_same_spot(rest, i)
+        t_stop = float("inf") if t_next is None else t_next + GONE_HOLD_S + REST_STEP_S
+        frames = [(t, b) for t, b in got[1] if t_rest <= t <= t_stop]
         base = presence(frames[0][1], u, v, r)
         if base <= 10:
             continue
