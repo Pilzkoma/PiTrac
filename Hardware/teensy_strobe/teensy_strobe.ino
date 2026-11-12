@@ -19,6 +19,20 @@
 //   TEST_FIRE                       → FIRED  (manual fire without Jetson GPIO)
 //   RUN[,max_ms]                    → OK | ERR <reason>   continuous strobe
 //   STOP                            → OK <pulses fired>
+//   TRIG_ARM | TRIG_DISARM          → OK    camera trigger lines driven / released
+//   SHOT,<mask>,<delay_us>,<pulse_us> → OK | ERR <reason>  trigger cameras, flash
+//
+// Camera trigger (added 2026-11-12). The B0332 boards (UC-844) have a trigger
+// input at pad F: ~3 kOhm pull-up to 3.3 V, a frame per RISING edge once the
+// camera is in trigger mode (UVC exposure_auto_priority=1). CAM1_TRIG / CAM2_TRIG
+// drive those pads directly. Disarmed they are inputs (high impedance) and the
+// cameras behave as if nothing were connected; armed they idle HIGH. SHOT pulls
+// the lines in <mask> (bit 0 = cam1, bit 1 = cam2) LOW for TRIG_LOW_US and
+// releases them HIGH - that rising edge is t0 - then fires one flash of
+// <pulse_us> (0 = no flash) at t0 + <delay_us>, timed on the cycle counter.
+// Interrupts stay on, so USB service can add a few microseconds. Purpose first:
+// measure when each camera actually exposes after its edge
+// (sp1_vision/trigger_sweep.py). SHOT is refused while RUN is active.
 //
 // Continuous strobe (added 2026-11-11). The UVC cameras free-run without a
 // trigger input and deliver frames 11-20 ms late, so reacting to a hit is
@@ -42,6 +56,13 @@
 constexpr uint8_t FIRE_PIN   = 2;   // input from Jetson GPIO (RISING edge)
 constexpr uint8_t LED_GATE   = 3;   // output to MOSFET gate
 constexpr uint8_t STATUS_LED = 13;  // onboard LED — slow blink = waiting setup, solid = ready
+constexpr uint8_t CAM1_TRIG  = 4;   // to pad F of camera 1 (G to GND)
+constexpr uint8_t CAM2_TRIG  = 5;   // to pad F of camera 2
+
+constexpr uint32_t TRIG_LOW_US        = 10;      // camera needs >= 2 us
+constexpr uint32_t SHOT_MAX_DELAY_US  = 100000;
+constexpr uint32_t SHOT_MAX_PULSE_US  = 1000;
+constexpr uint32_t SHOT_MIN_SPACING_US = 5000;   // LED protection between SHOTs
 
 constexpr size_t MAX_INTERVALS    = 64;
 constexpr size_t SERIAL_BUF_SIZE  = 512;
@@ -86,7 +107,14 @@ uint32_t run_started_ms = 0;
 uint32_t run_max_ms     = RUN_DEFAULT_MAX_MS;
 uint32_t run_pulses     = 0;
 
+// Camera trigger state (TRIG_ARM / SHOT).
+bool     trig_armed     = false;
+bool     shot_fired     = false;
+uint32_t last_shot_us   = 0;
+
 // Forward decls
+void armTrigger(bool on);
+void shot(char* args);
 void runStep();
 void startRun(char* args);
 void stopRun();
@@ -104,13 +132,15 @@ void setup() {
     pinMode(FIRE_PIN,   INPUT);
     pinMode(LED_GATE,   OUTPUT);
     pinMode(STATUS_LED, OUTPUT);
+    pinMode(CAM1_TRIG,  INPUT);     // disarmed: released, the camera's pull-up holds F
+    pinMode(CAM2_TRIG,  INPUT);
     digitalWriteFast(LED_GATE,   LOW);
     digitalWriteFast(STATUS_LED, LOW);
 
     Serial.begin(115200);
     uint32_t t0 = millis();
     while (!Serial && (millis() - t0) < BOOT_WAIT_MS) { /* spin */ }
-    Serial.println("BOOT teensy_strobe firmware v0.1");
+    Serial.println("BOOT teensy_strobe firmware v0.2 (camera trigger)");
 
     attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
 }
@@ -253,7 +283,16 @@ void handleLine(char* line) {
         Serial.print(" ON_PULSE_US="); Serial.print(on_pulse_us);
         Serial.print(" N_FAST=");      Serial.print(num_pulse_intervals_fast);
         Serial.print(" N_SLOW=");      Serial.print(num_pulse_intervals_slow);
+        Serial.print(" TRIG=");        Serial.print(trig_armed ? "ARMED" : "OFF");
         Serial.print(" RUN_PULSES=");  Serial.println(run_pulses);
+    } else if (strcmp(line, "TRIG_ARM") == 0) {
+        armTrigger(true);
+        sendOk();
+    } else if (strcmp(line, "TRIG_DISARM") == 0) {
+        armTrigger(false);
+        sendOk();
+    } else if (strcmp(line, "SHOT") == 0) {
+        shot(args);
     } else {
         sendErr("unknown command");
     }
@@ -361,6 +400,75 @@ void stopRun() {
     current_state = State::READY;
     updateState();
     attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
+}
+
+// --- camera trigger --------------------------------------------------------
+
+void armTrigger(bool on) {
+    if (on) {
+        // Data register HIGH before the pin becomes an output, so arming never
+        // drives a LOW glitch onto F (a LOW-HIGH would trigger a frame).
+        digitalWriteFast(CAM1_TRIG, HIGH);
+        digitalWriteFast(CAM2_TRIG, HIGH);
+        pinMode(CAM1_TRIG, OUTPUT);
+        pinMode(CAM2_TRIG, OUTPUT);
+        digitalWriteFast(CAM1_TRIG, HIGH);
+        digitalWriteFast(CAM2_TRIG, HIGH);
+    } else {
+        pinMode(CAM1_TRIG, INPUT);
+        pinMode(CAM2_TRIG, INPUT);
+    }
+    trig_armed = on;
+}
+
+static bool nextLong(char** p, long* out) {
+    if (!*p || !**p) return false;
+    char* end;
+    *out = strtol(*p, &end, 10);
+    if (end == *p) return false;
+    *p = (*end == ',') ? end + 1 : end;
+    return true;
+}
+
+void shot(char* args) {
+    if (current_state == State::RUNNING) { sendErr("RUN active"); return; }
+    if (!trig_armed) { sendErr("not armed"); return; }
+    long mask, delay_us, pulse_us;
+    char* p = args;
+    if (!nextLong(&p, &mask) || !nextLong(&p, &delay_us) || !nextLong(&p, &pulse_us)) {
+        sendErr("SHOT needs mask,delay_us,pulse_us"); return;
+    }
+    if (mask < 1 || mask > 3) { sendErr("mask must be 1..3"); return; }
+    if (delay_us < 0 || delay_us > (long)SHOT_MAX_DELAY_US) { sendErr("delay out of range"); return; }
+    if (pulse_us < 0 || pulse_us > (long)SHOT_MAX_PULSE_US) { sendErr("pulse out of range"); return; }
+    if (shot_fired && (micros() - last_shot_us) < SHOT_MIN_SPACING_US) {
+        sendErr("too soon after last SHOT"); return;
+    }
+
+    const uint32_t cycles_per_us = F_CPU_ACTUAL / 1000000;
+    detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
+
+    if (mask & 1) digitalWriteFast(CAM1_TRIG, LOW);
+    if (mask & 2) digitalWriteFast(CAM2_TRIG, LOW);
+    delayMicroseconds(TRIG_LOW_US);
+    digitalWriteFast(CAM1_TRIG, HIGH);
+    digitalWriteFast(CAM2_TRIG, HIGH);
+    const uint32_t c0 = ARM_DWT_CYCCNT;            // t0: the rising edge
+
+    if (pulse_us > 0) {
+        const uint32_t wait = (uint32_t)delay_us * cycles_per_us;
+        while ((ARM_DWT_CYCCNT - c0) < wait) { /* spin */ }
+        digitalWriteFast(LED_GATE, HIGH);
+        delayMicroseconds((uint32_t)pulse_us);
+        digitalWriteFast(LED_GATE, LOW);
+    }
+
+    last_shot_us = micros();
+    shot_fired = true;
+    if (current_state != State::RUNNING) {
+        attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
+    }
+    sendOk();
 }
 
 void sendOk()  { Serial.println("OK"); }
