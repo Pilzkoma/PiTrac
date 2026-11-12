@@ -1828,6 +1828,27 @@ PiTrac's key techniques:
 > auf dem Jetson also neu über spidev — denkbar als Statusanzeige (bereit,
 > letzter Schuss, IP, Kamerazustand, Ausrichthilfe).
 
+**2026-11-12 (spät) — Drei Chips aufgenommen, die Auswertung kann sie noch nicht.**
+
+> `strobe_shot --seconds 45 --interval-ms 4`, Rohdaten (1,1 GB, 5443 Bilder
+> je Kamera) diesmal dauerhaft in `/home/brain/strobe_raw/2026-11-12_chips`
+> (die Putt-Rohdaten in `/tmp` waren nach einem Neustart weg). Die
+> automatische Auswertung von `strobe_shot` endete ohne Meldung;
+> `strobe_event` brauchte über 50 min — quadratische Ball-weg-Suche, behoben
+> in `b3a3fcc`. Danach: Ruheball bei X −78, Z 440 mm, aber 11 "Schläge"
+> statt 3 (Bälle hinlegen/wegnehmen zählt mit). Beim ersten Chip ist der Ball
+> nur in den ersten zwei Bildpaaren gefunden (≈ 4–5 m/s, leicht steigend —
+> grob, zwei Punkte). Das Kontaktblatt (`strobe_raw/chip1_sheet.jpg`)
+> zeigt warum: der Ball ist in jedem Bild hell und klar zu sehen, aber bei
+> 4 ms Blitzabstand fallen zwei Blitze in jedes Bild, und bei dieser
+> Geschwindigkeit überlappen die beiden Ballbilder (≈ 18 mm Abstand, 43 mm
+> Ball) zu einem länglichen Fleck, den die Kreissuche ablehnt. Auswertung
+> abgebrochen. Für Chips nötig: Zuordnung pro Blitz (Punkt b) oder genau ein
+> Blitz pro Bild — das liefert der Kamera-Trigger. Dafür am selben Abend:
+> Teensy-Firmware v0.2 (`TRIG_ARM`, `SHOT`, Pins 4/5) und
+> `sp1_vision/trigger_sweep.py` (`faa349a`); cam1 (Dashboard links, die
+> von Hand getriggerte) an Pin 4, cam2 an Pin 5, GND an beide G.
+
 \---
 
 \---
