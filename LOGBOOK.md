@@ -1944,24 +1944,35 @@ PiTrac's key techniques:
 > Kalibrierung vom 10.11.) schlugen schon vor diesen Änderungen fehl —
 > eigenes Thema, nicht angefasst.
 
-**2026-11-13 — Kurzpuls-Test: Ball gut sichtbar, Dimples nicht.**
+**2026-11-13 — Kurzpuls-Test (korrigiert) und Tintentest.**
 
-> Ruhender Ball bei Z 430 mm (Radius 45,6 / 45,8 px), Trigger-Modus, 0,5 ms
-> Belichtung, Gamma 72, Blitz 0,9 ms nach der Flanke, je 4 Schüsse
-> (`sp1_vision/strobe_runs/2026-11-13_pulse_test/`).
-> Ball minus Umgebung (cam1 / cam2): 10 µs +4 / +7 — 20 µs **+15 / +17** —
-> 30 µs **+26 / +28** — 50 µs +40 / +44 — 100 µs +68 / +77 — 200 µs
-> +125 / +125 — 300 µs +162 / +163 (fast gesättigt). Unter 20 µs kommt kaum
-> Licht an (Einschaltzeit LED/MOSFET). 20–30 µs reichen zum Sehen
-> (1,5–2,3 mm Unschärfe bei 75 m/s).
-> **Dimples auf keinem Ausschnitt erkennbar** — sichtbar sind die
-> 8×8-Blöcke der MJPEG-Kompression (so groß wie ein Dimple; YUY2 gibt es
-> bei 1280×800 nur mit 10 fps) und der Blitz fast aus Kamerarichtung lässt
-> Dimples kaum Schatten werfen. Scharf zu sehen: der **schwarze Aufdruck**
-> des Balls, in beiden Kameras — es gibt also IR-dunkle Tinte. Damit ist
-> PiTracs Dimple-Verfahren mit diesen Kameras unwahrscheinlich; Spin über
-> Markierungen (Schablone, IR-dunkle Tinte) als eigenes Verfahren ist der
-> realistische Weg — zurück zur ursprünglichen Idee des Besitzers.
+> **Erster Lauf ungültig**: das Skript las nach jedem `SHOT` "das nächste
+> Bild" — im Trigger-Modus liegen im Puffer noch Bilder von vor dem
+> Umschalten bzw. vom vorigen Schuss. Prüfung mit abwechselnd 0 / 300 µs:
+> der Blitz tauchte erst beim *nächsten* Schuss auf, je Kamera verschieden.
+> Seine Zahlen (+15 bei 20 µs, "unter 20 µs kaum Licht") und die Aussage
+> "keine Dimples" (aus Ausschnitten der falschen Blitzlänge) sind
+> **zurückgenommen**. Neu (`2026-11-13_pulse_test/shot_frames.py`): Bilder
+> laufend lesen, per Ankunftszeit zuordnen, Dunkel-Schüsse dazwischen —
+> Versatz 0 und 0 fehlende Bilder nachgewiesen, beide Kameras.
+>
+> **Richtige Zahlen** (Ball bei Z 443 mm, Radius 44 px, 0,5 ms, Gamma 72,
+> je 4 Schüsse), Ball minus Umgebung cam1 / cam2: 10 µs **+17 / +17** —
+> 20 µs **+34 / +34** — 30 µs **+50 / +49** — 50 µs +75 / +75 — 100 µs
+> +123 / +124 — ab 200 µs übersteuert. ~1,6 Graustufen pro µs, beide
+> Kameras gleich. **10 µs zeigt den Ball schon, 20–30 µs deutlich.**
+>
+> **Dimples: offen.** Auf den richtigen Ausschnitten zellige Struktur bei
+> 100 µs, gewellter Rand bei 200 µs — ob das für PiTracs Gabor-Verfahren
+> reicht, entscheidet nicht der Augenschein (Test: PiTracs Filter auf
+> unsere Ausschnitte, oder zwei Aufnahmen desselben Balls leicht gedreht).
+> Dagegen spricht MJPEG (8×8-Blöcke ≈ ein Dimple) und der Blitz aus
+> Kamerarichtung.
+>
+> **Tinte**: Ball mit Strichen verschiedener Stifte (fein, mittel, dick):
+> nur der **dicke Strich in der Mitte** ist bei 850 nm klar schwarz, die
+> anderen höchstens ein schwacher Schatten; der Hersteller-Aufdruck ist
+> ebenfalls dunkel (`ink_crops.png`).
 
 \---
 

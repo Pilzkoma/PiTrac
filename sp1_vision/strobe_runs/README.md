@@ -308,12 +308,19 @@ below the image top. The arrays light too flat for higher launches.
 
 ## 2026-11-13 — short-pulse test, `2026-11-13_pulse_test/`
 
-Static ball at Z 430 mm (radius 45.6 / 45.8 px), trigger mode, 0.5 ms
-exposure, gamma 72, flash 0.9 ms after the edge, 4 shots per pulse length
-(`pulse_test.py`, numbers in `results.txt`, crops in `pulse_crops.png`).
-Ball minus surround, cam1 / cam2: 10 µs +4 / +7, 20 µs +15 / +17, 30 µs
-+26 / +28, 50 µs +40 / +44, 100 µs +68 / +77, 200 µs +125 / +125, 300 µs
-+162 / +163. Below 20 µs almost nothing arrives (LED/MOSFET turn-on);
-20-30 µs is enough to see the ball. **No dimple pattern at any pulse**: the
-MJPEG 8x8 blocks are dimple-sized and the near-axial flash gives dimples
-little shadow. The factory print (black line) is sharp in both cameras.
+Static ball at Z 443 mm (radius 44 px), trigger mode, 0.5 ms exposure,
+gamma 72, flash 0.9 ms after the edge, 4 flash shots per pulse each followed
+by a dark shot; frames matched by arrival time, alignment proven
+(`shot_frames.py` / `shot_analyse.py`, numbers in `results.txt`). Ball minus
+surround, cam1 / cam2: 10 µs +17 / +17, 20 µs +34 / +34, 30 µs +50 / +49,
+50 µs +75 / +75, 100 µs +123 / +124, saturated from 200 µs - about 1.6 grey
+levels per µs. 10 µs already shows the ball, 20-30 µs clearly.
+
+Dimples: undecided - a cellular texture at 100 µs and a scalloped rim at
+200 µs, but MJPEG's 8x8 blocks are about a dimple's size; settle it with
+PiTrac's Gabor filter on these crops, not by eye. Ink (`ink_crops.png`):
+of several pens only the thick middle stroke is clearly dark at 850 nm.
+
+A first run the same day read "the next frame" after each SHOT and got
+frames from before trigger mode or from the previous shot; it halved every
+figure and claimed "no dimples" from crops of the wrong pulse. Withdrawn.

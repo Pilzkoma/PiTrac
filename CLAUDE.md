@@ -91,14 +91,17 @@ viable and roughly an order of magnitude more accurate at these distances.
    the flash must be (100 µs smears 3 mm at 30 m/s, about one dimple). Marks only
    if the dimples fail - then as our own method, in IR-dark ink (many felt-pen
    inks are transparent at 850 nm). Foam balls have no dimples.
-   **Short-pulse test 2026-11-13 (`sp1_vision/strobe_runs/2026-11-13_pulse_test/`):
-   no dimple pattern visible at any pulse (20-300 µs, ball radius 45 px)** -
-   the cameras deliver MJPEG at full rate (YUY2 only 10 fps), whose 8x8
-   blocks are the size of a dimple, and the near-axial flash gives dimples
-   little shadow. The ball's factory print (a black line) is sharp in both
-   cameras, so IR-dark ink exists. As things stand, spin needs marks and a
-   mark-based method of our own (the owner's stencil idea), not PiTrac's
-   Gabor path.
+   **Short-pulse test 2026-11-13 (`sp1_vision/strobe_runs/2026-11-13_pulse_test/`),
+   dimples undecided:** on correctly matched frames the ball surface shows a
+   cellular texture at 100 µs and a scalloped rim at 200 µs (ball radius
+   44 px), but whether that is enough for the Gabor path is not settled by
+   looking - test it by running PiTrac's filter on our crops, or two shots
+   of one ball turned slightly. Against it: MJPEG at full rate (YUY2 only
+   10 fps), 8x8 blocks about a dimple's size; near-axial flash, little
+   dimple shadow. (A first run that day claimed "no dimples" from
+   mismatched frames - withdrawn.) Ink: of several pens only the thick
+   middle stroke on the test ball is clearly dark at 850 nm, the rest at
+   most a faint shadow; the factory print is dark too.
 2. GSPro is Windows-only — Jetson sends data over TCP, not a bug
 3. Issue #22: libgpiod chardev does not drive Pin 29 on the Seeed J202 carrier.
    `pulse_strobe_jetson.cpp` shells out to `fire_trigger.py` (Jetson.GPIO) instead.
@@ -296,11 +299,16 @@ Next SP1 items, in this order:
    the IR beam, not the image** (residual 106 → 9 in 0.1 s, ~100 mm below
    the image top) - the arrays light too flat for chips. Pre-existing:
    4 tests in `test_real_frames` fail against the 2026-11-10 calibration.
-   **Short-pulse test done (2026-11-13):** ball minus surround +15 / +26 /
-   +40 / +70 / +125 / +162 grey levels at 20 / 30 / 50 / 100 / 200 / 300 µs
-   (0.5 ms exposure, gamma 72, both cameras alike); 10 µs gives only +4..7
-   (LED/MOSFET turn-on). 20-30 µs is enough to see the ball (1.5-2.3 mm
-   blur at 75 m/s). Dimples: not visible, see Known issues 1.
+   **Short-pulse test done (2026-11-13):** ball minus surround **+17 / +34 /
+   +50 / +75 / +123** grey levels at 10 / 20 / 30 / 50 / 100 µs, ~1.6 per µs,
+   saturating from 200 µs (0.5 ms exposure, gamma 72, both cameras within a
+   grey level of each other). 10 µs already shows the ball, 20-30 µs
+   clearly (1.5-2.3 mm blur at 75 m/s). Dimples: undecided, see Known
+   issues 1. Only numbers from aligned frames count: in trigger mode,
+   reading "the next frame" after a SHOT returns frames from before trigger
+   mode or the previous shot (a first run did, and halved every figure) -
+   read continuously, match by arrival (`trigger_sweep.assign_frames`) and
+   prove it with interleaved dark shots (`2026-11-13_pulse_test/shot_frames.py`).
    **Next:** (1) the IR beam's vertical coverage; (2) launch angle and
    trigger-index frame times in `strobe_event`; (3) several flashes per
    frame for fast balls (PiTrac's multi-exposure, now in both cameras at

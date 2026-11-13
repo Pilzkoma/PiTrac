@@ -1,21 +1,31 @@
-2026-11-13 short-pulse test, static ball at X -53 Y 105 Z 430 mm (r 45.6 / 45.8 px)
-trigger mode, 0.5 ms exposure, flash 0.9 ms after the edge, gamma 72, 4 shots per pulse
-ball = mean inside 0.6 r, surround = ring 1.4-1.9 r, texture = std of (frame - gaussian(2)) inside 0.6 r
+2026-11-13 short-pulse test, static ball at X -46 Y 105 Z 443 mm (r 44.3 / 44.5 px)
+trigger mode, 0.5 ms exposure, flash 0.9 ms after the edge, gamma 72,
+4 flash shots per pulse, each followed by a dark shot; frames matched to
+shots by arrival time, alignment proven (held-back shift 0, 0 missing, both
+cameras). shot_frames.py captures, shot_analyse.py measures.
+ball = mean inside 0.6 r over the 4 flash frames, surround = ring 1.4-1.9 r
 
-cam pulse_us  ball  surround  ball-surr  max  texture
- 1      0    12.0    12.9      -0.9    30   0.62
- 1     10    17.8    13.6      +4.2    34   0.66
- 1     20    30.0    15.0     +15.0    66   1.89
- 1     30    41.9    16.5     +25.5    94   2.72
- 1     50    59.3    19.0     +40.2   125   3.71
- 1    100    93.8    25.3     +68.4   192   4.33
- 1    200   167.4    42.5    +124.9   246   7.52
- 1    300   219.8    57.9    +161.8   240   6.34
- 2      0    10.8    11.2      -0.4    24   0.31
- 2     10    18.7    12.1      +6.5    29   0.28
- 2     20    30.7    13.5     +17.2    56   1.58
- 2     30    42.4    14.9     +27.6    75   2.10
- 2     50    62.2    17.7     +44.4   106   2.89
- 2    100   102.0    24.8     +77.2   168   3.38
- 2    200   164.0    39.2    +124.8   229   4.77
- 2    300   217.2    54.4    +162.9   240   5.21
+cam pulse_us  ball  surround  ball-surr   max
+ 1     10    33.8    16.7     +17.1    79
+ 1     20    53.9    19.6     +34.3   132
+ 1     30    72.5    22.8     +49.8   178
+ 1     50   104.3    28.9     +75.4   250
+ 1    100   167.2    44.4    +122.8   255
+ 1    200   231.9    71.1    +160.8   255
+ 1    300   235.1    94.4    +140.8   255
+ 2     10    30.1    13.3     +16.8    81
+ 2     20    49.6    15.9     +33.7   137
+ 2     30    68.1    18.8     +49.3   195
+ 2     50    99.5    24.6     +74.9   255
+ 2    100   163.2    39.5    +123.7   255
+ 2    200   231.4    65.7    +165.7   255
+ 2    300   235.0    88.3    +146.7   255
+
+A first run the same day read "the next frame" after each SHOT and got
+frames from before trigger mode / from the previous shot: it reported +15 at
+20 us and "almost nothing" at 10 us, and its crops showed the wrong pulse.
+Superseded by the numbers above.
+
+ink_crops.png: the same ball with pen strokes (fine, medium, thick, several
+markers), 100 / 300 us. Only the thick stroke in the middle is clearly dark
+at 850 nm; the others at most a faint shadow.
