@@ -1,0 +1,32 @@
+2026-11-13 dimple test: do PiTrac's dimple maps carry a known rotation?
+
+Resting ball at Z ~443 mm (radius ~44 px). Set A: unmoved; set B: the same
+ball turned by hand about the vertical axis. Both captured with
+2026-11-13_pulse_test/shot_frames.py (trigger mode, 0.5 ms exposure,
+aligned frames proven), 50 and 100 us flashes. True turn from the dark pen
+stroke's longitude: -12 deg (cam1), -8 to -9 deg (cam2).
+
+dimple_test.py reproduces PiTrac's front-end (IsolateBall + equalizeHist,
+Gabor 21 px, sigma 1, lambda 6, gamma 0.2, psi 90 deg, 33 orientations,
+max, threshold regulated to 39-45 % white, reflections >= 245 and outer 8 %
+ignored), turns A's map on the sphere by phi about the vertical axis and
+scores pixel agreement with B's map. Native crop size (CROP=96).
+
+marks masked (dimples only):
+  cam1  50us  repeatability 0.768  score(0) 0.635  best 0.653 at +24 deg
+  cam1 100us  repeatability 0.847  score(0) 0.583  best 0.635 at +24 deg
+  cam2  50us  repeatability 0.774  score(0) 0.603  best 0.672 at +38 deg
+  cam2 100us  repeatability 0.833  score(0) 0.565  best 0.642 at +38 deg
+  -> no peak near the true turn; best values wrong sign, at the search edge.
+  (Upsampled to 128 px crops: same - best +36..+40 deg.)
+
+control, marks kept in the map:
+  cam1  50us  best 0.606 at -18 deg     cam1 100us  best 0.603 at -16 deg
+  cam2  50us  best 0.578 at -16 deg     cam2 100us  best 0.588 at -16 deg
+  -> the turn is found (sign right, within a few degrees) when a real
+     feature is present, so the machinery works.
+
+Conclusion: on these images PiTrac's dimple maps do not carry the ball's
+rotation; what is repeatable in them is the limb, shading and compression.
+Spin needs marks (IR-dark ink) and a mark-based method. Limits: one ball,
+one turn, PiTrac's front-end reproduced, not its full 3D candidate search.

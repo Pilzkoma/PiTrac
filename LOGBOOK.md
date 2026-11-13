@@ -1974,6 +1974,27 @@ PiTrac's key techniques:
 > anderen höchstens ein schwacher Schatten; der Hersteller-Aufdruck ist
 > ebenfalls dunkel (`ink_crops.png`).
 
+**2026-11-13 — Dimple-Test: PiTracs Dimple-Karten tragen die Drehung nicht → Spin über Markierungen.**
+
+> Ruhender Ball, Satz A unbewegt, Satz B von Hand ~10° um die senkrechte
+> Achse gedreht (Aufnahme mit `shot_frames.py`, Zuordnung nachgewiesen,
+> 50 / 100 µs). Wahrer Drehwinkel aus dem dicken Strich: −12° (cam1),
+> −8 / −9° (cam2). `dimple_test.py` baut PiTracs Vorderteil nach
+> (IsolateBall + Histogrammausgleich, Gabor 21 px, σ 1, λ 6, γ 0,2, ψ 90°,
+> 33 Richtungen, Schwelle auf 39–45 % weiß, Glanz und Rand ignoriert),
+> dreht A's Karte auf der Kugel um φ und vergleicht mit B.
+> - **Nur Dimples** (Striche/Aufdruck ausgeblendet): kein Maximum beim wahren
+>   Winkel; beste Werte bei +24° / +38° — falsches Vorzeichen, am Suchrand.
+>   Ruhebilder stimmen zu 77–85 % überein, stabil sind aber Rand, Schattierung
+>   und JPEG-Blöcke.
+> - **Gegenprobe mit Strich**: Maximum bei −16 / −18° — Vorzeichen richtig,
+>   wenige Grad daneben. Die Rechnung funktioniert also.
+>
+> **Entscheidung: Spin über IR-dunkle Markierungen** (Stift vom dicken
+> Strich, Schablone) mit eigenem Auswerteverfahren statt PiTracs Gabor-Weg —
+> die ursprüngliche Idee des Besitzers. Grenzen: ein Ball, eine Drehung,
+> PiTracs Vorderteil nachgebaut, nicht seine volle 3D-Suche.
+
 \---
 
 \---

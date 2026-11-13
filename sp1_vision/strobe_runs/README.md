@@ -324,3 +324,14 @@ of several pens only the thick middle stroke is clearly dark at 850 nm.
 A first run the same day read "the next frame" after each SHOT and got
 frames from before trigger mode or from the previous shot; it halved every
 figure and claimed "no dimples" from crops of the wrong pulse. Withdrawn.
+
+## 2026-11-13 — dimple test, `2026-11-13_dimple_test/`
+
+Does PiTrac's dimple map carry a known rotation on our images? A resting
+ball, captured unmoved and turned by hand about the vertical axis (true
+turn from the pen stroke: −12° cam1, −8..−9° cam2). `dimple_test.py`
+reproduces PiTrac's front-end and scores A's map, turned on the sphere by
+φ, against B's. Dimples only: no peak near the true turn (best +24° / +38°,
+wrong sign, at the search edge). Control with the stroke left in: peak at
+−16..−18°. The maps do not carry the rotation; spin needs IR-dark marks and
+a mark-based method. Numbers in `results.txt`.

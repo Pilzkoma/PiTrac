@@ -81,8 +81,18 @@ viable and roughly an order of magnitude more accurate at these distances.
 - V4L2 — built into Linux kernel, headers via libv4l-dev
 
 ## Known issues — do not try to fix these
-1. ~~Spin requires marked balls~~ — **corrected 2026-11-12, the old assumption was
-   never PiTrac's.** PiTrac's spin (`GetBallRotation`, `ball_image_proc.cpp` ~2871)
+1. **Spin needs marked balls on this hardware - decided 2026-11-13 by test**
+   (`sp1_vision/strobe_runs/2026-11-13_dimple_test/`): PiTrac's dimple front-end
+   reproduced on our aligned frames, ball turned by hand ~10°: the dimple maps
+   show **no peak at the true turn** (best scores wrong sign, at the search
+   edge), while the same machinery with the pen stroke left in finds the turn
+   (−16..−18° vs −8..−12° true, sign right). What repeats in the maps is limb,
+   shading and MJPEG blocks. So: IR-dark marks (the thick-stroke pen from the
+   ink test; most felt pens vanish at 850 nm), a stencil, and a mark-based
+   spin method of our own. Limits: one ball, one turn, front-end reproduced,
+   not PiTrac's full 3D candidate search.
+   History: on 2026-11-12 "marked balls" was found never to be PiTrac's
+   assumption - PiTrac's spin (`GetBallRotation`, `ball_image_proc.cpp` ~2871)
    reads the **dimples**: Gabor filters in 32 directions, threshold regulated to
    38–45 % white, then a 3D rotation search matching image 1 onto image 2. Marks
    *disturb* it (code comment at 2969–2971; the author on Hackaday: spin "without
