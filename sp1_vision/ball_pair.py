@@ -183,16 +183,25 @@ def _radius_error(rig, xyz, radius1_px, radius2_px):
                abs(radius2_px / expected2 - 1.0))
 
 
-def _in_measurement_volume(xyz):
+def _in_measurement_volume(xyz, in_flight=False):
+    """Depth and lateral bounds always; the height band only for a ball at rest.
+
+    In flight the ball climbs over the optical axis (Y = -23 to -66 mm on the
+    2026-11-12 chips, located to 0.1-0.4 px and refused only here), so only
+    "not below the surface" remains. The wall and monitor objects the band
+    exists for do not appear in the flight search's difference images.
+    """
     depth = float(xyz[2])
     if not MIN_DEPTH_M <= depth <= MAX_DEPTH_M:
         return False
     if abs(float(xyz[0])) > MAX_LATERAL_FRACTION * depth:
         return False
+    if in_flight:
+        return float(xyz[1]) <= MAX_BALL_HEIGHT_M
     return MIN_BALL_HEIGHT_M <= float(xyz[1]) <= MAX_BALL_HEIGHT_M
 
 
-def _consistent_pairs(rig, candidates1, candidates2):
+def _consistent_pairs(rig, candidates1, candidates2, in_flight=False):
     """Every pairing that satisfies the three declared constraints.
 
     Returns (survivors, rejected_on_size, solved_behind, solved_at_all).
@@ -223,7 +232,7 @@ def _consistent_pairs(rig, candidates1, candidates2):
                 # swap at all.
                 solved_behind += 1
                 continue
-            if not _in_measurement_volume(xyz):
+            if not _in_measurement_volume(xyz, in_flight):
                 continue
             e1, e2 = triangulate.reprojection_error(
                 rig, xyz, (u1, v1), (u2, v2))
@@ -292,7 +301,7 @@ def _outline_measured(frame, candidates, refine):
     return measured
 
 
-def _refined_pair(rig, frame1, frame2, best, refine):
+def _refined_pair(rig, frame1, frame2, best, refine, in_flight=False):
     """The selected pair re-measured on its outlines, or None.
 
     Both circles or neither: the two images must be measured by the same
@@ -312,7 +321,7 @@ def _refined_pair(rig, frame1, frame2, best, refine):
         xyz = triangulate.triangulate_point(rig, fit1[:2], fit2[:2])
     except triangulate.TriangulationError:
         return None
-    if xyz[2] <= 0.0 or not _in_measurement_volume(xyz):
+    if xyz[2] <= 0.0 or not _in_measurement_volume(xyz, in_flight):
         return None
     e1, e2 = triangulate.reprojection_error(rig, xyz, fit1[:2], fit2[:2])
     refined_worst = max(e1, e2)
@@ -334,7 +343,8 @@ def _to_ball_pair(survivor):
                     radius_error=error)
 
 
-def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
+def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None,
+                   in_flight=False):
     """Return (BallPair, None), or (None, reason) saying why not.
 
     `max_candidates`, if given, refuses a pair of frames in which either
@@ -342,6 +352,10 @@ def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
     n1 x n2 triangulations, and a noise image (a ball-free difference image
     scaled up, 2026-11-12) gave 1768 x 1577 circles and ~280 s per frame.
     None keeps the old behaviour.
+
+    `in_flight` drops the resting-ball height band (see
+    _in_measurement_volume); the flight search sets it, the rest search
+    must not.
 
     `refine` is the outline refiner for BOTH phases below; None means
     frame_analysis.refine_ball. The analysis passes
@@ -395,7 +409,7 @@ def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
                                         max_candidates))
 
     survivors, on_size, behind, at_all = _consistent_pairs(
-        rig, candidates1, candidates2)
+        rig, candidates1, candidates2, in_flight)
     best, reason = _verdict(survivors, on_size, behind, at_all,
                             len(candidates1), len(candidates2))
 
@@ -403,7 +417,7 @@ def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
         rescue1 = _outline_measured(frame1, candidates1, refine)
         rescue2 = _outline_measured(frame2, candidates2, refine)
         rescued, r_on_size, r_behind, r_at_all = _consistent_pairs(
-            rig, rescue1, rescue2)
+            rig, rescue1, rescue2, in_flight)
         rescue_best, _ = _verdict(rescued, r_on_size, r_behind, r_at_all,
                                   len(candidates1), len(candidates2))
         if rescue_best is not None:
@@ -416,5 +430,5 @@ def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
     if best is None:
         return None, reason
 
-    refined = _refined_pair(rig, frame1, frame2, best, refine)
+    refined = _refined_pair(rig, frame1, frame2, best, refine, in_flight)
     return _to_ball_pair(refined if refined is not None else best), None

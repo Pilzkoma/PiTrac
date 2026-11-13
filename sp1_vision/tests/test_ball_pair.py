@@ -208,6 +208,23 @@ class FindBallPairTest(unittest.TestCase):
         pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
         self.assertIsNone(pair, "accepted a point 220 mm above the axis")
 
+    def test_a_ball_in_flight_above_the_axis_is_found_when_asked_for(self):
+        # 2026-11-12 triggered chips: the ball was located to 0.1-0.4 px at
+        # Y = -23, -45, -66 mm, radii matching the range, and refused only by
+        # the resting-ball height band. A ball in flight climbs over the axis.
+        for y in (-0.045, -0.150):
+            truth = np.array([0.03, y, 0.450])
+            f1, f2 = frames_with(self.rig, balls=[truth])
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2, in_flight=True)
+            self.assertIsNotNone(pair, "{} m: {}".format(y, reason))
+            np.testing.assert_allclose(pair.xyz_m, truth, atol=0.004)
+
+    def test_in_flight_the_ball_still_cannot_be_below_the_floor(self):
+        truth = np.array([0.0, 0.300, 0.500])        # 300 mm below the axis
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        pair, _ = ball_pair.find_ball_pair(self.rig, f1, f2, in_flight=True)
+        self.assertIsNone(pair)
+
     def test_a_ball_on_the_surface_is_still_accepted(self):
         # The counter-case, so the height band cannot be tightened into
         # uselessness: the real thing sits at +76 to +86 mm across every

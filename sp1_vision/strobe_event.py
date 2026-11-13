@@ -197,7 +197,8 @@ def flight(rig, got, t_imp):
         img1, d1 = refs[1].positive(b1)
         img2, d2 = refs[2].positive(b2)
         ball, reason = ball_pair.find_ball_pair(rig, bgr(d1), bgr(d2),
-                                                max_candidates=MAX_CANDIDATES)
+                                                max_candidates=MAX_CANDIDATES,
+                                                in_flight=True)
         if ball is not None:
             track.append((0.5 * (t1 + t2), ball))
             shown.append((t1, img1, d1, len(track),
