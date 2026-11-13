@@ -1911,6 +1911,39 @@ PiTrac's key techniques:
 > exakt) statt aus der Ankunftszeit; (2) Kurzpuls-Test am ruhenden Ball
 > (Dimples sichtbar?); (3) mehrere Blitze pro Bild für schnelle Bälle.
 
+**2026-11-13 — Die Trigger-Chips sind gemessen.**
+
+> Drei Ursachen, jede erst gemessen, dann behoben (`4a395d2`, `405a0f4`):
+> 1. **Flugsuche hing**: ein ballfreies Differenzbild hat ~9 Graustufen
+>    Rauschen als 99,9-%-Wert; auf 220 hochgerechnet → **1768 × 1577
+>    Hough-Kreise, ~280 s Paarung pro Bild** (mit Ball: 6 × 8, 0,3 s). Jetzt
+>    Untergrenze 100 für die Skalierung, und `find_ball_pair(max_candidates=200)`
+>    weist Rauschbilder vor der Paarung ab.
+> 2. **Ruhe-Suche blind**: Ruheball 78 auf 24 Graustufen, aber weiche Kante
+>    (Sobel-Median 19, Canny-Schwelle 100) → 0 von 17; dunkle Bilder
+>    (Median < 40) jetzt ×2,5 aufgehellt → 16 von 17.
+> 3. **Ball über der Achse verworfen**: auf 0,1–0,4 px gefunden bei
+>    Y = −23 / −45 / −66 mm, aber das Höhenband gilt dem *ruhenden* Ball.
+>    `find_ball_pair(in_flight=True)` lässt nur "nicht unter dem Boden".
+>
+> Ergebnis (`2026-11-12_chips_trigger`, 147 s statt Stunden):
+> | Chip | Geschw. | Abflug* | Richtung | Punkte | rms |
+> |---|---|---|---|---|---|
+> | 1 | **4,82 m/s** | ≈ 33° | 2,4° zum Gerät | 7/7 | 5,5 mm |
+> | 2 | 4,86 m/s | ≈ 36° | 0,7° zum Gerät | 5/6 → verworfen | 2,2 mm |
+> | 3 | **3,91 m/s** | ≈ 36° | 1,7° zum Gerät | 7/8 | 6,4 mm |
+> \*von Hand aus erster/letzter Position + 1,6° Nicken; `strobe_event` gibt
+> den Abflugwinkel noch nicht aus.
+>
+> **Der Ball fliegt aus dem Licht, nicht aus dem Bild**: sein Restwert fällt
+> 106 → 85 → 67 → 44 → 33 → 23 → 9 in 0,1 s, während er noch ~100 mm
+> unter dem oberen Bildrand ist. Die IR-Strahler leuchten zu flach für
+> Chips/höhere Abflüge — Kandidat für Ausrichtung/Streuscheibe am Strahler.
+>
+> Nebenbefund: 4 Tests in `test_real_frames` (Aufnahmen Aug./Sep. gegen die
+> Kalibrierung vom 10.11.) schlugen schon vor diesen Änderungen fehl —
+> eigenes Thema, nicht angefasst.
+
 \---
 
 \---

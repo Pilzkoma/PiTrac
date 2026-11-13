@@ -278,17 +278,20 @@ Next SP1 items, in this order:
    it. Chips recorded that way: 4512 edges, 4512 frames per camera, and the
    contact sheet shows **one round sharp ball per frame, the ball's print
    visibly rotating** (free-running at 4 ms the chip was an elongated double
-   image). **Next session, in this order:** (1) make `strobe_event` read
-   triggered recordings - its rest search (tuned to 8 ms frames) found the
-   dimmer rest ball at only 4 of ~180 moments (2 of 3 chips), and its flight
-   search ran 34 min on chip 1 without output and was stopped (unexamined;
-   guess: noise in ball-free positive images scaled up into masses of
-   circles); options: bound the search to a window round the expected path,
-   a longer flash (200-300 µs costs little blur at chip speed) for a
-   brighter rest ball, frame times from the trigger index (10 ms exact)
-   instead of arrival. Recording `/home/brain/strobe_raw/2026-11-12_chips_trigger`.
-   (2) the short-pulse test (a) above; (3) several flashes per frame for
-   fast balls (PiTrac's multi-exposure, now in both cameras at once).
+   image). **`strobe_event` reads triggered recordings (2026-11-13,
+   `4a395d2`, `405a0f4`):** positive-image scale floored (noise had been
+   blown up into 1768 x 1577 circles, ~280 s per frame), `max_candidates`,
+   dark frames brightened x2.5 for the rest search (0 → 16 of 17), and
+   `find_ball_pair(in_flight=True)` for balls above the axis. Chips 1 and 3
+   measured: **4.82 and 3.91 m/s, ≈ 33-36° launch, 7 points each, rms 5.5 /
+   6.4 mm**; chip 2 (4.86 m/s) had 5 of 6 points. **The ball flies out of
+   the IR beam, not the image** (residual 106 → 9 in 0.1 s, ~100 mm below
+   the image top) - the arrays light too flat for chips. Pre-existing:
+   4 tests in `test_real_frames` fail against the 2026-11-10 calibration.
+   **Next:** (1) the short-pulse test (a) above; (2) the IR beam's vertical
+   coverage; (3) launch angle and trigger-index frame times in
+   `strobe_event`; (4) several flashes per frame for fast balls (PiTrac's
+   multi-exposure, now in both cameras at once).
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike

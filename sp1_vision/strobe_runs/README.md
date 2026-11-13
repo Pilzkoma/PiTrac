@@ -284,3 +284,24 @@ its flight search ran 34 min on chip 1 without output (stopped,
 unexamined). Next: bound the flight search to a window round the expected
 path, consider a 200-300 µs flash for the rest ball, frame times from the
 trigger index instead of arrival.
+
+**2026-11-13: `strobe_event` adapted** (`4a395d2`, `405a0f4`), three causes,
+each measured first: (1) a ball-free difference image's ~9 grey levels of
+noise were scaled to 220 - 1768 x 1577 Hough circles, ~280 s of pairing per
+frame; now a floor of 100 on the scale plus `max_candidates`; (2) the rest
+ball's soft edge (Sobel median 19 vs Canny 100) - dark frames brightened
+x2.5 for the rest search, 0 → 16 of 17; (3) the ball in flight climbed over
+the optical axis and the resting-ball height band refused it -
+`find_ball_pair(in_flight=True)`. The whole recording now takes 147 s:
+
+| chip | speed | launch* | direction | points | rms |
+|---|---|---|---|---|---|
+| 1 | 4.82 m/s | ≈ 33° | 2.4° towards the unit | 7/7 | 5.5 mm |
+| 2 | 4.86 m/s | ≈ 36° | 0.7° towards | 5/6, rejected (min 6) | 2.2 mm |
+| 3 | 3.91 m/s | ≈ 36° | 1.7° towards | 7/8 | 6.4 mm |
+
+*by hand from first/last position plus the unit's +1.6° pitch.
+
+The ball leaves the IR beam before it leaves the image: its residual falls
+106 → 85 → 67 → 44 → 33 → 23 → 9 over 0.1 s while it is still ~100 mm
+below the image top. The arrays light too flat for higher launches.
