@@ -9,6 +9,9 @@ import types
 import unittest
 from unittest import mock
 
+import cv2
+import numpy as np
+
 from sp1_vision import strobe_event as se
 
 FPS = 120.0
@@ -89,6 +92,57 @@ class FindImpacts(unittest.TestCase):
         rest = rest_samples(0.25, 1.5, a1) + rest_samples(3.1, 4.0, a2)
         impacts, _ = self.run_find(got1, rest)
         self.assertEqual([round(t, 2) for t, _ in impacts], [1.5, 4.0])
+
+
+class PositiveImage(unittest.TestCase):
+    """The ball-only difference image must not blow noise up into circles."""
+
+    def setUp(self):
+        rng = np.random.default_rng(0)
+        self.still = rng.uniform(10, 30, (200, 300)).astype(np.uint8)
+        self.ref = se.PositiveReference([(0.0, self.still), (0.01, self.still)])
+        self.rng = rng
+
+    def test_a_ball_free_frame_stays_dark(self):
+        # Triggered frames, 2026-11-12: with no ball the brightest residue is
+        # noise of ~9 grey levels; scaled to 220 it gave 1768 Hough circles.
+        noisy = np.clip(self.still.astype(int) + self.rng.integers(-9, 10, self.still.shape),
+                        0, 255).astype(np.uint8)
+        _, d = self.ref.positive(noisy)
+        self.assertLess(int(d.max()), 40)
+
+    def test_a_ball_still_comes_out_bright(self):
+        frame = self.still.copy()
+        cv2.circle(frame, (150, 100), 30, 120, -1)
+        _, d = self.ref.positive(frame)
+        self.assertGreater(int(d[100, 150]), 150)
+
+
+class RestSearchOnDarkFrames(unittest.TestCase):
+    """find_rest_balls brightens triggered (dark) frames before the search."""
+
+    def seen_maxima(self, level):
+        frame = np.full((80, 80), level, np.uint8)
+        frame[30:50, 30:50] = min(255, level + 50)
+        got = {1: [(0.5, frame)], 2: [(0.5, frame)]}
+        seen = []
+
+        def fake_find(rig, f1, f2):
+            seen.append(int(f1.max()))
+            return None, "stub"
+
+        with mock.patch.object(se.ball_pair, "find_ball_pair", fake_find), \
+             mock.patch.object(se.ss, "REFERENCE_SKIP_S", 0.0):
+            se.find_rest_balls(None, got)
+        return seen
+
+    def test_a_dark_frame_is_brightened(self):
+        # 2026-11-12 triggered chips: rest ball 78 on 24, median ~17; the
+        # circle search found it in 0 of 17 moments as is, 16 of 17 at x2.5.
+        self.assertEqual(set(self.seen_maxima(17)), {int(67 * se.DARK_FRAME_GAIN)})
+
+    def test_a_normal_frame_is_left_alone(self):
+        self.assertEqual(set(self.seen_maxima(100)), {150})
 
 
 if __name__ == "__main__":

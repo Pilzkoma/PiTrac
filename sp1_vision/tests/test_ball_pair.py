@@ -249,6 +249,26 @@ class FindBallPairTest(unittest.TestCase):
         _, reason = ball_pair.find_ball_pair(self.rig, f1, f2)
         self.assertRegex(reason, r"\d+")
 
+    def test_a_noise_image_with_masses_of_circles_is_refused_unsearched(self):
+        # 2026-11-12: a ball-free difference image, its noise scaled up,
+        # gave 1768 x 1577 Hough circles and ~280 s of pairing per frame.
+        # With a cap the caller gets a reason at once and pairing never runs.
+        many = [(float(10 + i), 100.0, 30.0) for i in range(300)]
+        f1, f2 = frames_with(self.rig, balls=[np.array([0.0, 0.09, 0.5])])
+        with mock.patch.object(ball_pair.frame_analysis, "ball_candidates",
+                               return_value=many), \
+             mock.patch.object(ball_pair, "_consistent_pairs") as pairing:
+            pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2, max_candidates=200)
+        self.assertIsNone(pair)
+        self.assertIn("300", reason)
+        pairing.assert_not_called()
+
+    def test_without_a_cap_the_search_is_unchanged(self):
+        truth = np.array([0.03, 0.0937, 0.500])
+        f1, f2 = frames_with(self.rig, balls=[truth])
+        pair, reason = ball_pair.find_ball_pair(self.rig, f1, f2, max_candidates=200)
+        self.assertIsNotNone(pair, reason)
+
     def test_an_empty_camera_is_named(self):
         truth = np.array([0.0, 0.09, 0.5])
         f1, _ = frames_with(self.rig, balls=[truth])

@@ -50,9 +50,31 @@ REF_FROM_S, REF_TO_S = 0.25, 0.08   # reference window before impact
 FLIGHT_S = 0.6              # searched after impact
 PAIR_MAX_DT_S = 0.006       # cam1/cam2 frames paired at most this far apart
 
+# Triggered recordings (0.5 ms exposure, 2026-11-12) are dark: frame median
+# ~17 grey levels against ~100 at 8 ms. The rest ball is there (78 on a 24
+# surround) but its edge under the near-axial flash is soft - Sobel median 19
+# against Hough's Canny threshold of 100 - and the circle search found it in
+# 0 of 17 moments; brightened x2.5 first, in 16 of 17.
+DARK_FRAME_MEDIAN = 40
+DARK_FRAME_GAIN = 2.5
+
+# The positive (ball-only) image is scaled so its 99.9th percentile reaches
+# 220. Without a floor on that percentile a ball-free triggered frame, whose
+# brightest residue is ~9 grey levels of noise, was scaled x25 into 1768
+# Hough circles; frames with a ball have it near 100 and are unaffected.
+POSITIVE_MIN_TOP = 100.0
+MAX_CANDIDATES = 200        # either camera: a noise image, skipped unsearched
+
 
 def bgr(img):
     return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+
+def brightened(img):
+    """A dark (triggered) frame scaled by DARK_FRAME_GAIN; others as they are."""
+    if float(np.median(img)) >= DARK_FRAME_MEDIAN:
+        return img
+    return np.clip(img.astype(np.float32) * DARK_FRAME_GAIN, 0, 255).astype(np.uint8)
 
 
 def nearest(frames, t):
@@ -89,7 +111,8 @@ def find_rest_balls(rig, got):
         t1, b1 = nearest(got[1], t)
         t2, b2 = nearest(got[2], t1)
         if abs(t2 - t1) <= PAIR_MAX_DT_S:
-            ball, _ = ball_pair.find_ball_pair(rig, bgr(sc.decode(b1)), bgr(sc.decode(b2)))
+            f1, f2 = brightened(sc.decode(b1)), brightened(sc.decode(b2))
+            ball, _ = ball_pair.find_ball_pair(rig, bgr(f1), bgr(f2))
             if ball is not None:
                 found.append((t1, ball))
         t += REST_STEP_S
@@ -158,7 +181,7 @@ class PositiveReference(ss.Reference):
         f = img.astype(np.float32)
         ca, cb = self.inv @ np.array([(f * self.a).sum(), (f * self.b).sum()])
         d = np.clip(f - ca * self.a - cb * self.b, 0, None)
-        top = max(float(np.percentile(d, 99.9)), 1.0)
+        top = max(float(np.percentile(d, 99.9)), POSITIVE_MIN_TOP)
         return img, np.clip(d * (220.0 / top), 0, 255).astype(np.uint8)
 
 
@@ -173,7 +196,8 @@ def flight(rig, got, t_imp):
             continue
         img1, d1 = refs[1].positive(b1)
         img2, d2 = refs[2].positive(b2)
-        ball, reason = ball_pair.find_ball_pair(rig, bgr(d1), bgr(d2))
+        ball, reason = ball_pair.find_ball_pair(rig, bgr(d1), bgr(d2),
+                                                max_candidates=MAX_CANDIDATES)
         if ball is not None:
             track.append((0.5 * (t1 + t2), ball))
             shown.append((t1, img1, d1, len(track),

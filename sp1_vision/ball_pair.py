@@ -334,8 +334,14 @@ def _to_ball_pair(survivor):
                     radius_error=error)
 
 
-def find_ball_pair(rig, frame1, frame2, refine=None):
+def find_ball_pair(rig, frame1, frame2, refine=None, max_candidates=None):
     """Return (BallPair, None), or (None, reason) saying why not.
+
+    `max_candidates`, if given, refuses a pair of frames in which either
+    camera offers more circles than that, before any pairing: pairing is
+    n1 x n2 triangulations, and a noise image (a ball-free difference image
+    scaled up, 2026-11-12) gave 1768 x 1577 circles and ~280 s per frame.
+    None keeps the old behaviour.
 
     `refine` is the outline refiner for BOTH phases below; None means
     frame_analysis.refine_ball. The analysis passes
@@ -383,6 +389,10 @@ def find_ball_pair(rig, frame1, frame2, refine=None):
             if not found)
         return None, "no circle at all in {} ({} / {} candidates)".format(
             empty, len(candidates1), len(candidates2))
+    if max_candidates is not None and max(len(candidates1), len(candidates2)) > max_candidates:
+        return None, ("{} x {} circles, more than {} - a noise image, not "
+                      "searched".format(len(candidates1), len(candidates2),
+                                        max_candidates))
 
     survivors, on_size, behind, at_all = _consistent_pairs(
         rig, candidates1, candidates2)
