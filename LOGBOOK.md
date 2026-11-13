@@ -1944,6 +1944,25 @@ PiTrac's key techniques:
 > Kalibrierung vom 10.11.) schlugen schon vor diesen Änderungen fehl —
 > eigenes Thema, nicht angefasst.
 
+**2026-11-13 — Kurzpuls-Test: Ball gut sichtbar, Dimples nicht.**
+
+> Ruhender Ball bei Z 430 mm (Radius 45,6 / 45,8 px), Trigger-Modus, 0,5 ms
+> Belichtung, Gamma 72, Blitz 0,9 ms nach der Flanke, je 4 Schüsse
+> (`sp1_vision/strobe_runs/2026-11-13_pulse_test/`).
+> Ball minus Umgebung (cam1 / cam2): 10 µs +4 / +7 — 20 µs **+15 / +17** —
+> 30 µs **+26 / +28** — 50 µs +40 / +44 — 100 µs +68 / +77 — 200 µs
+> +125 / +125 — 300 µs +162 / +163 (fast gesättigt). Unter 20 µs kommt kaum
+> Licht an (Einschaltzeit LED/MOSFET). 20–30 µs reichen zum Sehen
+> (1,5–2,3 mm Unschärfe bei 75 m/s).
+> **Dimples auf keinem Ausschnitt erkennbar** — sichtbar sind die
+> 8×8-Blöcke der MJPEG-Kompression (so groß wie ein Dimple; YUY2 gibt es
+> bei 1280×800 nur mit 10 fps) und der Blitz fast aus Kamerarichtung lässt
+> Dimples kaum Schatten werfen. Scharf zu sehen: der **schwarze Aufdruck**
+> des Balls, in beiden Kameras — es gibt also IR-dunkle Tinte. Damit ist
+> PiTracs Dimple-Verfahren mit diesen Kameras unwahrscheinlich; Spin über
+> Markierungen (Schablone, IR-dunkle Tinte) als eigenes Verfahren ist der
+> realistische Weg — zurück zur ursprünglichen Idee des Besitzers.
+
 \---
 
 \---

@@ -91,6 +91,14 @@ viable and roughly an order of magnitude more accurate at these distances.
    the flash must be (100 µs smears 3 mm at 30 m/s, about one dimple). Marks only
    if the dimples fail - then as our own method, in IR-dark ink (many felt-pen
    inks are transparent at 850 nm). Foam balls have no dimples.
+   **Short-pulse test 2026-11-13 (`sp1_vision/strobe_runs/2026-11-13_pulse_test/`):
+   no dimple pattern visible at any pulse (20-300 µs, ball radius 45 px)** -
+   the cameras deliver MJPEG at full rate (YUY2 only 10 fps), whose 8x8
+   blocks are the size of a dimple, and the near-axial flash gives dimples
+   little shadow. The ball's factory print (a black line) is sharp in both
+   cameras, so IR-dark ink exists. As things stand, spin needs marks and a
+   mark-based method of our own (the owner's stencil idea), not PiTrac's
+   Gabor path.
 2. GSPro is Windows-only — Jetson sends data over TCP, not a bug
 3. Issue #22: libgpiod chardev does not drive Pin 29 on the Seeed J202 carrier.
    `pulse_strobe_jetson.cpp` shells out to `fire_trigger.py` (Jetson.GPIO) instead.
@@ -288,10 +296,15 @@ Next SP1 items, in this order:
    the IR beam, not the image** (residual 106 → 9 in 0.1 s, ~100 mm below
    the image top) - the arrays light too flat for chips. Pre-existing:
    4 tests in `test_real_frames` fail against the 2026-11-10 calibration.
-   **Next:** (1) the short-pulse test (a) above; (2) the IR beam's vertical
-   coverage; (3) launch angle and trigger-index frame times in
-   `strobe_event`; (4) several flashes per frame for fast balls (PiTrac's
-   multi-exposure, now in both cameras at once).
+   **Short-pulse test done (2026-11-13):** ball minus surround +15 / +26 /
+   +40 / +70 / +125 / +162 grey levels at 20 / 30 / 50 / 100 / 200 / 300 µs
+   (0.5 ms exposure, gamma 72, both cameras alike); 10 µs gives only +4..7
+   (LED/MOSFET turn-on). 20-30 µs is enough to see the ball (1.5-2.3 mm
+   blur at 75 m/s). Dimples: not visible, see Known issues 1.
+   **Next:** (1) the IR beam's vertical coverage; (2) launch angle and
+   trigger-index frame times in `strobe_event`; (3) several flashes per
+   frame for fast balls (PiTrac's multi-exposure, now in both cameras at
+   once); (4) ball marks: IR-dark ink test, stencil, mark-based spin.
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike

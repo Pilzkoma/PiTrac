@@ -305,3 +305,15 @@ the optical axis and the resting-ball height band refused it -
 The ball leaves the IR beam before it leaves the image: its residual falls
 106 → 85 → 67 → 44 → 33 → 23 → 9 over 0.1 s while it is still ~100 mm
 below the image top. The arrays light too flat for higher launches.
+
+## 2026-11-13 — short-pulse test, `2026-11-13_pulse_test/`
+
+Static ball at Z 430 mm (radius 45.6 / 45.8 px), trigger mode, 0.5 ms
+exposure, gamma 72, flash 0.9 ms after the edge, 4 shots per pulse length
+(`pulse_test.py`, numbers in `results.txt`, crops in `pulse_crops.png`).
+Ball minus surround, cam1 / cam2: 10 µs +4 / +7, 20 µs +15 / +17, 30 µs
++26 / +28, 50 µs +40 / +44, 100 µs +68 / +77, 200 µs +125 / +125, 300 µs
++162 / +163. Below 20 µs almost nothing arrives (LED/MOSFET turn-on);
+20-30 µs is enough to see the ball. **No dimple pattern at any pulse**: the
+MJPEG 8x8 blocks are dimple-sized and the near-axial flash gives dimples
+little shadow. The factory print (black line) is sharp in both cameras.
