@@ -1998,7 +1998,7 @@ PiTrac's key techniques:
 **2026-11-14 — Markenkarte und Schablone (Spin über Markierungen, Teil 1).**
 
 > Entwurf freigegeben (`docs/superpowers/specs/2026-11-13-ball-marks-spin-design.md`):
-> Kalibrier-freie Spin-Messung über 20 Marken, versetzt getriggerte Kameras
+> Spin-Messung über 20 Marken, versetzt getriggerte Kameras
 > (cam2 = cam1 + ~1 ms, je eigener Blitz), Lage pro Bild, 1-ms-Paar
 > eindeutig, 10 ms genau. Entscheidungen des Besitzers: STEP über FreeCAD,
 > Hersteller-Aufdruck bleibt (variiert), kein Launch Monitor → Prüfung über
