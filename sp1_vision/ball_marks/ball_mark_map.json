@@ -1,6 +1,14 @@
 {
  "version": 1,
  "frame": "stencil frame: +Z = vertex-up axis, seam = plane z = 0; outlines in (east, north) mm on the tangent plane",
+ "conventions": {
+  "frame": "Stencil frame, right-handed: +Z = the stencil axis through site 0 (vertex-up), seam = plane z = 0; 'upper' sites have z > 0. Alignment holes at 0/100/220 deg azimuth fix the one way the halves close.",
+  "north_east": "Per site: north = +Z projected into the tangent plane (+X at the two poles), east = north x normal, so east x north = normal and, seen from outside, east is to the right of north.",
+  "outline_mm": "Polygon (east, north) in mm on the plane tangent to the sphere of radius shell.inner_diameter_mm/2 at the site; outline_outer_mm is the same grown by shell.chamfer_mm (opening at the outer surface).",
+  "bar_angle_deg": "Bars only: direction of the bar from north towards east (clockwise seen from outside); a bar is symmetric, +180 deg is the same bar. bar_to is the neighbour it is aligned with.",
+  "neighbours": "The three neighbouring site ids, counter-clockwise seen from outside the ball.",
+  "inked_mark": "The stencil cuts each mark as the cone from the ball centre through outline_mm, so the ink on the ball is outline_mm projected centrally onto the ball surface (scale ball radius / shell inner radius = 0.995). Ink may bleed a little at the edges."
+ },
  "ball_diameter_mm": 42.67,
  "shell": {
   "inner_diameter_mm": 42.9,

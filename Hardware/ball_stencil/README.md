@@ -14,7 +14,12 @@ analysis expects. Design: `docs/superpowers/specs/2026-11-13-ball-marks-spin-des
 
 Geometry: inner Ø 42.9 mm (ball 42.67 mm), wall 1.5 mm, cutouts chamfered
 1.0 mm towards the outside, flange at the seam Ø 53.9 mm × 2 mm per half,
-3 alignment holes Ø 1.9 mm through both flanges. Marks: 5 dots (Ø 7 mm),
+3 alignment holes Ø 1.9 mm through both flanges at **0°, 100°, 220°** — not
+evenly spaced on purpose: the mark layout is 3-fold symmetric, so with even
+spacing the halves would also close turned by 120° and the upper ten marks
+would land in the wrong places. Now they close only one way. Each cutout is
+cut as a cone from the ball centre through the mark outline, so the ink on
+the ball is exactly the outline in the map (projected onto the ball). Marks: 5 dots (Ø 7 mm),
 10 bars (11 × 3.5 mm, each along the edge to a neighbouring mark), 5 crosses
 (arms 10 × 3.5 mm); 10 per half, none closer than 1.5 mm to the seam.
 
@@ -32,8 +37,8 @@ Geometry: inner Ø 42.9 mm (ball 42.67 mm), wall 1.5 mm, cutouts chamfered
    cutouts** as far as possible (print is dark at 850 nm too; the analysis
    ignores dark blobs that do not fit the map, but a mark on top of a logo is
    lost).
-2. Upper half on, pins in their holes, a rubber band (or tape) round the
-   flange so nothing moves.
+2. Upper half on so all **three** pins go into holes (it only fits one way),
+   a rubber band (or tape) round the flange so nothing moves.
 3. Fill **every cutout completely** with the **3 mm Edeka permanent marker**
    (the only pen tested that stays dark at 850 nm). Go round the edges of
    each cutout, then fill.

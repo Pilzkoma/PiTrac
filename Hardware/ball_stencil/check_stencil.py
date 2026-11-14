@@ -57,6 +57,43 @@ def face_centres():
     return centres
 
 
+def hole_azimuths(shape, radius, z):
+    """Azimuths (deg) where the flange is empty on the pin circle at height z."""
+    empty = [a for a in range(360)
+             if not shape.isInside(FreeCAD.Vector(radius * math.cos(math.radians(a)),
+                                                  radius * math.sin(math.radians(a)), z), 0.01, True)]
+    groups, start, prev = [], None, None
+    for a in empty + [None]:
+        if a is not None and prev is not None and a == prev + 1:
+            prev = a
+            continue
+        if start is not None:
+            groups.append((start + prev) / 2.0)
+        start, prev = a, a
+    if len(groups) > 1 and empty and empty[0] == 0 and empty[-1] == 359:
+        # one hole across 0 deg: merge the first and last group
+        first, last = groups[0], groups[-1]
+        groups = groups[1:-1] + [((first + last + 360) / 2.0) % 360]
+    return sorted(groups)
+
+
+def same_pattern(a, b, tol=3.0):
+    return len(a) == len(b) and all(min(abs((x - y + 180) % 360 - 180) for y in b) < tol for x in a)
+
+
+def skin_free(shape, site, r_in):
+    """Probes just outside the inner surface near every outline vertex: empty?"""
+    n, north, east = (FreeCAD.Vector(*site[k]) for k in ("normal", "north", "east"))
+    bad = 0
+    for e, nn in site["outline_mm"]:
+        for f in (0.8, 0.9):
+            d = n * r_in + east * (f * e) + north * (f * nn)
+            d.normalize()
+            if shape.isInside(d * (r_in + 0.1), 0.005, True):
+                bad += 1
+    return bad
+
+
 def polygon_area(pts):
     return 0.5 * abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1])))
 
@@ -67,6 +104,7 @@ def main():
     wall = doc["shell"]["wall_mm"]
     r_mid = r_in + wall / 2
     ok = True
+    holes = {}
     centres = face_centres()
     for half in ("upper", "lower"):
         step = os.path.join(HERE, "stencil_%s.step" % half)
@@ -88,6 +126,12 @@ def main():
         filled = sum(shape.isInside(FreeCAD.Vector(*[x * r_mid for x in c]), 0.01, True) for c in solid)
         print("  wall solid at %d of %d face centres" % (filled, len(solid)))
         ok &= filled == len(solid) and len(solid) >= 5
+        skins = sum(skin_free(shape, st, r_in) for st in sites)
+        print("  probes near outline ends blocked: %d" % skins)
+        ok &= skins == 0
+        holes[half] = hole_azimuths(shape, ms.pin_circle_radius(doc),
+                                    ms.FLANGE_THICK_MM / 2 if half == "upper" else -ms.FLANGE_THICK_MM / 2)
+        print("  alignment holes at %s deg" % ", ".join("%.0f" % h for h in holes[half]))
         uncut = ms.build_half(doc, half, cutouts=False)
         removed = uncut.Volume - shape.Volume
         expected = sum(0.5 * (polygon_area(s["outline_mm"]) + polygon_area(s["outline_outer_mm"])) * wall
@@ -101,6 +145,12 @@ def main():
         facets = Mesh.Mesh(stl).CountFacets
         print("  STL %d triangles" % facets)
         ok &= facets < 10000
+    if "upper" in holes and "lower" in holes:
+        match = same_pattern(holes["upper"], holes["lower"])
+        unique = not any(same_pattern([(h + rot) % 360 for h in holes["upper"]], holes["upper"])
+                         for rot in (120, 240))
+        print("holes match between halves: %s; only one way to close: %s" % (match, unique))
+        ok &= match and unique
     print("CHECK OK" if ok else "CHECK FAILED")
     return ok
 

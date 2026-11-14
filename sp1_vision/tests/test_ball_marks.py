@@ -140,6 +140,19 @@ class Geometry(unittest.TestCase):
         self.assertEqual([x["shape"] for x in m["sites"]], [k.shape for k in self.marks])
         self.assertEqual([x["bar_to"] for x in m["sites"]], [k.bar_to for k in self.marks])
 
+    def test_the_map_states_its_conventions(self):
+        # Part 2 reads the map without this code at hand: the frame, the
+        # angle conventions and how the inked mark relates to the outline
+        # (central projection from the ball centre, final review 2026-11-14)
+        # must be in the file itself.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "map.json")
+            bm.write_map(p, self.marks, self.s, self.nb)
+            conv = bm.read_map(p)["conventions"]
+        for key in ("frame", "outline_mm", "bar_angle_deg", "neighbours", "inked_mark"):
+            self.assertIn(key, conv)
+        self.assertIn("centre", conv["inked_mark"])
+
     def test_the_cli_writes_all_three_files(self):
         with tempfile.TemporaryDirectory() as d:
             ball_marks_design.main(["--out", d])
