@@ -25,9 +25,12 @@ the ball is exactly the outline in the map (projected onto the ball). Marks: 5 d
 
 ## Printing
 
-- Both halves **flange face down** on the bed (the lower half is modelled
-  flange-up: flip it in the slicer). No supports needed for the flange; the
-  dome prints as an overhang-free shell from the flange upwards.
+- A hemispherical shell has overhangs beyond 45° in any orientation, so
+  **supports are needed**. Recommended: each half **dome down** (apex on the
+  bed, flange up) with tree supports — they then touch only the outside and
+  the underside of the flange, and the inside, where the ball sits, stays
+  clean. (Flange-down also works but puts supports inside the dome.) Not
+  test-printed yet; check the fit with a ball before marking.
 - Alignment pins: three ~4 mm pieces of **1.75 mm filament**, pushed into the
   holes of one half.
 
