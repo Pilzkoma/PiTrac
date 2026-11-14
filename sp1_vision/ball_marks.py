@@ -11,6 +11,7 @@ This module is the single source of the geometry: the stencil generator and
 the analysis both read the map file it writes, never their own copy.
 """
 
+import json
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
@@ -20,6 +21,14 @@ import numpy as np
 PHI = (1.0 + 5.0 ** 0.5) / 2.0
 SHAPES = ("dot", "bar", "cross")
 MIN_PER_SHAPE = 5
+
+BALL_DIAMETER_MM = 42.67
+SHELL_INNER_DIAMETER_MM = 42.9
+SHELL_WALL_MM = 1.5
+CHAMFER_MM = 1.0              # cutout outline grown by this at the outer surface
+DOT_DIAMETER_MM = 7.0
+BAR_MM = (11.0, 3.5)          # length, width
+CROSS_MM = (10.0, 3.5)        # arm length, arm width
 
 
 @dataclass(frozen=True)
@@ -140,38 +149,41 @@ def _options(nb, site):
             + [Mark(site, "bar", j) for j in nb[site]])
 
 
-def _cost(marks, nb, accept=None):
+def _cost(marks, nb):
     sigs = Counter(sig for _, _, _, sig in all_v_signatures(marks, nb))
     dup = sum(n - 1 for n in sigs.values())
     counts = Counter(m.shape for m in marks)
     short = sum(max(0, MIN_PER_SHAPE - counts[s]) for s in SHAPES)
-    bad = 0 if accept is None else sum(1 for m in marks if not accept(m))
-    return dup + short + bad
+    return dup + short
 
 
-def assign_marks(seed=0, accept=None, max_restarts=200, max_steps=4000):
+def assign_marks(seed=0, accept="stencil", max_restarts=200, max_steps=4000):
     """A shape for every site such that all 60 V signatures are distinct.
 
     Deterministic for a seed: random start, then repeatedly re-choose one
     site's mark to the option with the lowest cost (duplicate signatures,
-    plus shortfall below MIN_PER_SHAPE of any shape, plus marks `accept`
-    refuses), restarting when stuck. `accept(mark) -> bool` lets the caller
-    add per-mark constraints (stencil geometry).
+    plus shortfall below MIN_PER_SHAPE of any shape), restarting when stuck.
+    Only marks `accept(mark) -> bool` allows are ever chosen; the default,
+    "stencil", is clears_seam: a bar pointing at a neighbour across the seam
+    brings its outer cutout to ~1.0 mm of it.
     """
     sites = dodecahedron_sites()
     nb = neighbours(sites)
+    if accept == "stencil":
+        accept = lambda m: clears_seam(m, sites, nb)  # noqa: E731
+    allowed = [[o for o in _options(nb, i) if accept is None or accept(o)] for i in range(20)]
     rng = np.random.default_rng(seed)
     for _ in range(max_restarts):
-        marks = [_options(nb, i)[rng.integers(5)] for i in range(20)]
-        cost = _cost(marks, nb, accept)
+        marks = [opts[int(rng.integers(len(opts)))] for opts in allowed]
+        cost = _cost(marks, nb)
         for _ in range(max_steps):
             if cost == 0:
                 return marks
             i = int(rng.integers(20))
             best, best_cost = [], None
-            for opt in _options(nb, i):
+            for opt in allowed[i]:
                 trial = marks[:i] + [opt] + marks[i + 1:]
-                c = _cost(trial, nb, accept)
+                c = _cost(trial, nb)
                 if best_cost is None or c < best_cost:
                     best, best_cost = [opt], c
                 elif c == best_cost:
@@ -179,3 +191,100 @@ def assign_marks(seed=0, accept=None, max_restarts=200, max_steps=4000):
             marks[i] = best[int(rng.integers(len(best)))]
             cost = best_cost
     raise RuntimeError("no assignment with unique V signatures found")
+
+
+def _rect(half_len, half_wid, angle):
+    """Rectangle outline (4, 2) in (east, north), long axis at angle from east."""
+    c, s_ = np.cos(angle), np.sin(angle)
+    u, v = np.array([c, s_]), np.array([-s_, c])
+    return np.array([half_len * u + half_wid * v, -half_len * u + half_wid * v,
+                     -half_len * u - half_wid * v, half_len * u - half_wid * v])
+
+
+def cutout_outline_mm(mark, sites, nb, offset_mm=0.0):
+    """The mark's outline (k, 2) in its tangent frame (east, north), in mm.
+
+    Dot: a 32-gon of DOT_DIAMETER_MM. Bar: BAR_MM along the great-circle
+    direction to the neighbour it points at. Cross: two CROSS_MM arms along
+    north and east. `offset_mm` grows the outline (the outward chamfer).
+    """
+    if mark.shape == "dot":
+        r = DOT_DIAMETER_MM / 2 + offset_mm
+        t = np.linspace(0, 2 * np.pi, 32, endpoint=False)
+        return np.stack([r * np.cos(t), r * np.sin(t)], axis=1)
+    if mark.shape == "bar":
+        north, east = tangent_frame(sites[mark.site])
+        d = sites[mark.bar_to] - sites[mark.site]
+        angle = np.arctan2(d @ north, d @ east)
+        return _rect(BAR_MM[0] / 2 + offset_mm, BAR_MM[1] / 2 + offset_mm, angle)
+    a = CROSS_MM[0] / 2 + offset_mm
+    w = CROSS_MM[1] / 2 + offset_mm
+    return np.array([(w, w), (w, a), (-w, a), (-w, w), (-a, w), (-a, -w),
+                     (-w, -w), (-w, -a), (w, -a), (w, -w), (a, -w), (a, w)], dtype=np.float64)
+
+
+def outline_3d(mark, sites, nb, radius_mm, offset_mm=0.0):
+    """The outline as 3D points (k, 3) on the plane tangent at radius_mm."""
+    n = sites[mark.site]
+    north, east = tangent_frame(n)
+    poly = cutout_outline_mm(mark, sites, nb, offset_mm)
+    return n * radius_mm + poly[:, :1] * east + poly[:, 1:] * north
+
+
+def write_map(path, marks, sites, nb):
+    """The map file read by the stencil generator and the analysis."""
+    out = []
+    for m in marks:
+        n = sites[m.site]
+        north, east = tangent_frame(n)
+        entry = {
+            "id": m.site,
+            "normal": n.tolist(),
+            "azimuth_deg": float(np.degrees(np.arctan2(n[1], n[0]))),
+            "elevation_deg": float(np.degrees(np.arcsin(np.clip(n[2], -1, 1)))),
+            "half": "upper" if n[2] > 0 else "lower",
+            "shape": m.shape,
+            "bar_to": m.bar_to,
+            "bar_angle_deg": None,
+            "neighbours": list(nb[m.site]),
+            "north": north.tolist(),
+            "east": east.tolist(),
+            "outline_mm": cutout_outline_mm(m, sites, nb).tolist(),
+            "outline_outer_mm": cutout_outline_mm(m, sites, nb, CHAMFER_MM).tolist(),
+        }
+        if m.shape == "bar":
+            d = sites[m.bar_to] - n
+            entry["bar_angle_deg"] = float(np.degrees(np.arctan2(d @ east, d @ north)))
+        out.append(entry)
+    doc = {
+        "version": 1,
+        "frame": "stencil frame: +Z = vertex-up axis, seam = plane z = 0; "
+                 "outlines in (east, north) mm on the tangent plane",
+        "ball_diameter_mm": BALL_DIAMETER_MM,
+        "shell": {"inner_diameter_mm": SHELL_INNER_DIAMETER_MM,
+                  "wall_mm": SHELL_WALL_MM, "chamfer_mm": CHAMFER_MM},
+        "shapes_mm": {"dot_diameter": DOT_DIAMETER_MM, "bar": list(BAR_MM),
+                      "cross": list(CROSS_MM)},
+        "sites": out,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=1)
+
+
+def read_map(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+SEAM_CLEARANCE_MM = 1.5       # outer cutout edge to the seam, on the cutting plane
+
+
+def clears_seam(mark, sites, nb):
+    """True if the mark's outer cutout stays SEAM_CLEARANCE_MM off the seam.
+
+    Measured on the plane the stencil generator cuts through, 0.5 mm outside
+    the shell's outer surface, with the chamfer.
+    """
+    r = SHELL_INNER_DIAMETER_MM / 2 + SHELL_WALL_MM + 0.5
+    pts = outline_3d(mark, sites, nb, r, CHAMFER_MM)
+    return float(np.min(np.abs(pts[:, 2]))) >= SEAM_CLEARANCE_MM

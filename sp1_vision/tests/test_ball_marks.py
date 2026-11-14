@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 from sp1_vision import ball_marks as bm
+from sp1_vision import ball_marks_design
 
 
 class Sites(unittest.TestCase):
@@ -88,6 +89,62 @@ class Signatures(unittest.TestCase):
         sigs = {sig for _, _, _, sig in bm.all_v_signatures(self.marks, self.nb)}
         sigs_m = {sig for _, _, _, sig in bm.all_v_signatures(self.marks, nb_m)}
         self.assertNotEqual(sigs, sigs_m)
+
+
+class Geometry(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.s = bm.dodecahedron_sites()
+        cls.nb = bm.neighbours(cls.s)
+        cls.marks = bm.assign_marks(seed=0)
+        cls.r_out = bm.SHELL_INNER_DIAMETER_MM / 2 + bm.SHELL_WALL_MM
+
+    def test_no_cutout_reaches_the_seam(self):
+        for m in self.marks:
+            pts = bm.outline_3d(m, self.s, self.nb, self.r_out, bm.CHAMFER_MM)
+            self.assertGreaterEqual(float(np.min(np.abs(pts[:, 2]))), 1.0, m)
+
+    def test_cutouts_keep_three_mm_apart(self):
+        outer = {m.site: bm.outline_3d(m, self.s, self.nb, self.r_out, bm.CHAMFER_MM)
+                 for m in self.marks}
+        for i in range(20):
+            for j in self.nb[i]:
+                d = np.linalg.norm(outer[i][:, None, :] - outer[j][None, :, :], axis=2)
+                self.assertGreaterEqual(float(d.min()), 3.0, (i, j))
+
+    def test_the_marker_fits_every_cutout(self):
+        for m in self.marks:
+            poly = bm.cutout_outline_mm(m, self.s, self.nb)
+            width = min(np.ptp(poly @ np.array([np.cos(a), np.sin(a)]))
+                        for a in np.linspace(0, np.pi, 180, endpoint=False))
+            self.assertGreaterEqual(width, 3.5 - 1e-6, m)
+
+    def test_a_bar_runs_along_the_edge_to_its_neighbour(self):
+        bar = next(m for m in self.marks if m.shape == "bar")
+        poly = bm.cutout_outline_mm(bar, self.s, self.nb)
+        north, east = bm.tangent_frame(self.s[bar.site])
+        d = self.s[bar.bar_to] - self.s[bar.site]
+        want = np.array([d @ east, d @ north])
+        want /= np.linalg.norm(want)
+        centred = poly - poly.mean(axis=0)
+        long_axis = np.linalg.svd(centred, full_matrices=False)[2][0]
+        self.assertGreater(abs(float(long_axis @ want)), 0.999)
+
+    def test_map_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "map.json")
+            bm.write_map(p, self.marks, self.s, self.nb)
+            m = bm.read_map(p)
+        self.assertEqual(len(m["sites"]), 20)
+        self.assertEqual(sum(x["half"] == "upper" for x in m["sites"]), 10)
+        self.assertEqual([x["shape"] for x in m["sites"]], [k.shape for k in self.marks])
+        self.assertEqual([x["bar_to"] for x in m["sites"]], [k.bar_to for k in self.marks])
+
+    def test_the_cli_writes_all_three_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            ball_marks_design.main(["--out", d])
+            for name in ("ball_mark_map.json", "marks_table.md", "marks_drawing.svg"):
+                self.assertTrue(os.path.getsize(os.path.join(d, name)) > 0, name)
 
 
 if __name__ == "__main__":
