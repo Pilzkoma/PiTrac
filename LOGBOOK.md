@@ -1995,6 +1995,32 @@ PiTrac's key techniques:
 > die ursprüngliche Idee des Besitzers. Grenzen: ein Ball, eine Drehung,
 > PiTracs Vorderteil nachgebaut, nicht seine volle 3D-Suche.
 
+**2026-11-14 — Markenkarte und Schablone (Spin über Markierungen, Teil 1).**
+
+> Entwurf freigegeben (`docs/superpowers/specs/2026-11-13-ball-marks-spin-design.md`):
+> Kalibrier-freie Spin-Messung über 20 Marken, versetzt getriggerte Kameras
+> (cam2 = cam1 + ~1 ms, je eigener Blitz), Lage pro Bild, 1-ms-Paar
+> eindeutig, 10 ms genau. Entscheidungen des Besitzers: STEP über FreeCAD,
+> Hersteller-Aufdruck bleibt (variiert), kein Launch Monitor → Prüfung über
+> Handdrehungen, grob/fein-Vergleich und TrackMan-Tour-Durchschnitte.
+> Teil 1 umgesetzt (Plan `docs/superpowers/plans/2026-11-14-ball-marks-part1-map-stencil.md`):
+> - `sp1_vision/ball_marks.py` + `ball_marks_design.py`: 20 Dodekaeder-Ecken
+>   (Ecke oben, je 10 pro Hälfte), **5 Punkte, 10 Balken, 5 Kreuze**; jede
+>   Gruppe "Marke + zwei Nachbarn" (mit Umlaufsinn und Balkenrichtung) kommt
+>   nur einmal vor (60/60 eindeutig); Balken, die über die Fuge zeigen, sind
+>   verboten (kamen bis ~1,0 mm an die Fuge). Karte `sp1_vision/ball_marks/ball_mark_map.json`
+>   ist die einzige Quelle für Schablone und Auswertung; dazu `marks_table.md`, `marks_drawing.svg`.
+> - `Hardware/ball_stencil/`: FreeCAD 1.1.4 (per winget installiert) erzeugt
+>   **echte STEP-Dateien** beider Halbschalen + STL (~5700 Dreiecke):
+>   innen Ø 42,9, Wand 1,5, Ausschnitte 1 mm nach außen angefast, Flansch
+>   Ø 53,9 × 2 mm, 3 Löcher Ø 1,9 für Filament-Stifte (beide Hälften
+>   flanschseitig druckbar). `check_stencil.py`: CHECK OK (alle 10 Ausschnitte
+>   pro Hälfte offen, Wand zwischen den Marken geschlossen, Maße stimmen).
+>   Eigenheit: `freecadcmd` gibt immer Exit-Code 0 und verschluckt gepufferte
+>   Ausgabe bei `sys.exit` — das Urteil ist die gedruckte Zeile.
+> Nächstes: Besitzer druckt und bemalt 5 Bälle (Anleitung im README);
+> Teil 2 (Marken erkennen, Lage bestimmen, Handdreh-Prüfung) bekommt einen eigenen Plan.
+
 \---
 
 \---

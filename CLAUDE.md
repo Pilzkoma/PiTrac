@@ -327,8 +327,13 @@ Next SP1 items, in this order:
    dodecahedron sites, dot/bar/cross in the 3 mm Edeka marker, two
    half-shell stencil as a real STEP, offset trigger cam2 = cam1 + ~1 ms
    with one flash each, orientation per image, 1 ms pair for an unambiguous
-   rate, 10 ms for precision). Three owner decisions open at the end of the
-   spec; not yet approved, no code yet.
+   rate, 10 ms for precision). **Approved 2026-11-14; part 1 done**: mark map
+   `sp1_vision/ball_marks/ball_mark_map.json` (single source; 5 dots, 10 bars,
+   5 crosses, all 60 site+2-neighbour V's unique) from `sp1_vision/ball_marks.py`,
+   stencil as real STEP + STL in `Hardware/ball_stencil/` (FreeCAD 1.1.4 on
+   the Windows box; `freecadcmd` always exits 0 - read the printed CHECK
+   line). Owner prints and marks 5 balls; part 2 (detection + orientation)
+   needs its own plan.
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike
