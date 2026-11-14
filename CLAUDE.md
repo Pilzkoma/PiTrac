@@ -322,7 +322,13 @@ Next SP1 items, in this order:
    **Next:** (1) the IR beam's vertical coverage; (2) launch angle and
    trigger-index frame times in `strobe_event`; (3) several flashes per
    frame for fast balls (PiTrac's multi-exposure, now in both cameras at
-   once); (4) ball marks: IR-dark ink test, stencil, mark-based spin.
+   once); (4) ball marks and mark-based spin - **design drafted,
+   `docs/superpowers/specs/2026-11-13-ball-marks-spin-design.md`** (20
+   dodecahedron sites, dot/bar/cross in the 3 mm Edeka marker, two
+   half-shell stencil as a real STEP, offset trigger cam2 = cam1 + ~1 ms
+   with one flash each, orientation per image, 1 ms pair for an unambiguous
+   rate, 10 ms for precision). Three owner decisions open at the end of the
+   spec; not yet approved, no code yet.
 
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike
