@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-13
 **Sub-project:** SP2 — Spin Detection (with SP1 trigger/strobe work)
-**Status:** Draft for owner approval (owner decisions folded in 2026-11-14)
+**Status:** Approved by the owner 2026-11-14 (implementation plan next)
 
 ## Why
 
