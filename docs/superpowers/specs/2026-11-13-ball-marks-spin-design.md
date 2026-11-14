@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-13
 **Sub-project:** SP2 — Spin Detection (with SP1 trigger/strobe work)
-**Status:** Draft for owner approval
+**Status:** Draft for owner approval (owner decisions folded in 2026-11-14)
 
 ## Why
 
@@ -224,12 +224,24 @@ Each part is usable and testable before the next starts.
   stereo; its accuracy must be checked against the current method on the
   same recordings before it replaces anything.
 
-## Open with the owner (2026-11-13, end of session)
+## Owner decisions (2026-11-14)
 
-1. B-rep tool for the STEP: FreeCAD scripting (recommended) or CadQuery.
-2. Factory print on the balls (dark at 850 nm): all 5 the same model? Can
-   the print be removed or print-free balls used? Otherwise the detector
-   rejects every dark blob that does not fit the map, and the ball goes into
-   the stencil with the logo between cutouts.
-3. Access to a commercial launch monitor as a spin reference? If not,
-   acceptance rests on coarse/fine agreement plus hand-turn sign checks.
+1. **STEP via FreeCAD scripting** (headless, `FreeCADCmd`), exact B-rep,
+   exported per half-shell; an STL for printing may go alongside
+   (< 10,000 triangles).
+2. **The factory print stays and varies between balls.** The detector must
+   treat every dark blob that does not fit the map as clutter and never
+   guess a match from it; marks are only accepted when shape, size and
+   neighbour geometry agree with the map. The owner places each ball in the
+   stencil with its print between cutouts where possible. Mark size and
+   stroke (3 mm marker, 9-11 mm shapes) must stay distinguishable from
+   typical print (text, logo, number).
+3. **No commercial launch monitor.** Acceptance of part 4 therefore rests on
+   (a) hand-turn sign/axis checks, (b) agreement of the coarse (1 ms) and
+   fine (10 ms) rates, and (c) plausibility against published TrackMan
+   tour averages per club (e.g. 2023 PGA Tour: driver ~2,545 rpm, 7-iron
+   ~7,124 rpm, pitching wedge ~9,316 rpm; amateurs lower club and ball speed,
+   spin roughly in proportion). These check ranges, not individual shots.
+   A test with a known spin rate (a marked ball turned by a motor of known
+   or strobe-measured rpm) would be the real reference; any such fixture is
+   new hardware and needs the owner's approval first.
