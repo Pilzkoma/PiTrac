@@ -352,3 +352,18 @@ where it runs into a cross, and the cross stays whole (cam1: 434 of 476
 large components keep ≥ 90 %, the poor ones sit on the dim lower limb,
 where the test's brightness estimate counts the shading as ink; chips:
 157 of 163). Numbers in `results.txt`.
+
+## 2026-11-18 — setup check ("Aufbau" page), first live runs
+
+Dashboard page `/setup` (`sp4_gspro/setup_page.py`, `sp1_vision/setup_check.py`,
+capture in `sp1_vision/flash_pair.py`): one 100 µs flash at 8 ms exposure,
+stereo ball position, offset from the target 50 cm in front of the rear
+camera (camera 2 for right-handers), advice how to move the unit, green
+within ±10 mm. A measurement takes ~9 s. Run from a test copy on port 5001
+with the ball resting at ~43 cm: found every time, `along` (flight
+direction) 4.3–5.3 mm over 8 runs, but **depth 430–443 mm (sd 4.3 mm)** with
+the unit and ball untouched, in steps of ~2.6 mm - exactly one pixel of
+disparity at this range. Single-flash depth is quantised by the whole-pixel
+circle centres, so a ±10 mm verdict can flip near the edge. Not tuned yet;
+options: average several flashes per measurement, or a sub-pixel circle
+refinement for this path. Not yet checked against a tape.

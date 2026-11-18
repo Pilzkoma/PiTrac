@@ -335,6 +335,12 @@ Next SP1 items, in this order:
    line). Owner prints and marks 5 balls; part 2 (detection + orientation)
    needs its own plan.
 
+**Setup check (2026-11-18, branch `setup-check`):** dashboard page "Aufbau"
+(`/setup`): one flash, ball position against the target 50 cm in front of
+the rear camera (camera 2 for right-handers, camera 1 for left-handers),
+how far to move the unit, green within ±10 mm. Single-flash depth jitters
+±5 mm (whole-pixel disparity); see `sp1_vision/strobe_runs/README.md`.
+
 Known small defect, not yet fixed: `cli_calibrate.py --focus` measures the frame
 centre (`sharpness_score`) instead of the detected board (`board_sharpness`), unlike
 the dashboard. That is the readout that once hid a 5.4x focus error.

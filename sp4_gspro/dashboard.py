@@ -40,6 +40,7 @@ import system_control
 from shot_db import ShotDB
 from ball_physics import compute_flight
 from calibration_page import calibration_bp
+from setup_page import setup_bp
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -51,6 +52,8 @@ app = Flask(__name__)
 # easy to re-run - every adjustment to a camera mount invalidates the previous
 # result - and a button here beats a remembered command line.
 app.register_blueprint(calibration_bp)
+# Setting the unit up against the ball's spot: one flash, how far to move it.
+app.register_blueprint(setup_bp)
 
 db = None  # initialized in main()
 
