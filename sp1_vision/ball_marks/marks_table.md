@@ -25,4 +25,4 @@ Stencil frame: +Z = vertex-up axis, seam = plane z = 0. Bar angle from the site'
 | 18 | lower | 142.8 | -48.2 | bar | 15 | -60.0 | 19, 10, 15 |
 | 19 | lower | 0.0 | -90.0 | bar | 18 | 142.8 | 16, 18, 17 |
 
-Shapes: 5 dots, 10 bars, 5 crosses. Sizes: dot Ø 7.0 mm, bar 11.0 × 3.5 mm, cross arms 10.0 × 3.5 mm; cutouts grow 1.0 mm towards the outside (chamfer).
+Shapes: 5 dots, 10 bars, 5 crosses. Sizes: dot Ø 7.0 mm, bar 11.0 × 3.5 mm, cross arms 10.0 × 3.5 mm; cutouts grow 1.5 mm towards the outside (chamfer).

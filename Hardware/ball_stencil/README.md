@@ -8,12 +8,21 @@ analysis expects. Design: `docs/superpowers/specs/2026-11-13-ball-marks-spin-des
 |---|---|
 | `stencil_upper.step`, `stencil_lower.step` | the halves as exact CAD solids (edit these, e.g. in Shapr3D) |
 | `stencil_upper.stl`, `stencil_lower.stl` | for printing, ~5,700 triangles each |
-| `make_stencil.py` | generates all four from the mark map |
+| `make_stencil.py` | generates all four from the mark map (chamfer defect, see below) |
 | `check_stencil.py` | checks the generated files |
 | `../../sp1_vision/ball_marks/marks_table.md`, `marks_drawing.svg` | where every mark sits, its shape and direction |
 
+**Status 2026-11-18.** The map now asks for a 1.5 mm chamfer (the thick
+marker did not reach everything at 1.0 mm). The STEP/STL files here are
+still the 2026-11-14 generation with 1.0 mm, and `make_stencil.py` makes the
+chamfer only about half as wide as asked on the outer surface (known defect,
+written up in `_cutout`). The stencil actually printed and used is the
+owner's own CAD edit of these files with wider chamfers; all mark positions
+and the ink outlines are unchanged, so balls marked with either version
+match the map.
+
 Geometry: inner Ø 42.9 mm (ball 42.67 mm), wall 1.5 mm, cutouts chamfered
-1.0 mm towards the outside, flange at the seam Ø 53.9 mm × 2 mm per half,
+1.5 mm (map; see status) towards the outside, flange at the seam Ø 53.9 mm × 2 mm per half,
 3 alignment holes Ø 1.9 mm through both flanges at **0°, 100°, 220°** — not
 evenly spaced on purpose: the mark layout is 3-fold symmetric, so with even
 spacing the halves would also close turned by 120° and the upper ten marks
@@ -36,10 +45,11 @@ the ball is exactly the outline in the map (projected onto the ball). Marks: 5 d
 
 ## Marking a ball
 
-1. Ball into the lower half. Turn it so the **factory print sits between
-   cutouts** as far as possible (print is dark at 850 nm too; the analysis
-   ignores dark blobs that do not fit the map, but a mark on top of a logo is
-   lost).
+1. Ball into the lower half. Turn it so the **logos sit between cutouts**
+   (print is dark at 850 nm too; a mark touching a logo is lost). The thin
+   alignment line between the logos may run through cutouts: the analysis
+   strips anything thinner than ~2 mm (tested 2026-11-18,
+   `sp1_vision/strobe_runs/2026-11-18_thin_print/`).
 2. Upper half on so all **three** pins go into holes (it only fits one way),
    a rubber band (or tape) round the flange so nothing moves.
 3. Fill **every cutout completely** with the **3 mm Edeka permanent marker**

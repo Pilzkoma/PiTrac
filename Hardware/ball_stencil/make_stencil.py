@@ -75,6 +75,19 @@ def _cutout(site, r_in, r_out):
     surface - and the ink on the ball - is the outline projected from the
     ball centre. Outer part: lofted from the outline at r_in to the chamfered
     outline on the plane 0.5 mm outside the shell.
+
+    KNOWN DEFECT (found 2026-11-15, not fixed): the chamfer ends on a flat
+    plane, but the shell drops 0.5-1 mm below that plane at the cutout edges,
+    so the real growth on the outer surface is only ~0.4-0.55 mm instead of
+    the map's chamfer_mm (check_stencil's removed-volume check fails with
+    chamfer 1.5: 772 vs 1034 mm^3). The printed stencil (2026-11-16) is the
+    owner's own CAD edit, not this script's output. Fix before regenerating:
+    run the chamfer as a ruled surface from the inner opening on the sphere
+    r_in to outline_outer_mm projected onto the sphere r_out, both outlines
+    split at the same points (one split count per edge for both - different
+    counts made a self-intersecting solid), closed by fans to apexes well
+    outside each surface, sewn into one solid, and cut separately from the
+    frustum (deep.fuse(chamfer) silently returned the frustum alone).
     """
     deep = Part.makeLoft([_wire(site, "outline_mm", DEEP_MM, DEEP_MM / r_in),
                           _wire(site, "outline_mm", r_in)], True)
