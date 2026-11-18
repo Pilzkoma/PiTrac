@@ -34,6 +34,10 @@ setup_bp = Blueprint("setup", __name__)
 
 PULSE_US = 100
 IMAGE_WIDTH = 640
+# Either camera offering more circles than this is a noise image (no ball,
+# only the lit floor, stretched): refused unsearched, as strobe_event does.
+# Uncapped, such a pair took ~420 s in test and held the lock throughout.
+MAX_CANDIDATES = 200
 
 # Replaced in tests; the real one fires the strobe.
 _capture = flash_pair.capture_flash_pair
@@ -89,7 +93,7 @@ def _result(hand):
     rig = _rig()
     out = {"found": ball is not None, "reason": reason, "unlit": unlit,
            "along_mm": None, "depth_mm": None, "ok": False, "margin_ok": False,
-           "advice": [], "xyz_mm": None,
+           "advice": [], "xyz_mm": None, "handedness": hand,
            "rear_camera": setup_check.rear_camera(rig, hand)}
     target = None
     if ball is not None:
@@ -131,7 +135,8 @@ def setup_measure():
         else:
             rig = _rig()
             bgr = {n: cv2.cvtColor(fp.diff[n], cv2.COLOR_GRAY2BGR) for n in (1, 2)}
-            ball, reason = ball_pair.find_ball_pair(rig, bgr[1], bgr[2])
+            ball, reason = ball_pair.find_ball_pair(rig, bgr[1], bgr[2],
+                                                    max_candidates=MAX_CANDIDATES)
         _last = (fp, ball, reason, unlit)
         return jsonify(_result(hand))
     except Exception as e:      # noqa: BLE001 - the page must say what went wrong
@@ -246,7 +251,15 @@ function show(d) {
 async function post(url) {
   const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
                               body: JSON.stringify({handedness: hand})});
-  return r.json();
+  let d = await r.json();
+  // The toggle may have changed while the request ran (a measurement takes
+  // ~9 s): never show a result computed for the other handedness.
+  while (!d.error && d.handedness && d.handedness !== hand) {
+    const again = await fetch('/setup/recompute', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                   body: JSON.stringify({handedness: hand})});
+    d = await again.json();
+  }
+  return d;
 }
 
 for (const h of ['RH', 'LH']) {

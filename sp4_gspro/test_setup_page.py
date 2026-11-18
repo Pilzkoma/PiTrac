@@ -8,7 +8,10 @@ the Jetson. Run from sp4_gspro/:
 """
 
 import os
+import time
 import unittest
+
+import cv2
 
 import numpy as np
 
@@ -109,6 +112,26 @@ class SetupPageTest(unittest.TestCase):
     def test_bad_handedness(self):
         r = self.client.post("/setup/measure", json={"handedness": "x"})
         self.assertEqual(r.status_code, 400)
+
+    def test_response_names_its_handedness(self):
+        self.assertEqual(self.measure("RH")["handedness"], "RH")
+        r = self.client.post("/setup/recompute", json={"handedness": "LH"}).get_json()
+        self.assertEqual(r["handedness"], "LH")
+
+    def test_noise_image_is_refused_quickly(self):
+        # No ball, the flash lights only the floor: the stretched difference is
+        # noise, the case that gave 1768 x 1577 circles and ~280 s on 2026-11-12.
+        rng = np.random.RandomState(1)
+        noise = {n: cv2.GaussianBlur(rng.randint(0, 255, self.images[n].shape).astype(np.uint8),
+                                     (5, 5), 0) for n in (1, 2)}
+        setup_page._capture = _fake_capture(noise)
+        t0 = time.monotonic()
+        r = self.measure()
+        # Uncapped: ~420 s. Capped, Hough on noise alone still costs ~11 s per
+        # camera on the Jetson, so the bound is minutes-versus-seconds, not tight.
+        self.assertLess(time.monotonic() - t0, 60.0)
+        self.assertFalse(r["found"])
+        self.assertIsNone(r["along_mm"])
 
     def test_page_and_nav(self):
         html = self.client.get("/setup").get_data(as_text=True)
