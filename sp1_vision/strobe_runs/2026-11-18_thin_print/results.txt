@@ -1,0 +1,96 @@
+2026-11-18 thin-print test: does removing everything thinner than ~2 mm
+strip the factory print and keep the marks?
+
+Agreed with the owner the same day (spec owner decision 4): part 2 opens the
+dark mask with a ~2 mm disc before shape analysis, so a thin alignment line
+crossing a mark does not cost the mark. thin_print_test.py: ball found as the
+roundest bright blob, visible cap unwrapped onto the sphere (azimuthal
+equidistant, 4.69 px per mm of arc), dark = below 0.6 x local ball
+brightness, opening with a disc of the given width; the same in the plain
+image for comparison. Per dark component: area, fraction kept.
+
+Material (no ball with an alignment line was available yet):
+  static, 8 ms exposure, single 100 us flash (strobe_pair, 2026-11-15),
+    ball 2 cam1 + cam2 (dot glued to the swoosh head), ball 1 cam1;
+    frames in JetsonLM_recordings/2026-11-15_marked_balls_static/ (not in repo)
+  rolling, triggered 0.5 ms / 100 us flash, ball 1, cam1 53.27-53.44 s,
+    18 frames, ball radius 39-44 px (JetsonLM_recordings/2026-11-15_marked_rolls/)
+Commands:
+  python thin_print_test.py OUT <ball2 cam1/cam2 flash> <ball1 cam1 flash> [--stroke-mm W]
+  python thin_print_test.py OUT <cam1/t053.27..t053.44 jpgs>
+
+Results, opening 2.0 mm:
+  marks: kept 92-99 % on the sphere map in nearly every case, out to 60 deg
+    from the view centre (static_2mm.txt, roll_2mm.txt, roll_2mm.jpg).
+  plane image instead of sphere map: marks near the limb lose much more
+    (ball 2 bar at 60 deg: 26 % kept in the plane vs 99 % on the sphere;
+    rolling marks 36-63 % in many frames) - foreshortening narrows them.
+    -> The opening must run on the unwrapped sphere, not the image.
+  swoosh (ball 1, both runs): the thin tail goes, the head (~3-4 mm thick,
+    as thick as a mark stroke) stays as a 15-25 mm^2 blob, 63-80 % of the
+    swoosh kept. Marks are 28-67 mm^2.
+  ball 2: the dot glued to the swoosh head stays one blob with it
+    (95 / 118 mm^2 after opening). Not freed.
+
+Opening 2.5 / 3.0 mm (static_3mm.jpg): the swoosh head still survives and
+the ball-2 dot stays attached, while marks start to break (a bar split in
+two at 3 mm, kept 67-79 % on large ones). No width separates the swoosh
+head from the marks; 2 mm stays.
+
+Conclusion:
+  - Thin strokes (<~2 mm) are removed while marks stay intact, provided the
+    opening runs on the sphere map. Whether a real ~1 mm alignment line is
+    removed where it crosses a mark: tested the same evening, see below.
+  - Thick print (logo heads, letters) is as thick as the marks; the opening
+    does not remove it and does not free a mark touching it. Those remnants
+    must be rejected by the shape/size/neighbour check against the map
+    (spec owner decision 2). Owner rule unchanged: logos free, line may be
+    ignored.
+  - Earlier statement (2026-11-18, to the owner) that ball 2's dot "would
+    probably come free" with this step: wrong.
+
+
+Same evening: a ball with a thin alignment line (new ball, reprinted
+stencil, line placed to run into marks, logos clear). Frames in
+JetsonLM_recordings/2026-11-18_line_ball/ (README there).
+
+Static (strobe_pair, line_static_2mm.jpg/.txt): at 850 nm the line is a faint
+grey stroke, only fragments fall under 0.6 x brightness; the opening removes
+all of them. The crosses it runs into keep 96-99 % and stay separate blobs.
+
+Three putts from rest, triggered 0.5 ms / 100 us, ~20 px per frame
+(line_putts_cam1/2.txt, line_putt_cam1_2mm.jpg): the line runs into a cross
+in frame after frame and is stripped every time; the cross stays whole.
+Components within 60 deg of the view centre:
+  cam1 (110 frames): >= 20 mm^2: 476, kept >= 90 % 434, 60-90 % 40, < 60 % 2;
+                     < 20 mm^2 (line fragments, specks): 218, 13 kept > 50 %
+  cam2 (90 frames, ball leaves cam2's view earlier): >= 20 mm^2: 399,
+                     kept >= 90 % 348, 60-90 % 42, < 60 % 9;
+                     < 20 mm^2: 178, 31 kept > 50 %
+The large components kept < 60 % are not the filter: they sit at 44-58 deg
+on the dim lower-left limb (the IR beam lights the ball from above), where
+this test's "local brightness" fails and the limb shading itself counts as
+dark and merges with a mark (line_putt_cam2_limb.jpg). Part 2 needs a better
+ball-brightness model there (e.g. a radial shading profile), independent of
+the opening.
+Also seen: the specular highlight sits on a mark in some frames and punches
+a hole into it (cam1 16.09-16.10 s); the hole survives the opening as a gap.
+Small surviving line fragments (a few mm^2) are left to the size check.
+
+Three chips after the putts (line_chips_cam1/2.txt, line_chips_cam1_2mm.jpg):
+a low one at 54.41 s that rolls off right, and two in flight at 87.73 s and
+98.03 s, rising out of the IR beam (the ball darkens frame by frame, still
+analysable to the last frames in view). Within 60 deg:
+  cam1 (40 frames): >= 20 mm^2: 163, kept >= 90 % 157, 60-90 % 6, < 60 % 0;
+                    < 20 mm^2: 95, 9 kept > 50 %
+  cam2 (37 frames): >= 20 mm^2: 145, kept >= 90 % 139, 60-90 % 5, < 60 % 1;
+                    < 20 mm^2: 75, 8 kept > 50 %
+(one cam1 frame, 54.62 s, picked a background blob after the ball had left
+- the test's ball finder, not the filter). The line is stripped in flight
+as at rest; the highlight hole shows again (98.08 s). The marks visibly
+turn from frame to frame in both chips - material for part 2.
+
+Verdict: the 2 mm opening on the sphere map removes the alignment line,
+also where it crosses a mark, and keeps the marks, at rest, in putts and
+in chips. Owner rule confirmed:
+ignore the line, keep the logos clear, fill the cutouts.

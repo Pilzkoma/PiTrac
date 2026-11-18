@@ -245,3 +245,24 @@ Each part is usable and testable before the next starts.
    A test with a known spin rate (a marked ball turned by a motor of known
    or strobe-measured rpm) would be the real reference; any such fixture is
    new hardware and needs the owner's approval first.
+
+## Owner decision (2026-11-18): thin print is filtered, logos stay free
+
+4. **Thin alignment lines may cross marks; logos may not.** Many balls carry
+   a thin line between two opposite logos, and placing the ball so that
+   neither logo nor line touches a cutout is fiddly (the map leaves ~3.5 mm
+   clearance for a 30 mm line running logo to logo, ~1 mm for one running
+   across). So the owner keeps only the logos (thick print) clear and
+   ignores the line, and fills every cutout completely. Part 2 removes dark
+   structure thinner than ~2 mm with a morphological opening **on the
+   unwrapped sphere** (in the plain image foreshortening narrows marks near
+   the limb and the opening destroys them) before shape analysis.
+   Tested on existing images (`sp1_vision/strobe_runs/2026-11-18_thin_print/`):
+   marks keep 92–99 % out to 60° from the view centre; a swoosh's thin tail
+   goes, but its head is as thick as a mark stroke and survives, and a mark
+   touching it is not freed. Remnants of thick print are left to the
+   shape/size/neighbour check (decision 2). A real alignment line running
+   into crosses (static, three putts and three chips, same day) is removed and the
+   crosses stay whole. Side findings for part 2: the dim lower limb (IR
+   beam from above) needs a shading model or it reads as ink, and the
+   specular highlight can punch a hole into a mark.

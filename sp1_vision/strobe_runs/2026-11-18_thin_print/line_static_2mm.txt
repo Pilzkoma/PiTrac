@@ -1,0 +1,23 @@
+thin-print test: opening 2.0 mm (9.4 px at 4.69 px/mm), dark < 0.60 x local brightness
+per component: area mm^2 | kept sphere | kept plane | deg from view centre (* = beyond 60 deg, foreshortened)
+
+gs_01_flash.png  ball (558, 600) r 39.9 px
+     79.8  0.96  0.95   42
+     51.0  0.98  0.98   17
+     46.9  0.98  0.84   62*
+     46.3  0.99  0.98   49
+     20.9  0.95  0.82   64*
+     16.3  0.90  0.00   67*
+      3.0  0.00  0.00   31
+      2.8  0.00   nan   61*
+      1.4  0.00   nan   65*
+      1.1  0.00   nan   38
+   after opening: 6 blobs, mm^2 77 50 46 46 20 15
+gs_01_flash.png  ball (735, 611) r 37.4 px
+     97.1  0.98  0.96   55
+     72.6  0.99  0.95   59
+     60.7  0.99  0.98   54
+     57.4  0.97  0.97    7
+      2.5  0.00  0.00   25
+      1.5  0.00  0.00   29
+   after opening: 4 blobs, mm^2 95 72 60 56

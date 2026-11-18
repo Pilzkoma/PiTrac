@@ -335,3 +335,20 @@ reproduces PiTrac's front-end and scores A's map, turned on the sphere by
 wrong sign, at the search edge). Control with the stroke left in: peak at
 −16..−18°. The maps do not carry the rotation; spin needs IR-dark marks and
 a mark-based method. Numbers in `results.txt`.
+
+## 2026-11-18 — thin-print filter, `2026-11-18_thin_print/`
+
+Does removing dark structure thinner than ~2 mm (morphological opening)
+strip the factory print and keep the marks? `thin_print_test.py` on the
+static marked-ball frames (balls 1 and 2) and 18 frames of ball 1 rolling.
+On the unwrapped sphere, marks keep 92–99 % out to 60° from the view
+centre; in the plain image, marks near the limb lose up to three quarters
+(foreshortening), so the opening must run on the sphere map. A swoosh
+loses its thin tail but its head is as thick as a mark stroke and stays;
+ball 2's dot, glued to that head, is not freed. 2.5–3 mm does not help and
+starts breaking marks. Same evening, a ball with a thin alignment line,
+static, three putts and three chips: the line (faint grey at 850 nm) is stripped also
+where it runs into a cross, and the cross stays whole (cam1: 434 of 476
+large components keep ≥ 90 %, the poor ones sit on the dim lower limb,
+where the test's brightness estimate counts the shading as ink; chips:
+157 of 163). Numbers in `results.txt`.
