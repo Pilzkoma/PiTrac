@@ -28,36 +28,14 @@ import sys
 import time
 
 import cv2
-import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sp1_vision import ball_pair, cli_triangulate, stereo_geometry  # noqa: E402
 from sp1_vision import strobe_capture as sc  # noqa: E402
-from sp1_vision.calibration_capture import set_manual_exposure  # noqa: E402
+from sp1_vision.flash_pair import (  # noqa: E402,F401 - lit_frame re-exported
+    capture_flash_pair, lit_frame, unlit_cameras)
 
 SERIES = {"d": "depth", "s": "spread", "t": "target"}
-
-
-def lit_frame(frames, t_fire):
-    """Return (flash image, ambient image, rise) for one camera.
-
-    frames: [(kernel_ts, arrival_ts, mjpeg_buffer)] from strobe_capture.one_run.
-    The ambient image is the median of the last frames before the fire; the
-    rise is the 99th percentile of (flash - ambient) in grey levels.
-    """
-    decoded = [(ta, sc.decode(b)) for _, ta, b in frames]
-    ambient = [img for ta, img in decoded if ta < t_fire - 0.05]
-    if len(ambient) < 3:
-        raise RuntimeError("too few frames before the flash")
-    base = np.median(np.stack(ambient[-5:]), axis=0).astype(np.uint8)
-    best, best_rise = None, -1.0
-    for ta, img in decoded:
-        if ta < t_fire:
-            continue
-        rise = float(np.percentile(cv2.subtract(img, base), 99))
-        if rise > best_rise:
-            best, best_rise = img, rise
-    return best, base, best_rise
 
 
 def main(argv=None):
@@ -86,43 +64,10 @@ def main(argv=None):
     number = cli_triangulate._resume_start_number(dirs, shots)
     name = "gs_{:02d}.png".format(number)
 
-    sc.release_dashboard()
-    teensy = sc.Teensy(sc.TEENSY)
-    fire_pin = sc.FirePin()
-    caps = sc.open_cameras()
-    try:
-        sc.set_gamma(caps, args.gamma)
-        sc.settle_on_auto(caps)
-        for _, dev in caps.values():
-            set_manual_exposure(dev, args.exposure)
-        time.sleep(sc.SETTLE_S)
-        pulse = teensy.single_pulse(args.pulse_us)
-        t_fire, got = sc.one_run(caps, fire_pin)
-    finally:
-        sc.set_gamma(caps, sc.DEFAULT_GAMMA)
-        for cap, dev in caps.values():
-            cap.release()
-            set_manual_exposure(dev, None)
-        fire_pin.close()
-        teensy.close()
-
-    # What is saved as the shot - and therefore what the analysis measures -
-    # is the DIFFERENCE flash minus ambient. Everything the flash does not
-    # light drops out: on the first try (2026-11-11, room lamps on, 8 ms
-    # exposure) the patterned carpet in the plain flash frame gave two
-    # "ball-shaped objects". The flash frame and the ambient frame are kept
-    # beside it for reference.
-    frames, flash, ambient, rises = {}, {}, {}, {}
-    for n in (1, 2):
-        flash[n], ambient[n], rises[n] = lit_frame(got[n], t_fire)
-        diff = cv2.subtract(flash[n], ambient[n])
-        # Stretched linearly so its brightest 0.05 % sits at 220: under room
-        # lamps the difference is faint (tone curve, see strobe README) and
-        # the circle detector's edge threshold is absolute. A linear stretch
-        # moves no edge, so the geometry is untouched.
-        top = max(float(np.percentile(diff, 99.95)), 1.0)
-        frames[n] = np.clip(diff.astype(np.float32) * (220.0 / top), 0, 255).astype(np.uint8)
-    unlit = [n for n in (1, 2) if rises[n] < sc.LIT_THRESHOLD]
+    fp = capture_flash_pair(args.pulse_us, args.exposure, args.gamma)
+    pulse = fp.pulse_us
+    frames, flash, ambient, rises = fp.diff, fp.flash, fp.ambient, fp.rises
+    unlit = unlit_cameras(rises)
     if unlit:
         print("NO FLASH in cam{} (rise {}) - nothing saved, take it again".format(
             ",".join(map(str, unlit)),
