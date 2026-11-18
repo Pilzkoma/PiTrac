@@ -119,7 +119,7 @@ _POWER_ICON = ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stro
 
 
 def header_html(active):
-    """The header capsule; `active` is "stats" or "calibration"."""
+    """The header capsule; `active` is "stats", "calibration" or "setup"."""
     def nav(key, href, text):
         current = ' aria-current="page"' if key == active else ""
         return '<a href="{}"{}>{}</a>'.format(href, current, text)
@@ -127,7 +127,7 @@ def header_html(active):
     return """
 <header class="lm-header">
   <a class="lm-word" href="/">Jetson<i>LM</i></a>
-  <nav class="seg" aria-label="Seiten">{stats}{calib}</nav>
+  <nav class="seg" aria-label="Seiten">{stats}{calib}{setup}</nav>
   <span class="lm-status"><span class="lm-dot"></span>bereit</span>
   <button type="button" class="pill lm-power" id="lm-power">{icon}Herunterfahren</button>
 </header>
@@ -144,6 +144,7 @@ def header_html(active):
 </div>
 """.format(stats=nav("stats", "/", "Statistik"),
            calib=nav("calibration", "/calibration", "Kalibrierung"),
+           setup=nav("setup", "/setup", "Aufbau"),
            icon=_POWER_ICON)
 
 
