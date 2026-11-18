@@ -29,12 +29,18 @@ def _rig():
 
 
 def _fake_capture(images, rises=None):
-    def capture(pulse_us=100, release=None, **_):
+    """A stand-in for flash_pair.capture_flash_pairs: `images` is one stereo
+    pair used for every flash, or a list with one pair per flash."""
+    def capture(count=3, pulse_us=100, release=None, **_):
         if release is not None:
             release()
-        black = {n: np.zeros_like(images[n]) for n in (1, 2)}
-        return flash_pair.FlashPair(diff=images, flash=images, ambient=black,
-                                    rises=rises or {1: 60.0, 2: 60.0}, pulse_us=pulse_us)
+        per_flash = images if isinstance(images, list) else [images] * count
+        out = []
+        for imgs in per_flash[:count]:
+            black = {n: np.zeros_like(imgs[n]) for n in (1, 2)}
+            out.append(flash_pair.FlashPair(diff=imgs, flash=imgs, ambient=black,
+                                            rises=rises or {1: 60.0, 2: 60.0}, pulse_us=pulse_us))
+        return out
     return capture
 
 
@@ -90,6 +96,14 @@ class SetupPageTest(unittest.TestCase):
         self.assertIsNone(r["along_mm"])
         self.assertIn("Kamera 2", r["reason"])
 
+    def test_weak_flash_in_one_camera_counts_as_not_seen(self):
+        # 2026-11-19 on the device: cam2 rose by 10 on one flash (cam1 73) -
+        # above LIT_THRESHOLD, but a miss; searching it cost ~11 s of noise.
+        setup_page._capture = _fake_capture(self.images, rises={1: 73.0, 2: 10.0})
+        r = self.measure()
+        self.assertEqual(r["unlit"], [2])
+        self.assertFalse(r["found"])
+
     def test_busy(self):
         setup_page._lock.acquire()
         try:
@@ -132,6 +146,36 @@ class SetupPageTest(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 60.0)
         self.assertFalse(r["found"])
         self.assertIsNone(r["along_mm"])
+
+    def _pair_at(self, dz_m):
+        f1, f2 = frames_with(_rig(), balls=[self.ball_xyz + np.array([0.0, 0.0, dz_m])])
+        return {1: f1, 2: f2}
+
+    def _blank(self):
+        return {n: np.zeros_like(self.images[n]) for n in (1, 2)}
+
+    def test_three_flashes_give_the_median(self):
+        setup_page._capture = _fake_capture([self._pair_at(-0.006), self._pair_at(0.0),
+                                             self._pair_at(0.012)])
+        r = self.measure()
+        self.assertTrue(r["found"], r.get("reason"))
+        self.assertEqual((r["flashes"], r["found_count"]), (3, 3))
+        middle = (self.ball_xyz[2] - setup_check.target_xyz_m(_rig(), "RH", 0.09)[2]) * 1000
+        self.assertLess(abs(r["depth_mm"] - middle), 3.0)          # the median, not the mean
+        self.assertAlmostEqual(r["depth_spread_mm"], 18.0, delta=4.0)
+
+    def test_two_of_three_flashes_are_enough(self):
+        setup_page._capture = _fake_capture([self.images, self._blank(), self.images])
+        r = self.measure()
+        self.assertTrue(r["found"], r.get("reason"))
+        self.assertEqual(r["found_count"], 2)
+
+    def test_one_of_three_flashes_is_not_enough(self):
+        setup_page._capture = _fake_capture([self._blank(), self.images, self._blank()])
+        r = self.measure()
+        self.assertFalse(r["found"])
+        self.assertIsNone(r["depth_mm"])
+        self.assertIn("1 von 3", r["reason"])
 
     def test_page_and_nav(self):
         html = self.client.get("/setup").get_data(as_text=True)

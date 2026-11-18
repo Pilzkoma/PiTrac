@@ -76,6 +76,19 @@ def offsets(ball_xyz_m, target_xyz_m, handedness):
     return Offsets(along_mm=d[0] * flight_sign(handedness), depth_mm=d[2])
 
 
+def median_xyz(positions_m):
+    """Component-wise median of several ball positions (one per flash).
+    A single flash's depth jitters about +-5 mm (whole-pixel disparity, one
+    pixel = 2.6 mm at 50 cm), and one bad pairing must not move the result."""
+    return np.median(np.asarray(positions_m, dtype=float), axis=0)
+
+
+def depth_spread_mm(positions_m):
+    """Largest minus smallest depth of the flashes, mm."""
+    z = np.asarray(positions_m, dtype=float)[:, 2]
+    return float((z.max() - z.min()) * 1000.0)
+
+
 def margin_ok(ball, image_size=(1280, 800)):
     """Both circles at least EDGE_MARGIN_PX inside their image."""
     w, h = image_size

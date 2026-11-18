@@ -33,16 +33,26 @@ from sp1_vision import (ball_pair, calibration_capture, flash_pair,  # noqa: E40
 setup_bp = Blueprint("setup", __name__)
 
 PULSE_US = 100
+# Flashes per measurement, median of their positions: a single flash's depth
+# jitters about +-5 mm (whole-pixel disparity), which flipped the verdict
+# between green and red with nothing moved (2026-11-18). At least
+# MIN_FOUND of them must find the ball.
+FLASHES = 3
+MIN_FOUND = 2
 IMAGE_WIDTH = 640
 # Either camera offering more circles than this is a noise image (no ball,
 # only the lit floor, stretched): refused unsearched, as strobe_event does.
 # Uncapped, such a pair took ~420 s in test and held the lock throughout.
 MAX_CANDIDATES = 200
+# A camera whose flash rise is under this fraction of the other camera's
+# missed the flash (2026-11-19: cam2 +10 against cam1 +73, above
+# strobe_capture.LIT_THRESHOLD but a noise image all the same).
+LIT_RATIO = 0.5
 
 # Replaced in tests; the real one fires the strobe.
-_capture = flash_pair.capture_flash_pair
+_capture = flash_pair.capture_flash_pairs
 _lock = threading.Lock()
-_last = None        # (FlashPair, BallPair or None, reason, unlit) of the last measurement
+_last = None        # ([FlashPair], [BallPair or None], [reason], unlit) of the last measurement
 
 
 def _rig():
@@ -89,24 +99,39 @@ def _annotated(rig, img, n, ball, target):
 
 def _result(hand):
     """The JSON for the last measurement, seen with the given handedness."""
-    fp, ball, reason, unlit = _last
+    fps, balls, reasons, unlit = _last
     rig = _rig()
-    out = {"found": ball is not None, "reason": reason, "unlit": unlit,
+    found = [(i, b) for i, b in enumerate(balls) if b is not None]
+    out = {"found": len(found) >= MIN_FOUND, "reason": None, "unlit": unlit,
+           "flashes": len(fps), "found_count": len(found), "depth_spread_mm": None,
            "along_mm": None, "depth_mm": None, "ok": False, "margin_ok": False,
            "advice": [], "xyz_mm": None, "handedness": hand,
            "rear_camera": setup_check.rear_camera(rig, hand)}
-    target = None
-    if ball is not None:
-        target = setup_check.target_xyz_m(rig, hand, float(ball.xyz_m[1]))
-        off = setup_check.offsets(ball.xyz_m, target, hand)
+    failed = [r for r in reasons if r]
+    if not found:
+        out["reason"] = failed[0] if failed else "kein Ball"
+    elif len(found) < MIN_FOUND:
+        out["reason"] = "Ball nur in {} von {} Blitzen gefunden ({})".format(
+            len(found), len(fps), failed[0] if failed else "")
+    shown, ball, target = 0, None, None
+    if out["found"]:
+        xyzs = [b.xyz_m for _, b in found]
+        xyz = setup_check.median_xyz(xyzs)
+        # Images and the margin check from the flash nearest the median.
+        shown, ball = min(found, key=lambda ib: float(np.linalg.norm(ib[1].xyz_m - xyz)))
+        target = setup_check.target_xyz_m(rig, hand, float(xyz[1]))
+        off = setup_check.offsets(xyz, target, hand)
         out.update(along_mm=off.along_mm, depth_mm=off.depth_mm,
+                   depth_spread_mm=setup_check.depth_spread_mm(xyzs),
                    margin_ok=setup_check.margin_ok(ball, rig.image_size),
                    advice=setup_check.advice(off),
-                   xyz_mm=[float(x) * 1000.0 for x in ball.xyz_m])
+                   xyz_mm=[float(x) * 1000.0 for x in xyz])
         out["ok"] = off.ok and out["margin_ok"]
         if not out["margin_ok"]:
             out["advice"] = out["advice"] + ["Ball zu nah am Bildrand"]
-    out["images"] = {str(n): _annotated(rig, fp.diff[n], n, ball, target) for n in (1, 2)}
+    elif found:
+        shown, ball = found[0]
+    out["images"] = {str(n): _annotated(rig, fps[shown].diff[n], n, ball, target) for n in (1, 2)}
     return out
 
 
@@ -127,17 +152,30 @@ def setup_measure():
     if not _lock.acquire(False):
         return jsonify({"error": "Messung läuft bereits"})
     try:
-        fp = _capture(pulse_us=PULSE_US, release=calibration_capture.SESSION.release)
-        unlit = flash_pair.unlit_cameras(fp.rises)
-        if unlit:
-            ball, reason = None, "Blitz in {} nicht gesehen".format(
-                " und ".join("Kamera {}".format(n) for n in unlit))
-        else:
-            rig = _rig()
+        fps = _capture(count=FLASHES, pulse_us=PULSE_US,
+                       release=calibration_capture.SESSION.release)
+        rig = _rig()
+        balls, reasons, unlit = [], [], set()
+        for fp in fps:
+            # Stop once MIN_FOUND can no longer be reached: a no-ball flash
+            # costs ~23 s of circle search on the stretched floor noise.
+            if sum(b is None for b in balls) > len(fps) - MIN_FOUND:
+                break
+            top = max(fp.rises.values())
+            dark = sorted(set(flash_pair.unlit_cameras(fp.rises))
+                          | {n for n, r in fp.rises.items() if r < LIT_RATIO * top})
+            if dark:
+                unlit.update(dark)
+                balls.append(None)
+                reasons.append("Blitz in {} nicht gesehen".format(
+                    " und ".join("Kamera {}".format(n) for n in dark)))
+                continue
             bgr = {n: cv2.cvtColor(fp.diff[n], cv2.COLOR_GRAY2BGR) for n in (1, 2)}
             ball, reason = ball_pair.find_ball_pair(rig, bgr[1], bgr[2],
                                                     max_candidates=MAX_CANDIDATES)
-        _last = (fp, ball, reason, unlit)
+            balls.append(ball)
+            reasons.append(reason)
+        _last = (fps, balls, reasons, sorted(unlit))
         return jsonify(_result(hand))
     except Exception as e:      # noqa: BLE001 - the page must say what went wrong
         return jsonify({"error": "Messung fehlgeschlagen: {}".format(e)})
@@ -246,7 +284,9 @@ function show(d) {
     + '<ul>' + d.advice.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>'
     + '<div class="nums">Ball gegenüber Ziel: ' + d.along_mm.toFixed(0) + ' mm in Schlagrichtung, '
     + d.depth_mm.toFixed(0) + ' mm in der Tiefe · hintere Kamera: ' + d.rear_camera
-    + ' · Ball bei X ' + d.xyz_mm[0].toFixed(0) + ', Z ' + d.xyz_mm[2].toFixed(0) + ' mm</div>';
+    + ' · Ball bei X ' + d.xyz_mm[0].toFixed(0) + ', Z ' + d.xyz_mm[2].toFixed(0) + ' mm'
+    + ' · Median aus ' + d.found_count + ' von ' + d.flashes + ' Blitzen, Tiefe streut '
+    + d.depth_spread_mm.toFixed(0) + ' mm</div>';
 }
 
 async function post(url) {
@@ -276,7 +316,7 @@ document.getElementById('measure').onclick = async (e) => {
   e.target.disabled = true;
   const v = document.getElementById('verdict');
   v.className = 'verdict';
-  v.innerHTML = '<div class="head">Misst …</div><div class="nums">Kameras einstellen, blitzen — ein paar Sekunden.</div>';
+  v.innerHTML = '<div class="head">Misst …</div><div class="nums">Kameras einstellen, dreimal blitzen — ein paar Sekunden.</div>';
   try {
     const d = await post('/setup/measure');
     if (!d.error) measured = true;

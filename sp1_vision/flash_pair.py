@@ -73,35 +73,54 @@ def unlit_cameras(rises):
     return sorted(n for n, r in rises.items() if r < sc.LIT_THRESHOLD)
 
 
-def capture_flash_pair(pulse_us=100, exposure_units=80, gamma=sc.MEASURE_GAMMA,
-                       release=sc.release_dashboard):
-    """Fire one flash while both cameras stream; return a FlashPair.
+def capture_flash_pairs(count=3, pulse_us=100, exposure_units=80, gamma=sc.MEASURE_GAMMA,
+                        release=sc.release_dashboard):
+    """Fire `count` flashes in ONE camera session; return a FlashPair each.
 
-    `release` hands the cameras over first: the default asks the dashboard
-    over HTTP; the dashboard itself passes its own session's release.
+    The cameras are opened and settled on auto exposure once (the slow part,
+    ~3 s); each flash then costs one Teensy pulse setup and one ~0.5 s
+    capture run. `release` hands the cameras over first: the default asks
+    the dashboard over HTTP; the dashboard itself passes its own session's
+    release.
     """
     release()
     teensy = sc.Teensy(sc.TEENSY)
-    fire_pin = sc.FirePin()
-    caps = sc.open_cameras()
     try:
-        sc.set_gamma(caps, gamma)
-        sc.settle_on_auto(caps)
-        for _, dev in caps.values():
-            set_manual_exposure(dev, exposure_units)
-        time.sleep(sc.SETTLE_S)
-        pulse = teensy.single_pulse(pulse_us)
-        t_fire, got = sc.one_run(caps, fire_pin)
+        fire_pin = sc.FirePin()
+        try:
+            caps = sc.open_cameras()
+            runs = []
+            try:
+                sc.set_gamma(caps, gamma)
+                sc.settle_on_auto(caps)
+                for _, dev in caps.values():
+                    set_manual_exposure(dev, exposure_units)
+                time.sleep(sc.SETTLE_S)
+                for _ in range(count):
+                    pulse = teensy.single_pulse(pulse_us)
+                    t_fire, got = sc.one_run(caps, fire_pin)
+                    runs.append((pulse, t_fire, got))
+            finally:
+                sc.set_gamma(caps, sc.DEFAULT_GAMMA)
+                for cap, dev in caps.values():
+                    cap.release()
+                    set_manual_exposure(dev, None)
+        finally:
+            fire_pin.close()
     finally:
-        sc.set_gamma(caps, sc.DEFAULT_GAMMA)
-        for cap, dev in caps.values():
-            cap.release()
-            set_manual_exposure(dev, None)
-        fire_pin.close()
         teensy.close()
 
-    diff, flash, ambient, rises = {}, {}, {}, {}
-    for n in (1, 2):
-        flash[n], ambient[n], rises[n] = lit_frame(got[n], t_fire)
-        diff[n] = difference_image(flash[n], ambient[n])
-    return FlashPair(diff=diff, flash=flash, ambient=ambient, rises=rises, pulse_us=pulse)
+    pairs = []
+    for pulse, t_fire, got in runs:
+        diff, flash, ambient, rises = {}, {}, {}, {}
+        for n in (1, 2):
+            flash[n], ambient[n], rises[n] = lit_frame(got[n], t_fire)
+            diff[n] = difference_image(flash[n], ambient[n])
+        pairs.append(FlashPair(diff=diff, flash=flash, ambient=ambient, rises=rises, pulse_us=pulse))
+    return pairs
+
+
+def capture_flash_pair(pulse_us=100, exposure_units=80, gamma=sc.MEASURE_GAMMA,
+                       release=sc.release_dashboard):
+    """One flash (strobe_pair's capture); see capture_flash_pairs."""
+    return capture_flash_pairs(1, pulse_us, exposure_units, gamma, release)[0]

@@ -66,6 +66,18 @@ class OffsetsAndAdvice(unittest.TestCase):
         self.assertEqual(setup_check.advice(off), ["Passt - innerhalb ±10 mm"])
 
 
+class Median(unittest.TestCase):
+    def test_component_wise_median(self):
+        m = setup_check.median_xyz([[0.0, 0.1, 0.49], [0.002, 0.1, 0.50], [0.001, 0.2, 0.53]])
+        np.testing.assert_allclose(m, [0.001, 0.1, 0.50])
+
+    def test_two_positions_give_their_mean(self):
+        np.testing.assert_allclose(setup_check.median_xyz([[0, 0, 0.49], [0, 0, 0.51]]), [0, 0, 0.50])
+
+    def test_spread_of_depth(self):
+        self.assertAlmostEqual(setup_check.depth_spread_mm([[0, 0, 0.49], [0, 0, 0.503], [0, 0, 0.5]]), 13.0)
+
+
 class Margin(unittest.TestCase):
     def test_ball_near_an_edge(self):
         self.assertFalse(setup_check.margin_ok(_ball((30, 400), (640, 400))))
