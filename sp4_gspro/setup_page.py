@@ -188,7 +188,8 @@ SETUP_HTML = r"""
 <main class="sheet">
 <h1 class="title">Aufbau <i>prüfen</i></h1>
 <p class="sub">Ball auf seinen Platz legen, Händigkeit wählen, „Messen“ drücken: ein Blitz, dann steht hier,
-wie weit die <b>Einheit</b> zu verschieben ist, damit der Ball 50 cm vor der hinteren Kamera liegt —
+wie weit die <b>Einheit</b> zu verschieben ist, damit der Ball 50 cm vor der hinteren Kamera liegt
+(Kameraplatine bis Ballmitte) —
 der Kamera, von der der Ball wegfliegt, damit möglichst viele Bilder vom Flug entstehen.
 Grün heißt: innerhalb ±10 mm.</p>
 

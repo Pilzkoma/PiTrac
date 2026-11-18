@@ -20,7 +20,12 @@ import numpy as np
 
 from sp1_vision import stereo_geometry
 
+# The owner's reference (2026-11-18): 500 mm by tape from the rear camera's
+# board (its sensor) to the ball centre. The stereo frame's origin is the
+# camera's optical centre, about one focal length (calibrated 2.751 mm) in
+# front of the sensor, so the target depth from there is 2.75 mm less.
 TARGET_DISTANCE_M = 0.50
+SENSOR_TO_OPTICAL_CENTRE_M = 0.00275
 TOLERANCE_MM = 10.0
 EDGE_MARGIN_PX = 40
 _EPS_MM = 1e-6          # float noise at the tolerance boundary
@@ -47,10 +52,10 @@ def rear_camera(rig, handedness):
 
 
 def target_xyz_m(rig, handedness, ball_y_m):
-    """The target ball centre: TARGET_DISTANCE_M in front of the rear camera,
-    at the measured ball's height (height is not part of the check)."""
+    """The target ball centre: TARGET_DISTANCE_M from the rear camera's
+    sensor, at the measured ball's height (height is not part of the check)."""
     c = camera_centres(rig)[rear_camera(rig, handedness)]
-    return np.array([c[0], ball_y_m, c[2] + TARGET_DISTANCE_M])
+    return np.array([c[0], ball_y_m, c[2] + TARGET_DISTANCE_M - SENSOR_TO_OPTICAL_CENTRE_M])
 
 
 class Offsets:

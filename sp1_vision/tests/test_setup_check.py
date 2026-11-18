@@ -19,14 +19,17 @@ class Target(unittest.TestCase):
         self.assertEqual(setup_check.rear_camera(self.rig, "RH"), 2)   # cam2 at x = -80 mm
         self.assertEqual(setup_check.rear_camera(self.rig, "LH"), 1)
 
-    def test_target_is_50cm_in_front_of_rear_camera(self):
+    def test_target_is_50cm_from_the_rear_camera_board(self):
+        # The owner's reference (2026-11-18): tape from the camera board
+        # (sensor) to the ball centre = 500 mm. The optical centre the stereo
+        # depth is measured from sits one focal length (2.75 mm) in front.
         c2 = stereo_geometry.camera2_centre_in_camera1(self.rig)
         t = setup_check.target_xyz_m(self.rig, "RH", ball_y_m=0.09)
-        np.testing.assert_allclose(t, [c2[0], 0.09, c2[2] + 0.50], atol=1e-9)
+        np.testing.assert_allclose(t, [c2[0], 0.09, c2[2] + 0.50 - 0.00275], atol=1e-9)
 
     def test_target_for_left_handers_is_in_front_of_camera_1(self):
         t = setup_check.target_xyz_m(self.rig, "LH", ball_y_m=0.09)
-        np.testing.assert_allclose(t, [0.0, 0.09, 0.50], atol=1e-9)
+        np.testing.assert_allclose(t, [0.0, 0.09, 0.50 - 0.00275], atol=1e-9)
 
     def test_unknown_handedness(self):
         with self.assertRaises(ValueError):
