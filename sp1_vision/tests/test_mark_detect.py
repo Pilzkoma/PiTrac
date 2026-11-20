@@ -127,6 +127,38 @@ class MarkDetectTest(unittest.TestCase):
         self.assertIsNone(b.shape)
         self.assertIsNone(b.direction)
 
+    def test_ring_is_clutter(self):
+        # a ring (hole larger than a glint) is round and solid by its outline,
+        # with a dot's area - it must not be guessed to be a dot
+        site = self._sites("bar")[0]
+        r = rotation_taking(self.m.normals[site], np.array([0.0, 0.0, -1.0]))
+        img = render_ball(self.m, self.k, self.d, self.centre, r)
+        sites_cam = self.m.normals @ r.T
+        best = None
+        u = ball_unwrap.unwrap(img, self.k, self.d, self.centre)
+        for rad_deg in (15.0, 25.0, 35.0):
+            rad = ball_unwrap.R_OUT_PX * np.radians(rad_deg)
+            for phi in np.radians(np.arange(0.0, 360.0, 5.0)):
+                x, y = rad * np.cos(phi), rad * np.sin(phi)
+                n = ball_unwrap.normal_at(u, x, y)
+                clear = min(_angle_deg(n, s) for s in sites_cam)
+                if best is None or clear > best[0]:
+                    best = (clear, x, y)
+        clear, x, y = best
+        self.assertGreater(clear, 26.0)      # ring + nearest mark do not touch
+        for outer, inner in ((8.0, 4.0), (8.0, 3.0), (9.0, 5.0)):
+            with self.subTest(outer=outer, inner=inner):
+                u = ball_unwrap.unwrap(img, self.k, self.d, self.centre)
+                c = u.centre_px
+                yy, xx = np.mgrid[0:u.image.shape[0], 0:u.image.shape[1]]
+                rr = np.hypot(xx - (c + x), yy - (c + y)) / ball_unwrap.PX_PER_MM
+                u.image[(rr < outer / 2.0) & (rr >= inner / 2.0)] = 40
+                blobs = mark_detect.detect_marks(u, self.m)
+                b, err = self._nearest(blobs, ball_unwrap.normal_at(u, x, y))
+                self.assertLess(err, 2.0)
+                self.assertGreater(b.area_mm2, 0.6 * self.m.ink_area_mm2["dot"])
+                self.assertIsNone(b.shape, repr(b))
+
     def test_glint_on_cross(self):                           # Review Focus 3
         # a 1 mm glint at the mark centre; bars too (3.5 mm wide, the hole
         # leaves thin walls the opening would cut)
@@ -209,6 +241,24 @@ class MarkDetectTest(unittest.TestCase):
                             & (dist < 3.0 * ball_unwrap.PX_PER_MM) & (u.theta_deg <= 60.0))
                 self.assertGreater(int(np.count_nonzero(near_cut)), 100)
                 self.assertGreater(float(mask[near_cut].mean()), 0.95)
+
+    def test_frame_edge_on_the_dim_side(self):               # Review Focus 1 + 2
+        # flight frame: ball at the image edge and leaving the beam, dimmed to
+        # 0.35 towards the cut - the valid strip by the cut must not read as ink
+        k = self.k
+        x = (1280 - 40 - k[0, 2]) * 0.45 / k[0, 0]
+        centre = np.array([x, 0.0, 0.45])
+        for site in (0, 9, 4):
+            with self.subTest(site=site):
+                r = rotation_taking(self.m.normals[site], np.array([0.0, 0.0, -1.0]))
+                img = render_ball(self.m, k, self.d, centre, r, gradient=((1.0, 0.0), 0.35))
+                u = ball_unwrap.unwrap(img, k, self.d, centre)
+                mask = mark_detect.dark_mask(u)
+                false_dark = (mask > 0) & ~self._grow(self._true_ink(u, r), 2)
+                self.assertLess(int(np.count_nonzero(false_dark)), 20)
+                for b in mark_detect.detect_marks(u, self.m):
+                    self.assertFalse(b.shape is None and b.area_mm2 >= 20.0
+                                     and b.theta_deg > 45.0, repr(b))
 
 if __name__ == "__main__":
     unittest.main()

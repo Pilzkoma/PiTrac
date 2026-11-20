@@ -12,8 +12,9 @@ Classification against the map's ink areas (MarkMap.ink_area_mm2):
   dot   - area in band, round (elongation < ROUND), solid (>= SOLID)
   bar   - area in band, elongated (>= ELONGATED)
   cross - area in band, round, not solid (< SOLID)
-anything else is clutter (shape None) and is still returned, so the
-identifier can see a wrong-shape blob where the pose predicts a mark.
+a blob with a hole left after the glint fill (a ring) and anything else is
+clutter (shape None) and is still returned, so the identifier can see a
+wrong-shape blob where the pose predicts a mark.
 
 Areas are true areas on the ball: the unwrap is azimuthal equidistant, which
 stretches the tangential direction by theta / sin(theta), so each pixel
@@ -68,22 +69,48 @@ def _disc(diameter_px):
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (n, n))
 
 
+def _fill_invalid_locally(img, valid, reach_px):
+    """Copy of img with invalid pixels filled from their valid neighbours.
+
+    Iterated 3x3 grey dilation (the brightest known neighbour) out to
+    reach_px; pixels further from the valid region cannot influence the
+    closing of a valid pixel and keep the brightest valid grey. A local fill,
+    not one global value: under a brightness gradient a global maximum would
+    lift the estimate by a dim frame cut and turn the ball there into ink.
+    """
+    out = img.copy()
+    known = valid.copy()
+    ker = np.ones((3, 3), np.uint8)
+    for _ in range(int(reach_px)):
+        if known.all():
+            break
+        grown = cv2.dilate(np.where(known, out, 0).astype(np.uint8), ker)
+        new = cv2.dilate(known.astype(np.uint8), ker).astype(bool) & ~known
+        if not new.any():
+            break
+        out[new] = grown[new]
+        known |= new
+    out[~known] = img[valid].max()
+    return out
+
+
 def _local_brightness(u):
     """Grey closing with a disc larger than any mark, then a Gaussian.
 
     Invalid pixels must not act as dark structure (a mark touching the edge of
-    the valid cap would merge with it and keep its ink in the closing), so they
-    are set to the brightest valid grey before the closing, and the Gaussian is
-    normalised over valid pixels only (zeros outside would dim the edge).
+    the valid cap would merge with them and keep its ink in the closing), so
+    they are filled from their nearest valid neighbours before the closing, and
+    the Gaussian is normalised over valid pixels only (zeros outside would dim
+    the edge).
     """
     valid = u.valid
     img = u.image
     if not valid.any():
         return np.zeros(img.shape, np.float32)
-    filled = img.copy()
-    filled[~valid] = img[valid].max()
-    closed = cv2.morphologyEx(filled, cv2.MORPH_CLOSE,
-                              _disc(BRIGHTNESS_DISC_MM * PX_PER_MM))
+    disc = _disc(BRIGHTNESS_DISC_MM * PX_PER_MM)
+    # the closing of a pixel reads up to two disc radii away
+    filled = _fill_invalid_locally(img, valid, disc.shape[0] + 2)
+    closed = cv2.morphologyEx(filled, cv2.MORPH_CLOSE, disc)
     w = valid.astype(np.float32)
     num = cv2.GaussianBlur(closed.astype(np.float32) * w, (0, 0), _BLUR_SIGMA_PX)
     den = cv2.GaussianBlur(w, (0, 0), _BLUR_SIGMA_PX)
@@ -187,11 +214,16 @@ def detect_marks(u, mmap):
         elong = math.sqrt(max(evals[1], 1e-12) / max(evals[0], 1e-12))
         comp = (lab[stats[i, 1]:stats[i, 1] + stats[i, 3],
                     stats[i, 0]:stats[i, 0] + stats[i, 2]] == i).astype(np.uint8)
-        contours, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        contour = max(contours, key=cv2.contourArea)
+        comp = cv2.copyMakeBorder(comp, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+        contours, hier = cv2.findContours(comp, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        outer = [cnt for cnt, h in zip(contours, hier[0]) if h[3] < 0]
+        has_hole = len(outer) < len(contours)
+        contour = max(outer, key=cv2.contourArea)
         hull_area = cv2.contourArea(cv2.convexHull(contour))
         solid = float(cv2.contourArea(contour)) / hull_area if hull_area > 0 else 0.0
-        shape = _classify(area_mm2, elong, solid, mmap.ink_area_mm2)
+        # glint holes (< GLINT_HOLE_MM2) are already filled; a hole left now
+        # (a ring of print) is no mark, though its outline looks like a dot
+        shape = None if has_hole else _classify(area_mm2, elong, solid, mmap.ink_area_mm2)
         x, y = cx - c0, cy - c0
         normal = ball_unwrap.normal_at(u, x, y)
         direction = None
