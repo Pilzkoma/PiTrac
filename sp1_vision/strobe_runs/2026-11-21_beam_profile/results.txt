@@ -1,0 +1,37 @@
+2026-11-21 IR beam profile on a wall (beam_profile.py)
+
+Setup: unit square to a dark green wall ~48 cm away, white skirting board
+along the bottom (up to ~-1.5 deg), floor below. Both arrays fire together
+(wired in parallel); they are identical and parallel, so this is one
+array's profile. Frames in JetsonLM_recordings/2026-11-21_beam_profile/.
+
+Run 1, 100 us, whole band: meaningless - it measured the white skirting
+against the green wall (scene.jpg), and the skirting clipped (rise 148/150).
+Run 2, 300 us, --min-deg 1 (green wall only, +1.5 to +22.5 deg): wall rise
+up to 61/63 grey levels, in the linear range.
+
+Vertical profile along the image centre (relative to +1.5 deg, wall
+geometry divided out, beam x lens fall-off): half light at +16.9 deg (cam1)
+/ +15.2 deg (cam2); at the image top (+21 deg) 0.35. Both cameras agree.
+Sideways (light_map_upper_wall.jpg, relative to the axis):
+  centre column     +2 / +10 / +16 / +21 deg: 1.00 / 0.65 / 0.52 / 0.37
+  20 deg sideways   ~0.4-0.8 / 0.3-0.6 / 0.3-0.45 / 0.25-0.36
+  30 deg sideways (corners) 0.2-0.5 / 0.2-0.4 / 0.2-0.35 / 0.17-0.32
+The beam is much wider than the earlier "halves ~9 deg above the axis"
+(read off the chips' fading residual, 2026-11-12) - that was not a beam
+measurement.
+
+Below the axis nothing was measured on one surface; tilt options are
+evaluated with the profile mirrored about its peak (assumption):
+  tilts  0/ 0: rest ball (-13) 0.50, axis 0.92, +10 0.63, +16 0.50, +21 0.35
+  tilts 10/ 0: rest ball 0.41, axis 0.74, +10 0.77, +16 0.64, +21 0.48
+  tilts 16/-9: rest ball 0.53, axis 0.54, +10 0.54, +16 0.62, +21 0.58
+                (best worst-point over -13..+22.5; leans on the mirror)
+At 100 us the resting ball (-13 deg) gives +73 grey levels; at +21 deg the
+ball would get ~0.7 of that by this profile (+50), and the 2026-11-13 pulse
+test found +17 enough to see a ball. Brightness at the image top is not the
+bottleneck for chips; a tilt buys ~+35-65 % up there at a cost lower down.
+
+Tool bug found and fixed on the way: outside the measured range the
+profile was mirrored and then clipped, which handed out the PEAK value
+(a jump in the first suggested-tilt curve); now the darker end value.
