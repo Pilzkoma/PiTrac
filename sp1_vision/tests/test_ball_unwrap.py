@@ -37,8 +37,8 @@ class BallUnwrapTest(unittest.TestCase):
         best = None
         for i in range(1, n):
             cx, cy = cents[i]
-            nrm = ball_unwrap.normal_at(u, cx - u.image.shape[1] / 2.0,
-                                        cy - u.image.shape[0] / 2.0)
+            nrm = ball_unwrap.normal_at(u, cx - u.centre_px,
+                                        cy - u.centre_px)
             err = _angle_deg(nrm, r @ self.m.normals[site])
             if stats[i, cv2.CC_STAT_AREA] > 200 and (best is None or err < best):
                 best = err
@@ -58,6 +58,30 @@ class BallUnwrapTest(unittest.TestCase):
             n = ball_unwrap.normal_at(u, x, y)
             self.assertAlmostEqual(np.linalg.norm(n), 1.0, places=9)
             self.assertAlmostEqual(_angle_deg(n, u.basis[0]), th, delta=0.05)
+
+    def test_axes_reach_max_deg(self):
+        img = np.full((800, 1280), 100, np.uint8)
+        u = ball_unwrap.unwrap(img, self.k, self.d, self.centre)
+        c = u.centre_px
+        self.assertEqual(u.image.shape, (2 * c + 1, 2 * c + 1))
+        for deg in (60, 65, 68):
+            off = int(round(ball_unwrap.R_OUT_PX * np.radians(deg)))
+            for dx, dy in ((off, 0), (-off, 0), (0, off), (0, -off)):
+                self.assertTrue(u.valid[c + dy, c + dx], (deg, dx, dy))
+        self.assertAlmostEqual(u.theta_deg[c, c], 0.0)
+
+    def test_mark_at_60_and_68_on_axis(self):
+        site = 3
+        for deg in (60.0, 68.0):
+            # e1 is camera x for a centred ball: azimuth 0 is the +x axis
+            r = rotation_taking(self.m.normals[site], _dir_at(deg, 0.0))
+            img = render_ball(self.m, self.k, self.d, self.centre, r)
+            u = ball_unwrap.unwrap(img, self.k, self.d, self.centre)
+            c = u.centre_px
+            off = int(round(ball_unwrap.R_OUT_PX * np.radians(deg)))
+            patch = u.image[c - 6:c + 7, c + off - 6:c + off + 7]
+            self.assertTrue(u.valid[c, c + off])
+            self.assertLess(int(patch.min()), 100, deg)   # ink present, not cut off
 
     def test_tangent_is_tangent(self):
         img = np.full((800, 1280), 100, np.uint8)
@@ -80,7 +104,7 @@ class BallUnwrapTest(unittest.TestCase):
         pick = None
         for i in range(1, n):
             cx, cy = cents[i]
-            e = _angle_deg(ball_unwrap.normal_at(u, cx - w / 2.0, cy - h / 2.0), nrm)
+            e = _angle_deg(ball_unwrap.normal_at(u, cx - u.centre_px, cy - u.centre_px), nrm)
             if e < 5.0 and stats[i, cv2.CC_STAT_AREA] > 100:
                 pick = i
         self.assertIsNotNone(pick)
@@ -111,7 +135,7 @@ class BallUnwrapTest(unittest.TestCase):
             for xx in range(0, w, 7):
                 if not u.valid[yy, xx]:
                     continue
-                n = ball_unwrap.normal_at(u, xx - w / 2.0, yy - h / 2.0)
+                n = ball_unwrap.normal_at(u, xx - u.centre_px, yy - u.centre_px)
                 p = centre + mark_map.BALL_RADIUS_MM / 1000.0 * n
                 uv, _ = cv2.projectPoints(p.reshape(1, 1, 3), np.zeros(3), np.zeros(3), k, self.d)
                 if uv[0, 0, 0] > 1280 - 3:

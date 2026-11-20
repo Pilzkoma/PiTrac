@@ -9,6 +9,8 @@ arc length everywhere, so a mark keeps its true size near the limb.
 Pixels beyond MAX_DEG, or whose source falls outside the frame, are invalid
 and zero (never border-replicated).
 """
+import math
+
 import cv2
 import numpy as np
 
@@ -18,7 +20,10 @@ R_OUT_PX = 100
 PX_PER_MM = R_OUT_PX / BALL_RADIUS_MM
 MAX_DEG = 70.0
 _MARGIN_PX = 2.0
-_SIZE = 2 * R_OUT_PX + 1  # odd: pixel R_OUT_PX is the exact middle
+# half-size covers MAX_DEG along the axes; the exact middle is pixel
+# CENTRE_PX (integer) in both x and y, offsets (x, y) are measured from it
+CENTRE_PX = int(math.ceil(R_OUT_PX * math.radians(MAX_DEG))) + 1
+_SIZE = 2 * CENTRE_PX + 1
 
 
 class Unwrapped(object):
@@ -28,6 +33,7 @@ class Unwrapped(object):
         self.theta_deg = theta_deg
         self.basis = basis
         self.centre_cam_m = centre_cam_m
+        self.centre_px = CENTRE_PX
 
 
 def _basis(centre):
@@ -53,7 +59,7 @@ def _normals(basis, x, y):
 def unwrap(gray, K, dist, centre_cam_m):
     centre = np.asarray(centre_cam_m, float).reshape(3)
     basis = _basis(centre)
-    c = (_SIZE - 1) / 2.0
+    c = float(CENTRE_PX)
     ys, xs = np.mgrid[0:_SIZE, 0:_SIZE].astype(np.float64)
     n, theta = _normals(basis, xs - c, ys - c)
     pts = centre + (BALL_RADIUS_MM / 1000.0) * n.reshape(-1, 3)
