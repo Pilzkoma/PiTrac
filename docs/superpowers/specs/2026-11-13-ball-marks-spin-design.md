@@ -170,6 +170,17 @@ Each part is usable and testable before the next starts.
 - Fast balls (drive at 75 m/s is in view ≈ 9 ms, about one frame per
   camera) will later need two flashes per exposure, PiTrac-style; not in
   this design's first pass, but the firmware command should not rule it out.
+- **Design constraint (added 2026-11-21, final review of part 2): no lone
+  single-camera pose feeds spin without corroboration.** Part 2's
+  identification refuses rather than guesses only up to ONE misread mark
+  per image; with two misreads it can return a wrong pose (72 / 120 / 144 /
+  180° off; 9 of 1200 synthetic views, about 1 image in 2000 at a plausible
+  real misread rate). That is the map's code distance, not cheaply fixable
+  (a two-misread guard refuses ~76 % of clean views). So every orientation
+  used for a spin must be corroborated: cam1 and cam2 agreeing within the
+  acceptance angle (3°), or consistent with the orientations of other
+  frames of the same shot (temporal consistency, e.g. one constant rotation
+  fitting the sequence). An uncorroborated pose is dropped, not used.
 
 ## What is left to the builder
 

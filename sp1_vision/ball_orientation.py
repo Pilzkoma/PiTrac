@@ -5,6 +5,16 @@ refuse.
 Spin is computed from the orientations of successive images, so a wrong pose
 is far worse than a refusal: every step below can only discard.
 
+The bound of that promise: a wrong pose is refused for up to ONE misread blob
+per image (step 5). With two misread shapes in one image a wrong pose can
+come out (72 / 120 / 144 / 180 deg off; 9 of 1200 synthetic views with two
+random misreads, about 1 image in 2000 at a plausible real misread rate).
+That is the code distance of the map, not cheaply fixable (a two-misread
+guard would refuse ~76 % of clean views). A caller must therefore not use a
+lone single-camera pose for spin without corroboration - the other camera
+agreeing within the acceptance angle, or consistency across frames (spec,
+"Spin measurement (parts 3-4)").
+
 1. Hypotheses: every ordered pair of classified blobs (i, j) whose angle is
    within PAIR_TOL_DEG of the map's neighbour angle, times every ordered pair
    of neighbouring sites (a, b) with the same shapes. R is the rotation
