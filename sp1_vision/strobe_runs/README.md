@@ -367,3 +367,18 @@ disparity at this range. Single-flash depth is quantised by the whole-pixel
 circle centres, so a ±10 mm verdict can flip near the edge. Not tuned yet;
 options: average several flashes per measurement, or a sub-pixel circle
 refinement for this path. Not yet checked against a tape.
+
+## 2026-11-21 — offset trigger (part 3 of the spin design), accepted
+
+Firmware v0.4 adds `SEQ` / `SEQ_SHOT` / `SEQ_RUN`: a per-period schedule of
+trigger edges (E1, E2) and flashes (F<us>). Recording with cam2 edged 1 ms
+after cam1, and each camera with its own flash 0.9 ms after its own edge:
+
+    python3 -m sp1_vision.strobe_shot --trigger --offset-us 1000 --seconds 15 --out RUNDIR
+
+`trigger.json` next to `raw/` gives each camera's edge and flash time in the
+10 ms period. The sweep (`2026-11-21_offset_trigger/`) found cam1 exposing
+0.80–1.40 ms and cam2 1.80–2.40 ms after cam1's edge (0.5 ms + 50 µs flash
+at 50 µs steps). The windows are 0.40 ms apart, and neither camera saw the
+flash in the other's window. A 3 s test recording: 309 edges, 309 frames per
+camera, the marked ball flash-lit in both.
