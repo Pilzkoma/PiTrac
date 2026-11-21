@@ -125,7 +125,37 @@ static void test_flash_during_a_low_pulse_is_ordered_by_time() {
     expect_tr(s, 3, 1025, SEQ_LINE_LED, 0);
 }
 
+static void test_flashes_need_an_off_time_at_least_as_long_as_the_pulse_before() {
+    SeqSchedule s;
+    // final review 2026-11-21: 1 us gaps made 16 x 1000 us flashes one ~16 ms pulse
+    CHECK(seq_parse("0:F1000,1001:F1000", &s) != nullptr);
+    CHECK(seq_parse("0:F100,150:F100", &s) != nullptr);        // 50 us off after 100 us on
+    CHECK(seq_parse("0:F100,200:F100", &s) == nullptr);        // 100 us off: ok
+    CHECK(seq_parse("0:F20,60:F20", &s) == nullptr);           // short pulses: SEQ_MIN_FLASH_GAP_US
+    CHECK(seq_parse("0:F20,59:F20", &s) != nullptr);
+}
+
+static void test_seq_shot_spacing_grows_with_the_flash_time() {
+    SeqSchedule s;
+    CHECK(seq_parse("0:E1,900:F100,1000:E2,1900:F100", &s) == nullptr);
+    CHECK(seq_min_spacing_us(s, 5000, 0.25f) == 5000);         // 200 us on: SHOT's 5 ms
+    char buf[512] = "";
+    for (int i = 0; i < 8; ++i) {                              // 8 x 1000 us on
+        char tok[32];
+        std::snprintf(tok, sizeof tok, "%s%d:F1000", i ? "," : "", i * 2000);
+        std::strcat(buf, tok);
+    }
+    CHECK(seq_parse(buf, &s) == nullptr);
+    CHECK(s.flash_us == 8000);
+    // duty over (schedule + spacing) <= 0.25: spacing >= 8000 / 0.25 - end
+    const uint32_t sp = seq_min_spacing_us(s, 5000, 0.25f);
+    CHECK((float)s.flash_us / (float)(s.end_us + sp) <= 0.25f + 1e-6f);
+    CHECK(sp > 5000);
+}
+
 int main() {
+    test_flashes_need_an_off_time_at_least_as_long_as_the_pulse_before();
+    test_seq_shot_spacing_grows_with_the_flash_time();
     test_default_offset_schedule();
     test_transitions_sorted_even_when_events_are_not_listed_in_time();
     test_refusals_leave_the_old_schedule();

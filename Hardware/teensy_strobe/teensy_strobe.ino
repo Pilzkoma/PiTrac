@@ -36,7 +36,8 @@
 //   SEQ,0:E1,900:F100,1000:E2,1900:F100
 // SEQ_RUN has TRIG_RUN's guards (armed, period >= TRIG_RUN_MIN_PERIOD_US,
 // flash duty <= MAX_RUN_DUTY, schedule + 200 us within the period, max_ms);
-// SEQ_SHOT has SHOT's spacing guard. Transitions are played on the cycle
+// SEQ_SHOT has SHOT's spacing guard, lengthened to keep the flash duty <= MAX_RUN_DUTY
+// (seq_min_spacing_us). Transitions are played on the cycle
 // counter; interrupts stay on (a few us of USB jitter, as for SHOT).
 //
 // TRIG_RUN (added 2026-11-12): SHOT repeated on a fixed period - both
@@ -614,7 +615,8 @@ void seqShot() {
     if (current_state == State::RUNNING) { sendErr("RUN active"); return; }
     if (!trig_armed) { sendErr("not armed"); return; }
     if (!seq_loaded) { sendErr("no SEQ loaded"); return; }
-    if (shot_fired && (micros() - last_shot_us) < SHOT_MIN_SPACING_US) {
+    if (shot_fired && (micros() - last_shot_us)
+                      < seq_min_spacing_us(seq, SHOT_MIN_SPACING_US, MAX_RUN_DUTY)) {
         sendErr("too soon after last SHOT"); return;
     }
     detachInterrupt(digitalPinToInterrupt(FIRE_PIN));

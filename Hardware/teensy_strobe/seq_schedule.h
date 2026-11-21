@@ -10,7 +10,10 @@
 //                pulled low SEQ_TRIG_LOW_US before it (the camera needs
 //                >= 2 us low). At most one edge per camera per schedule.
 //   F<pulse_us>  flash (LED gate high) from t for pulse_us,
-//                1..SEQ_MAX_PULSE_US; flashes may neither overlap nor touch.
+//                1..SEQ_MAX_PULSE_US; after a flash the LED stays off at least
+//                as long as that flash was on, and at least
+//                SEQ_MIN_FLASH_GAP_US (final review 2026-11-21: 1 us gaps
+//                made 16 x 1000 us flashes one ~16 ms pulse).
 //
 // Compiled into pin transitions sorted by time. All times are shifted by
 // SEQ_TRIG_LOW_US so that an edge at t = 0 has its low transition at 0:
@@ -28,6 +31,7 @@ constexpr int      SEQ_MAX_EVENTS   = 16;
 constexpr uint32_t SEQ_TRIG_LOW_US  = 10;
 constexpr uint32_t SEQ_MAX_PULSE_US = 1000;
 constexpr uint32_t SEQ_MAX_T_US     = 100000;
+constexpr uint32_t SEQ_MIN_FLASH_GAP_US = 40;
 
 constexpr uint8_t SEQ_LINE_CAM1 = 0;
 constexpr uint8_t SEQ_LINE_CAM2 = 1;
@@ -55,6 +59,7 @@ inline const char* seq_parse(const char* args, SeqSchedule* out) {
     bool have_prev = false;
     uint32_t prev_t = 0;
     uint32_t last_flash_end = 0;
+    uint32_t last_pulse = 0;
     bool any_flash = false;
 
     while (true) {
@@ -83,7 +88,13 @@ inline const char* seq_parse(const char* args, SeqSchedule* out) {
             const unsigned long pulse = strtoul(p + 1, &end, 10);
             if (pulse < 1 || pulse > SEQ_MAX_PULSE_US) return "flash 1..1000 us";
             if (any_flash && ts <= last_flash_end) return "flashes overlap";
+            if (any_flash) {
+                const uint32_t gap = last_pulse > SEQ_MIN_FLASH_GAP_US ? last_pulse
+                                                                       : SEQ_MIN_FLASH_GAP_US;
+                if (ts - last_flash_end < gap) return "flash off-time shorter than the flash before";
+            }
             any_flash = true;
+            last_pulse = (uint32_t)pulse;
             last_flash_end = ts + (uint32_t)pulse;
             s.tr[s.n++] = {ts, SEQ_LINE_LED, 1};
             s.tr[s.n++] = {last_flash_end, SEQ_LINE_LED, 0};
@@ -115,6 +126,16 @@ inline const char* seq_parse(const char* args, SeqSchedule* out) {
     s.end_us = s.tr[s.n - 1].t_us;
     *out = s;
     return nullptr;
+}
+
+// Spacing SEQ_SHOT must keep after the previous shot: SHOT's min_spacing_us,
+// or more, so that the flash time over (schedule + spacing) stays within
+// max_duty (SHOT itself cannot exceed ~17 %: 1000 us per 6 ms).
+inline uint32_t seq_min_spacing_us(const SeqSchedule& s, uint32_t min_spacing_us,
+                                   float max_duty) {
+    const float need = (float)s.flash_us / max_duty - (float)s.end_us;
+    if (need <= (float)min_spacing_us) return min_spacing_us;
+    return (uint32_t)need + 1;
 }
 
 #endif  // SEQ_SCHEDULE_H
