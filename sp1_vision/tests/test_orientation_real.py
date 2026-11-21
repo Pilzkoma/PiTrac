@@ -221,6 +221,37 @@ class RollingCheckTest(unittest.TestCase):
         marked = sorted({(c["t_a"], c["t_b"]) for c in comps if c["flagged"]})
         self.assertEqual(marked, [(recs[3]["t"], recs[4]["t"]), (recs[4]["t"], recs[5]["t"])])
 
+    def test_unknown_centre_quality_is_its_own_category(self):      # final review 5
+        # A centre with too few tracked neighbours gets no residual: it is
+        # neither flagged nor known to be good, and must not be counted with
+        # the unflagged ones.
+        short = self._records([0.8, 0.0, 0.05])[:3]
+        for r in short:
+            r["ball"].uv1, r["ball"].uv2 = (640.0, 600.0), (830.0, 600.0)
+        orientation_check.centre_quality(short, self.rig)
+        self.assertEqual([orientation_check.centre_status(r) for r in short],
+                         ["unknown"] * 3)
+        self.assertEqual([r["centre_flag"] for r in short], [None] * 3)
+
+        recs = self._records([0.8, 0.0, 0.05])
+        for r in recs:
+            r["ball"].uv1, r["ball"].uv2 = (640.0, 600.0), (830.0, 600.0)
+        orientation_check.centre_quality(recs, self.rig)
+        self.assertEqual({orientation_check.centre_status(r) for r in recs}, {"ok"})
+        for key in ("centre_resid_mm", "centre_along_mm", "centre_across_mm"):
+            recs[4][key] = None                      # as if too few neighbours
+        self.assertEqual(orientation_check.centre_status(recs[4]), "unknown")
+        recs[7]["centre_flag"] = "test"
+        comps = orientation_check.rolling_check(None, self.rig, None, records=recs)
+        ok, flagged, unknown = orientation_check.split_by_centre(comps)
+        self.assertEqual(len(ok) + len(flagged) + len(unknown), len(comps))
+        pairs = lambda cs: sorted({(c["t_a"], c["t_b"]) for c in cs})
+        self.assertEqual(pairs(unknown), [(recs[3]["t"], recs[4]["t"]),
+                                          (recs[4]["t"], recs[5]["t"])])
+        self.assertEqual(pairs(flagged), [(recs[6]["t"], recs[7]["t"]),
+                                          (recs[7]["t"], recs[8]["t"])])
+        self.assertTrue(all(c["centre"] == "unknown" and not c["flagged"] for c in unknown))
+
     def test_arrival_times_snap_to_the_trigger_period(self):
         ts = [16.0310, 16.0390, 16.0509, 16.0589, 16.0709, 16.0909]
         got = orientation_check.snap_times(ts)

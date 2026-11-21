@@ -403,6 +403,8 @@ def centre_quality(recs, rig):
     residual exceeds CENTRE_FLAG_MM or a circle touches the edge, else None.
     The flag does not stop a frame from being oriented; rolling_check marks
     comparisons that use a flagged frame, and the summary reports both.
+    A centre without a residual and not at the border is neither flagged
+    nor known to be good (centre_status "unknown").
     """
     w, h = rig.image_size
     tracked = [k for k, r in enumerate(recs) if r["ball"] is not None]
@@ -443,6 +445,22 @@ def centre_quality(recs, rig):
         r["centre_across_mm"] = across
         r["at_border"] = border
         r["centre_flag"] = "; ".join(why) or None
+
+
+def centre_status(r):
+    """"flagged" (centre_flag set), "unknown" (no residual: too few tracked
+    neighbours, or centre_quality not run) or "ok"."""
+    if r.get("centre_flag"):
+        return "flagged"
+    if r.get("centre_across_mm") is None:
+        return "unknown"
+    return "ok"
+
+
+def split_by_centre(comps):
+    """rolling_check's comparisons as (ok, flagged, unknown) by their
+    "centre" field."""
+    return tuple([c for c in comps if c["centre"] == k] for k in ("ok", "flagged", "unknown"))
 
 
 def _mono_record(rig, g1, g2, mmap, expected, recs, up):
@@ -516,6 +534,11 @@ def _worst_across(ra, rb):
     return None if any(x is None for x in xs) else max(xs)
 
 
+def _worse_status(ra, rb):
+    st = {centre_status(ra), centre_status(rb)}
+    return "flagged" if "flagged" in st else ("unknown" if "unknown" in st else "ok")
+
+
 def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
                   records=None):
     """Measured rotation between consecutive Orientations of one camera
@@ -527,7 +550,9 @@ def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
     (measured axis on the predicted axis' side), lean_up_deg / lean_v_deg
     (measured axis' elevation towards up / towards v), rate_ratio,
     flagged (either frame's centre_flag is set, see centre_quality),
-    across_mm (the larger across-ray centre residual of the two, or None).
+    centre ("flagged" if flagged, else "unknown" if either frame's centre
+    status is unknown, else "ok"), across_mm (the larger across-ray centre
+    residual of the two, or None).
     """
     recs = (orient_frames(frames, rig, mmap, period_s, up_cam) if records is None
             else records)
@@ -569,6 +594,7 @@ def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
                 "lean_up_deg": lean_up, "lean_v_deg": lean_v,
                 "rate_ratio": meas / pred,
                 "flagged": bool(recs[a].get("centre_flag") or recs[b].get("centre_flag")),
+                "centre": _worse_status(recs[a], recs[b]),
                 "across_mm": _worst_across(recs[a], recs[b])})
     out.sort(key=lambda c: (c["t_a"], c["cam"]))
     return out
@@ -709,7 +735,8 @@ def main(argv=None):
                 r["t"], t2, r["tg"] - recs[0]["tg"], z, res, _fmt(r["cam1"])[:29],
                 _fmt(r["cam2"])[:29],
                 "%.2f" % r["agree_deg"] if r["agree_deg"] is not None else "-",
-                r["centre_flag"] or ""))
+                r["centre_flag"] or ("unknown (too few neighbours)" if r["ball"] is not None
+                                     and centre_status(r) == "unknown" else "")))
         comps = rolling_check(frames, rig, mmap, records=recs)
         print("\nrolling comparison (consecutive Orientations, same camera)")
         print("cam   t_a      t_b      dt ms  v m/s  pred deg  meas deg  err %   axis deg"
@@ -720,7 +747,7 @@ def main(argv=None):
                       c["cam"], c["t_a"], c["t_b"], c["dt"] * 1000, c["speed"], c["pred_deg"],
                       c["meas_deg"], c["angle_err_pct"], c["axis_err_deg"], c["lean_up_deg"],
                       c["lean_v_deg"], "+" if c["sign_ok"] else "WRONG",
-                      "F" if c["flagged"] else "",
+                      {"ok": "", "flagged": "F", "unknown": "?"}[c["centre"]],
                       "%.2f" % c["across_mm"] if c["across_mm"] is not None else "-"))
         print("\nsummary")
         n = len(recs)
@@ -748,8 +775,12 @@ def main(argv=None):
                       sum(1 for r in recs if r["centre_flag"]), CENTRE_FLAG_MM,
                       sum(1 for x in acrosses if x > CENTRE_FLAG_MM),
                       sum(1 for r in recs if r["at_border"])))
+        unknown = [r for r in recs if r["ball"] is not None and centre_status(r) == "unknown"]
+        print("centre quality unknown (too few tracked neighbours, not counted as "
+              "unflagged): %d frame(s)%s" % (len(unknown), "".join(
+                  " %.4f" % r["t"] for r in unknown)))
         for label, keep in (("", lambda r: True),
-                            ("unflagged ", lambda r: not r["centre_flag"])):
+                            ("unflagged ", lambda r: centre_status(r) == "ok")):
             agrees = [r["agree_deg"] for r in recs if r["agree_deg"] is not None and keep(r)]
             if agrees:
                 print("both cameras oriented in %d %sframes: agree median %.2f deg, max %.2f "
@@ -778,12 +809,19 @@ def main(argv=None):
             print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
                   % (_median([abs(c["angle_err_pct"]) for c in half]),
                      _median([c["axis_err_deg"] for c in half])))
-            clean = [c for c in comps if not c["flagged"]]
+            clean, _, unknown_c = split_by_centre(comps)
             print("rolling, flagged centres left out: %d of %d comparisons, median |angle "
-                  "error| %.0f %%, median axis error %.1f deg, signs right %d of %d" % (
+                  "error| %.0f %%, median axis error %.1f deg, signs right %d of %d "
+                  "(%d with an unknown centre left out too)" % (
                       len(clean), len(comps), _median([abs(c["angle_err_pct"]) for c in clean]),
                       _median([c["axis_err_deg"] for c in clean]),
-                      sum(c["sign_ok"] for c in clean), len(clean)))
+                      sum(c["sign_ok"] for c in clean), len(clean), len(unknown_c)))
+            if unknown_c:
+                print("rolling, unknown centre only: %d comparisons, median |angle error| "
+                      "%.0f %%, median axis error %.1f deg, signs right %d of %d" % (
+                          len(unknown_c), _median([abs(c["angle_err_pct"]) for c in unknown_c]),
+                          _median([c["axis_err_deg"] for c in unknown_c]),
+                          sum(c["sign_ok"] for c in unknown_c), len(unknown_c)))
             chalf = clean[len(clean) // 2:]
             print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
                   % (_median([abs(c["angle_err_pct"]) for c in chalf]),
