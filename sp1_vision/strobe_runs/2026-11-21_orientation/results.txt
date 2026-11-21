@@ -6,14 +6,27 @@ README there; not in the repo). Tool: sp1_vision/orientation_check.py.
   python -m sp1_vision.orientation_check static CAM1.png CAM2.png
   python -m sp1_vision.orientation_check roll SHOTS/cam1 SHOTS/cam2 T_FROM T_TO --sheet OUT.jpg
 
-Files here: putt1/2/3.txt (full per-frame tables, Windows run), putt2/3_sheet.jpg
-(unwrapped caps, row cam1 over row cam2: green = matched blob, yellow =
+Files here: putt1/2/3.txt (full per-frame tables, Windows run, regenerated
+with the committed tool after the final-review fixes; putt 1 was run without
+--sheet, no sheet of it is kept), putt2/3_sheet.jpg (unwrapped caps, row cam1 over row cam2: green = matched blob, yellow =
 classified but unmatched, grey = clutter, green crosses = matched sites under
 the pose), whatif_area_band.py (sensitivity run, see the end).
 All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
 
+ACCEPTANCE 2 IS ONLY PARTLY DONE. The spec's acceptance 2 asks for hand
+turns by known amounts about different axes and for backspin-like and
+hook-like sign checks. None of these was recorded. What is here is the
+static cam1/cam2 agreement and three rolling putts, which test the sign
+(and size) of a turn about ONE roughly horizontal axis - the rolling axis,
+up x v - only. A turn about the vertical (hook/slice-like) or about the
+other horizontal axis (backspin-like, seen from these cameras) has not been
+checked against a known answer. Open: a hand-turn series on a fixture (known
+angles about at least three axes, both signs).
+
 1. Static pair (8 ms exposure, one 100 us flash, ball at rest, Z 441 mm)
-   cam1 Orientation, 5 marks, rms 1.14 deg; cam2 Orientation, 5 marks, 0.95 deg.
+   cam1 Orientation, 5 marks, rms 1.13 deg; cam2 Orientation, 5 marks, 0.96 deg
+   (Jetson 1.14 / 0.95; an earlier version of this file gave the Jetson
+   figures as Windows ones - the pre-fix code gives 1.13 / 0.96 on Windows).
    cam1 / cam2 agree within 2.60 deg (Jetson 2.59).    spec number: < 3 deg - PASS
    Each camera's pose carried into the other: 5 matches, nothing off-site.
 
@@ -45,16 +58,23 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
    both cameras oriented           4 frames      7 frames      4 frames
      agree median / max (deg)      1.96 / 3.96   1.55 / 3.50   0.91 / 1.07
      over 3 deg                    1             3             0
+     (each putt's first both-oriented frame is its track seed, which was
+     CHOSEN for agreeing within 3 deg: 2.61 / 1.51 / 0.87 deg. Unselected
+     frames: 4 of 12 over 3 deg.)
    rolling comparisons             15            21            13
      median |angle error|          5 %           14 %          12 %
-       late half                   5 %           4 %           6 %
+       later half *                5 %           4 %           6 %
      median axis error             14.6 deg      12.8 deg      6.9 deg
-       late half                   19.4 deg      13.5 deg      7.7 deg
+       later half *                19.4 deg      13.5 deg      7.7 deg
      signs right                   15 of 15      21 of 21      13 of 13
+   * "later half" (earlier "late half") is the second half of the list of
+     comparisons sorted by time, not the second half of the roll time; the
+     comparisons are denser where both cameras orient well, so it is not
+     the same as "the later part of the roll".
 
    Against the expectation in the plan (angle within 15 %, axis within 10 deg,
    every sign right in the late part):
-     angle  - met in all three putts (late halves 4-6 %).
+     angle  - met in all three putts (later halves of the lists 4-6 %).
      sign   - met: 49 of 49 frame pairs, early and late.
      axis   - met in putt 3 only; putts 1 and 2 have median axis errors of
               13-15 deg (late halves 13.5 and 19.4 deg).
@@ -97,7 +117,13 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
                 angle 48 %)
    Both-camera agreement, unflagged frames only: 1.54 / 0.79 / 0.97 deg
    median, max 2.61 / 3.36 / 1.07 deg (1 of 7 over 3 deg, against 4 of 15
-   with flagged frames).
+   with flagged frames). Two of the 7 are seed frames chosen for agreement
+   (2.61 in putt 1 - that putt's max - and 0.87 in putt 3); unselected
+   unflagged frames: 1 of 5 over 3 deg (3.36). Frames whose centre quality
+   is unknown (too few tracked neighbours for a residual) are now a
+   category of their own and not counted as unflagged: 1 frame, putt 1
+   9.0195 (monocular, no Orientation, in no comparison) - no figure above
+   changes.
    The end of putt 2 is explained: 16.3114, 16.3195, 16.3316 have across
    residuals 3.5, 5.8 and 2.5 mm (13, 22, 9 deg by the measured
    sensitivity) - the ball at cam2's edge, stereo going wrong - and those
@@ -157,17 +183,37 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
    None of these makes a wrong pose; they make refusals.
 
 4. Wrong poses
-   No wrong identification was found: every sign is right, and no
-   comparison is off by anything like a symmetry of the site set (72 / 120 /
-   180 deg). Lone poses (one camera oriented, the other refused) carried
-   into the other camera: 26 cases; in 4 a classified blob of the other
-   camera lies off every site (putt 1 8.8708, 8.9194, putt 2 16.3316, putt 3
-   44.8795). For 8.8708 the neighbouring rolling comparison is within 5 %
-   and 15 deg, so that pose is right and the off-site blob is clutter that
-   classified; 16.3316 is in the noisy end of putt 2 (see 2.).
+   No wrong identification was confirmed: every sign is right, and no
+   rolling comparison or both-camera frame is off by anything like a
+   symmetry of the site set (72 / 120 / 180 deg). That does not cover every
+   pose. Lone poses (one camera oriented, the other refused) carried into
+   the other camera: 26 cases; in 4 a classified blob of the other camera
+   lies off every site:
+     putt 1 8.8708 cam1 - confirmed: the neighbouring rolling comparison
+       (8.8708 -> 8.8788) is within 5 % and 15 deg, so the off-site blob is
+       clutter that classified;
+     putt 1 8.9194 cam1 - confirmed: rolling comparison 8.8995 -> 8.9194
+       -5 %, sign right (axis 19.6 deg, flagged centre 2.0 mm across);
+     putt 2 16.3316 cam1 - in the noisy end of putt 2 (see 2.), comparison
+       +37 % / 51 deg with a flagged centre: neither confirmed nor refuted;
+     putt 3 44.8795 cam2 - UNCONFIRMED: no other cam2 Orientation near it,
+       cam1 refused (misread guard). Nothing here shows it right or wrong.
+   Bound of the method (final review): "never a wrong pose" holds for up to
+   ONE misread blob per image. The misread guard (ball_orientation,
+   MISREAD_GUARD) refuses when re-reading one blob as another shape lets a
+   pose > 10 deg away fit as well. With TWO random shape misreads in one
+   image, 9 of 1200 synthetic views gave wrong poses (72 / 120 / 144 /
+   180 deg off); with a plausible real misread rate about 1 image in 2000.
+   It is a property of the map's code distance; a two-misread guard would
+   refuse ~76 % of clean views. So a lone single-camera pose is not to be
+   trusted for spin without corroboration - cam1/cam2 agreement within the
+   acceptance angle, or consistency across frames (spec, "Spin measurement
+   (parts 3-4)").
    Precision: 4 of 15 rolling frames with both cameras oriented disagree by
-   3.0-4.0 deg, above the static acceptance number; with flagged centres
-   left out 1 of 7 (3.36 deg). See "Centre quality" in 2.
+   3.0-4.0 deg, above the static acceptance number - 4 of the 12 that were
+   not chosen as track seeds (the 3 seeds were chosen for agreeing within
+   3 deg); with flagged centres left out 1 of 7, or 1 of 5 without the
+   seeds (3.36 deg). See "Centre quality" in 2.
 
 5. Open points of Task 4, checked here
    - Missing-ink check reads the raw dark mask: in no frame of the three
@@ -175,8 +221,8 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
      removes (orientation_check.missing_ink_audit, 0 of 0). It did not
      matter on these frames.
    - Dim lower limb (Review Focus 2): limb fixture cam2 44.9315 gives an
-     Orientation, 5 marks, rms 1.11 deg; no limb shading became a blob
-     within 60 deg. cam1 refuses the same instant (central bar bitten into a
+     Orientation, 5 marks, rms 1.11 deg (Windows and Jetson; pinned in
+     test_orientation_real); no limb shading became a blob within 60 deg. cam1 refuses the same instant (central bar bitten into a
      "dot" by the glint, left cross blurred to a "dot"); cam2's pose carried
      into cam1 puts all 4 of cam1's classified blobs on predicted sites
      (2 matching, 2 of the misread shapes).
@@ -218,3 +264,22 @@ Jetson, fix round 1 (centre flag), same frames, committed tool:
     putt 2  axis 12.9 -> 5.1 deg (6 of 21), angle 14 -> 3 %
     putt 3  axis  6.3 -> 5.4 deg (2 of 10), angle 13 -> 48 % (early skid)
   agreement, unflagged frames: max 2.63 / 3.38 / 1.11 deg (1 of 7 over 3).
+
+Final-review fixes (2026-11-21), same frames, committed tool:
+  - Marks cut by the frame are clutter now (mark_detect.REJECT_CUT_MARKS,
+    on). On these putts it changes nothing: in all three windows one blob
+    touched the frame cut (putt 2, 34.2 mm2 at 40 deg) and it was clutter
+    already. Synthetic edge poses (reviewer's experiment, ball centre within
+    35 px of the right edge): poses 1-5 deg off 2 -> 0 (150 poses) and,
+    dimmed, 6 -> 0 (150 poses); correct poses 17 -> 10 and 14 -> 3; no
+    wrong poses before or after; centred, dimmed and glint runs unchanged.
+  - The refit loop's last pose is verified before it is returned; no
+    figure here changes (the cap was never reached on these frames).
+  - Unknown centre quality is its own category (1 frame, putt 1 9.0195);
+    no figure changes.
+  Headline numbers old -> new, Windows: static 2.60 -> 2.60 deg; share cam1
+  43 / 49 / 42 % -> same, cam2 20 / 23 / 27 % -> same; both-camera max
+  3.96 / 3.50 / 1.07 -> same; median axis 14.6 / 12.8 / 6.9 deg -> same,
+  flagged centres left out 4.6 / 5.1 / 5.5 -> same; signs 49 of 49 -> same.
+  Jetson: identical to the Jetson figures above (static 2.59, axis
+  14.6 / 12.9 / 6.3, unflagged 4.7 / 5.1 / 5.4 deg, putt 3 10 comparisons).

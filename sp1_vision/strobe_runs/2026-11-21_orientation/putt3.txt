@@ -48,6 +48,7 @@ frame pairs 26, ball on the track in 25 (1 seed frame(s), 7 monocular)
 cam1: Orientation in 11 of 26 frames (42 %), 11 of 25 with the ball found (44 %)
 cam2: Orientation in 7 of 26 frames (27 %), 7 of 25 with the ball found (28 %)
 centre residual from the neighbours' line: along the ray median 5.9 mm (max 21.2), across median 1.29 mm (90th percentile 3.44, max 5.18); flagged frames 17 (across over 0.8 mm 17, circle at the edge 0)
+centre quality unknown (too few tracked neighbours, not counted as unflagged): 0 frame(s)
 both cameras oriented in 4 frames: agree median 0.91 deg, max 1.07 deg, over 3 deg 0
 both cameras oriented in 2 unflagged frames: agree median 0.97 deg, max 1.07 deg, over 3 deg 0
 a pose in one camera only: 8; carried into the other camera it puts a classified blob off every site in 1, a wrong shape on a site in 5
@@ -70,8 +71,8 @@ refusals by reason:
    cam2   1  best pose leaves a bar where a cross belongs
    cam2   1  no two of # classified marks fit a pair of neighbouring sites
    cam2   1  no ball
-rolling: 13 comparisons, median |angle error| 12 %, median axis error 6.9 deg, signs right 13 of 13 (late half: 7 of 7)
-         late half: median |angle error| 6 %, median axis error 7.7 deg
-rolling, flagged centres left out: 2 of 13 comparisons, median |angle error| 48 %, median axis error 5.5 deg, signs right 2 of 2
-         late half: median |angle error| 41 %, median axis error 5.1 deg
+rolling: 13 comparisons, median |angle error| 12 %, median axis error 6.9 deg, signs right 13 of 13 (later half of the comparisons: 7 of 7)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 6 %, median axis error 7.7 deg
+rolling, flagged centres left out: 2 of 13 comparisons, median |angle error| 48 %, median axis error 5.5 deg, signs right 2 of 2 (0 with an unknown centre left out too)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 41 %, median axis error 5.1 deg
 sheet: sp1_vision/strobe_runs/2026-11-21_orientation/putt3_sheet.jpg

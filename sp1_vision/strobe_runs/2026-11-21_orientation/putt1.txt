@@ -27,7 +27,7 @@
   8.9915   8.9912 +0.240  398.3m  -5.0   2.09  refused: best pose leaves a d refused: ball not found in th -      2.1 mm across the ray off its neighbours' line (~8 deg)
   8.9995   8.9992 +0.250    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
   9.0115   9.0112 +0.260    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
-  9.0195   9.0192 +0.270  396.7m     -      -  refused: best pose leaves a b refused: ball not found in th -      
+  9.0195   9.0192 +0.270  396.7m     -      -  refused: best pose leaves a b refused: ball not found in th -      unknown (too few neighbours)
   9.0316   9.0313 +0.280    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
   9.0392   9.0390 +0.290    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
 
@@ -54,6 +54,7 @@ frame pairs 30, ball on the track in 25 (1 seed frame(s), 9 monocular)
 cam1: Orientation in 13 of 30 frames (43 %), 13 of 25 with the ball found (52 %)
 cam2: Orientation in 6 of 30 frames (20 %), 6 of 25 with the ball found (24 %)
 centre residual from the neighbours' line: along the ray median 5.6 mm (max 20.2), across median 1.21 mm (90th percentile 2.58, max 5.97); flagged frames 15 (across over 0.8 mm 15, circle at the edge 0)
+centre quality unknown (too few tracked neighbours, not counted as unflagged): 1 frame(s) 9.0195
 both cameras oriented in 4 frames: agree median 1.96 deg, max 3.96 deg, over 3 deg 1
 both cameras oriented in 2 unflagged frames: agree median 1.54 deg, max 2.61 deg, over 3 deg 0
 a pose in one camera only: 8; carried into the other camera it puts a classified blob off every site in 2, a wrong shape on a site in 3
@@ -70,7 +71,7 @@ refusals by reason:
    cam2   5  no ball
    cam2   2  best pose leaves a dot where a cross belongs
    cam2   2  ambiguous: one misread mark from another pose
-rolling: 15 comparisons, median |angle error| 5 %, median axis error 14.6 deg, signs right 15 of 15 (late half: 8 of 8)
-         late half: median |angle error| 5 %, median axis error 19.4 deg
-rolling, flagged centres left out: 5 of 15 comparisons, median |angle error| 3 %, median axis error 4.6 deg, signs right 5 of 5
-         late half: median |angle error| 3 %, median axis error 4.6 deg
+rolling: 15 comparisons, median |angle error| 5 %, median axis error 14.6 deg, signs right 15 of 15 (later half of the comparisons: 8 of 8)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 5 %, median axis error 19.4 deg
+rolling, flagged centres left out: 5 of 15 comparisons, median |angle error| 3 %, median axis error 4.6 deg, signs right 5 of 5 (0 with an unknown centre left out too)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 3 %, median axis error 4.6 deg
