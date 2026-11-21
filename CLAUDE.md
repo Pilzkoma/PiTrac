@@ -337,14 +337,26 @@ Next SP1 items, in this order:
    open: the hand-turn series; fixture in `Hardware/turn_fixture/` for the
    owner's 15° disc, three axes). **Part 3 accepted 2026-11-21**: firmware
    v0.4 `SEQ` / `SEQ_SHOT` / `SEQ_RUN`, recording with
-   `strobe_shot --trigger --offset-us 1000`; cam1 exposes 0.80-1.40 ms, cam2
-   1.80-2.40 ms after cam1's edge, 0.40 ms apart, neither sees the other's
-   flash (`sp1_vision/strobe_runs/2026-11-21_offset_trigger/`). The
+   `strobe_shot --trigger --offset-us 1000`; a 50 us flash is seen by cam1 at
+   0.80-1.40 ms and by cam2 at 1.80-2.40 ms after cam1's edge (0.5 ms
+   exposure + pulse), windows 0.40 ms apart, neither sees the other's flash
+   (`sp1_vision/strobe_runs/2026-11-21_offset_trigger/`). The
    firmware's host test lives in `Hardware/teensy_strobe/host_test/`,
    because arduino-cli compiles every .cpp next to the .ino. arduino-cli is
    the one bundled with the Arduino IDE (`E:\Users\lasse\AppData\Local\
    Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe`,
    fqbn `teensy:avr:teensy40`).
+   **Ball centre by cone fit (2026-11-21, `sp1_vision/sphere_fit.py`)**: the
+   cone of rays tangent to the sphere instead of a circle in the distorted
+   image, which sits 0.4 px (10° off axis) to 1 px (20°) outward. Default in
+   `orientation_check` (`--centre circle` for the old tables). Three putts:
+   across-ray residual 1.21/0.66/1.29 -> 0.81/0.50/0.57 mm, rolling axis
+   error 14.6/12.8/6.9 -> 7.6/4.5/5.5°, signs 60/60
+   (`sp1_vision/strobe_runs/2026-11-21_centre/results.txt`). ball_pair's own
+   default, setup_check and strobe_event still use the circle. OpenCV 4.5.4's
+   `cv2.remap` rounds sample positions to 1/32 px - use an exact bilinear
+   sample where subpixel matters. Next limit for orientation: marks near the
+   limb misclassified (crosses read as dots).
 
 **Setup check (2026-11-18, branch `setup-check`):** dashboard page "Aufbau"
 (`/setup`): one flash, ball position against the target 50 cm in front of
