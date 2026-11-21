@@ -420,5 +420,62 @@ class BallOrientationTest(unittest.TestCase):
         self.assertLess(_rot_angle_deg(res.R, r), 1e-3)
         self.assertNotIn(len(blobs) - 1, [bi for bi, _ in res.matched])
 
+    # ------------------------------------------------------- refit loop exit
+    def _noisy_blobs(self, seed, noise_deg=2.5):
+        """Perfect blobs of the sites within 60 deg of the view axis under
+        random pose `seed`, each normal moved noise_deg (rms) at random."""
+        rs = np.random.RandomState(seed)
+        r = _random_rotations(1, seed)[0]
+        w = np.array([0.0, 0.0, -1.0])
+        vis = [s for s in range(20) if (r @ self.m.normals[s]) @ w > np.cos(np.radians(60.0))]
+        blobs = [_synthetic_blob(self.m, r, s) for s in vis]
+        for b in blobs:
+            ax = rs.normal(size=3)
+            ax -= (ax @ b.normal) * b.normal
+            ax /= np.linalg.norm(ax)
+            th = np.radians(rs.normal() * noise_deg)
+            b.normal = b.normal * np.cos(th) + ax * np.sin(th)
+            if b.direction is not None:
+                d = b.direction - (b.direction @ b.normal) * b.normal
+                b.direction = d / np.linalg.norm(d)
+        return r, blobs
+
+    def _assert_pose_reproduces_its_matches(self, res, blobs):
+        if not isinstance(res, Orientation):
+            return
+        ev = ball_orientation._Evidence(blobs, None)
+        matches, conflicts = ball_orientation._verify(res.R, ev, self.m)
+        self.assertEqual(conflicts, [])
+        self.assertEqual(sorted((ev.index[k], s) for k, s in matches), res.matched)
+
+    def test_refit_cap_never_returns_an_unverified_pose(self):     # final review 4
+        # When the refit loop stops at _MAX_REFITS (or on a cycle) the match
+        # set has not settled; the pose fitted last must be verified before
+        # it is returned. With the cap at 0 every hypothesis takes that exit:
+        # on these noisy views the returned pose used to match a different
+        # set than the one it reported (seed 235 one blob more, 303 one less).
+        for seed in (235, 303, 319, 351):
+            with self.subTest(seed=seed):
+                _, blobs = self._noisy_blobs(seed)
+                with mock.patch.object(ball_orientation, "_MAX_REFITS", 0):
+                    res = ball_orientation.identify(blobs, self.m)
+                self._assert_pose_reproduces_its_matches(res, blobs)
+                # the default cap: same invariant
+                self._assert_pose_reproduces_its_matches(
+                    ball_orientation.identify(blobs, self.m), blobs)
+
+    def test_final_fit_refuses_a_match_set_its_pose_does_not_reproduce(self):
+        r = self._rich_pose(40.0)
+        sites = [s for s in range(20) if (r @ self.m.normals[s])[2] < -0.6]
+        blobs = [_synthetic_blob(self.m, r, s) for s in sites]
+        ev = ball_orientation._Evidence(blobs, None)
+        full = [(k, s) for k, s in enumerate(sites)]
+        R, rms = ball_orientation._final_fit(full, ev, self.m)
+        self.assertLess(_rot_angle_deg(R, r), 1e-3)
+        self.assertLess(rms, 1e-3)
+        # a subset: its pose matches every blob, so the subset is not its match set
+        self.assertIsNone(ball_orientation._final_fit(full[:-1], ev, self.m))
+
+
 if __name__ == "__main__":
     unittest.main()

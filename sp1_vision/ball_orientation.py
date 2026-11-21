@@ -19,7 +19,9 @@ is far worse than a refusal: every step below can only discard.
    Blobs with shape None (clutter, marks cut by the frame edge) are never
    matched and never evidence against a pose, but they do count as ink.
 3. Refit with kabsch on all matches and verify again until the match set is
-   stable.
+   stable. The pose returned is verified once more: a hypothesis whose
+   fitted pose does not reproduce its own match set (the loop stopped at
+   _MAX_REFITS or on a cycle) is discarded.
 4. Best = most matches, then lowest rms. Refuse with fewer than MIN_MATCHED
    matches, rms above MAX_RMS_DEG, or another surviving pose with the same
    match count more than DISTINCT_DEG away.
@@ -225,6 +227,18 @@ def _fit(matches, ev, mmap):
     return R, float(math.sqrt(float(np.mean(angles ** 2))))
 
 
+def _final_fit(matches, ev, mmap):
+    """(R, rms) of the fit on matches if that R, verified, has no conflict
+    and matches exactly the fitted set; else None. The refit loop can stop
+    at _MAX_REFITS or on a cycle with the match set still changing, and the
+    pose returned must be the one that was checked."""
+    R, rms = _fit(matches, ev, mmap)
+    again, conflicts = _verify(R, ev, mmap)
+    if conflicts or sorted(again) != sorted(matches):
+        return None
+    return R, rms
+
+
 def _hypotheses(ev, mmap):
     out = []
     n = len(ev.index)
@@ -348,6 +362,7 @@ def identify(blobs, mmap, unwrapped=None):
 
     survivors = []                  # (n_matches, rms, R, matches)
     discarded = None                # (n_matches, -n_conflicts, reason) of the best discarded
+    unsettled = 0                   # hypotheses whose fitted pose changes its own match set
     for R in hyps:
         matches, conflicts = _verify(R, ev, mmap)
         seen = []
@@ -365,12 +380,19 @@ def identify(blobs, mmap, unwrapped=None):
             continue
         if len(matches) < 2:
             continue
-        R, rms = _fit(matches, ev, mmap)
+        final = _final_fit(matches, ev, mmap)
+        if final is None:
+            unsettled += 1
+            continue
+        R, rms = final
         survivors.append((len(matches), rms, R, matches))
 
     if not survivors:
         if discarded is not None:
             return Refusal("best pose leaves " + discarded[2])
+        if unsettled:
+            return Refusal("no pose settles on its own matches (%d of %d classified marks)"
+                           % (unsettled, n_cls))
         return Refusal("no pose fits more than one of %d classified marks" % n_cls)
 
     survivors.sort(key=lambda t: (-t[0], t[1]))
