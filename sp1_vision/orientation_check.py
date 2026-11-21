@@ -801,13 +801,15 @@ def main(argv=None):
         if comps:
             half = comps[len(comps) // 2:]
             print("rolling: %d comparisons, median |angle error| %.0f %%, median axis error "
-                  "%.1f deg, signs right %d of %d (late half: %d of %d)" % (
+                  "%.1f deg, signs right %d of %d (later half of the comparisons: "
+                  "%d of %d)" % (
                       len(comps), _median([abs(c["angle_err_pct"]) for c in comps]),
                       _median([c["axis_err_deg"] for c in comps]),
                       sum(c["sign_ok"] for c in comps), len(comps),
                       sum(c["sign_ok"] for c in half), len(half)))
-            print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
-                  % (_median([abs(c["angle_err_pct"]) for c in half]),
+            print("         later half of the comparisons (the list split in two, not "
+                  "half the roll time): median |angle error| %.0f %%, median axis error "
+                  "%.1f deg" % (_median([abs(c["angle_err_pct"]) for c in half]),
                      _median([c["axis_err_deg"] for c in half])))
             clean, _, unknown_c = split_by_centre(comps)
             print("rolling, flagged centres left out: %d of %d comparisons, median |angle "
@@ -823,8 +825,9 @@ def main(argv=None):
                           _median([c["axis_err_deg"] for c in unknown_c]),
                           sum(c["sign_ok"] for c in unknown_c), len(unknown_c)))
             chalf = clean[len(clean) // 2:]
-            print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
-                  % (_median([abs(c["angle_err_pct"]) for c in chalf]),
+            print("         later half of the comparisons (the list split in two, not "
+                  "half the roll time): median |angle error| %.0f %%, median axis error "
+                  "%.1f deg" % (_median([abs(c["angle_err_pct"]) for c in chalf]),
                      _median([c["axis_err_deg"] for c in chalf])))
         if sheet:
             _sheet(recs, mmap, sheet)
