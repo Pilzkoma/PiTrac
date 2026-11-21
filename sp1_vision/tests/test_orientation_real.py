@@ -17,6 +17,7 @@ tracker does).
 """
 import os
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -47,10 +48,58 @@ class OrientationRealTest(unittest.TestCase):
                                              self.mmap, near_m=near_m)
 
     def test_static_pair_both_cameras_agree(self):
-        r = self._pair("static_cam1.png", "static_cam2.png")
+        # the acceptance number of 2026-11-21 (2.60 deg), measured with the
+        # circle centre; the cone centre's result is pinned below
+        with mock.patch.object(orientation_check, "CENTRE", "circle"):
+            r = self._pair("static_cam1.png", "static_cam2.png")
         self.assertIsInstance(r["cam1"], ball_orientation.Orientation, r["cam1"])
         self.assertIsInstance(r["cam2"], ball_orientation.Orientation, r["cam2"])
         self.assertLess(r["agree_deg"], 3.0)                 # spec acceptance: cam1/cam2 agree
+
+    def test_static_pair_with_the_cone_centre(self):
+        # cone centre (the default since 2026-11-21_centre): cam2 orients;
+        # cam1's cross at ~57 deg from the view centre - already borderline,
+        # results "Centre quality" 3a/3b - reads as a dot after the ~1 px
+        # centre shift and cam1 refuses. A refusal is allowed, a wrong pose not.
+        with mock.patch.object(orientation_check, "CENTRE", "cone"):
+            r = self._pair("static_cam1.png", "static_cam2.png")
+        self.assertIsInstance(r["cam2"], ball_orientation.Orientation, r["cam2"])
+        self._no_wrong_pose(r, "cam1", "static, cone")
+
+    def test_cone_refiner_picks_each_cameras_intrinsics(self):
+        f1, f2 = np.zeros((4, 4, 3), np.uint8), np.zeros((4, 4, 3), np.uint8)
+        seen = []
+        with mock.patch.object(orientation_check, "CENTRE", "cone"),                 mock.patch.object(orientation_check.sphere_fit, "refine_ball_cone",
+                                  lambda fr, u, v, r, K, d: seen.append((fr is f1, K is self.rig.k1))):
+            refine = orientation_check._pair_refiner(self.rig, f1, f2)
+            refine(f1, 0, 0, 1)
+            refine(f2, 0, 0, 1)
+        self.assertEqual(seen, [(True, True), (False, False)])
+
+    def test_cone_centre_is_adopted_on_a_real_rolling_frame(self):
+        # final review fix 2026-11-21: a 0.3 px convergence guard refused the
+        # cone on real balls (the axis moves up to ~0.9 px in the last pass)
+        # and the track fell back to raw Hough - putt 1 lost every frame.
+        # Adopted cone: radius within 3 % of the ball's at its range.
+        with mock.patch.object(orientation_check, "CENTRE", "cone"):
+            r = self._pair("limb_cam1_t044.9317.jpg", "limb_cam2_t044.9315.jpg")
+        b = r["ball"]
+        self.assertIsNotNone(b, r["reason"])
+        xyz = np.asarray(b.xyz_m)
+        exp1 = ball_pair.apparent_radius_px(self.rig.k1[0, 0], float(np.linalg.norm(xyz)))
+        exp2 = ball_pair.apparent_radius_px(
+            self.rig.k2[0, 0], float(np.linalg.norm(self.rig.r @ xyz + self.rig.t_m)))
+        self.assertAlmostEqual(b.radius1_px / exp1, 1.0, delta=0.03)
+        self.assertAlmostEqual(b.radius2_px / exp2, 1.0, delta=0.03)
+
+    def test_cone_refiner_refuses_a_frame_it_was_not_built_for(self):
+        # ball_pair must hand refine the very frame objects find_ball built;
+        # a copy would otherwise silently get camera 2's intrinsics
+        f1, f2 = np.zeros((4, 4, 3), np.uint8), np.zeros((4, 4, 3), np.uint8)
+        with mock.patch.object(orientation_check, "CENTRE", "cone"):
+            refine = orientation_check._pair_refiner(self.rig, f1, f2)
+            with self.assertRaises(ValueError):
+                refine(f1.copy(), 0, 0, 1)
 
     def _no_wrong_pose(self, r, cam, args):
         """cam is a Refusal, or an Orientation that agrees with the other

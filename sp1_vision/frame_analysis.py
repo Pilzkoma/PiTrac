@@ -341,7 +341,7 @@ def _within_seed_guards(u, v, r, fit):
     return centre_u, centre_v, radius
 
 
-def _outermost_edge_per_ray(blurred, u, v, radius):
+def _outermost_edge_per_ray(blurred, u, v, radius, sample=None):
     """The outermost outline edge along each ray from (u, v), or None.
 
     Returns (xs, ys), at most one point per ray. The same "outermost edge
@@ -367,8 +367,14 @@ def _outermost_edge_per_ray(blurred, u, v, radius):
     angles = np.linspace(-np.pi, np.pi, REFINE_ANGULAR_BINS, endpoint=False)
     map_x = (u + np.outer(np.cos(angles), radii)).astype(np.float32)
     map_y = (v + np.outer(np.sin(angles), radii)).astype(np.float32)
-    profiles = cv2.remap(blurred, map_x, map_y, cv2.INTER_LINEAR,
-                         borderMode=cv2.BORDER_REPLICATE)
+    if sample is None:
+        profiles = cv2.remap(blurred, map_x, map_y, cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_REPLICATE)
+    else:
+        # sphere_fit passes an exact bilinear sampler: cv2.remap rounds the
+        # sample positions to 1/32 px (OpenCV 4.5.4), which cost the cone fit
+        # 0.13 px on the Jetson against 0.04 px on Windows (2026-11-21).
+        profiles = sample(blurred, map_x, map_y)
     strength = np.abs(np.gradient(profiles, step, axis=1))
     # Samples off the ROI carry replicated border pixels, not image; a
     # clipped ball simply has fewer rays.

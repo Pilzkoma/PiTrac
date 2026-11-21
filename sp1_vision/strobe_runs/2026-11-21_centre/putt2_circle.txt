@@ -1,0 +1,98 @@
+39 frame pairs 16.02-16.42 s
+   t cam1   t cam2  grid    ball Z  along across  cam1                          cam2                          agree  centre flag
+ 16.0310  16.0308 +0.000  422.7  +12.2   0.45  ORIENT 4 marks 1.82 deg       refused: ambiguous: one misre -      
+ 16.0390  16.0388 +0.010  411.8   -7.8   0.39  refused: ambiguous: one misre refused: best pose leaves a b -      
+ 16.0509  16.0507 +0.020  415.5   -0.4   1.16  ORIENT 5 marks 0.82 deg       refused: best pose leaves a b -      1.2 mm across the ray off its neighbours' line (~4 deg)
+ 16.0589  16.0587 +0.030  417.9   +3.3   1.16  refused: best pose leaves a d refused: best pose leaves a b -      1.2 mm across the ray off its neighbours' line (~4 deg)
+ 16.0709  16.0708 +0.040  409.3   -5.3   0.20  refused: best pose leaves a d refused: best pose leaves a b -      
+ 16.0788  16.0786 +0.050  415.5   +3.8   1.14  refused: best pose leaves a d refused: only 2 classified ma -      1.1 mm across the ray off its neighbours' line (~4 deg)
+ 16.0908  16.0906 +0.060  411.8   +0.3   0.36  refused: only 2 classified ma refused: only 2 classified ma -      
+ 16.0989  16.0986 +0.070  412.1   +1.2   0.51  refused: no two of 3 classifi ORIENT 5 marks 1.61 deg       -      
+ 16.1109  16.1106 +0.080  408.8s  -1.3   1.40  ORIENT 4 marks 1.58 deg       ORIENT 6 marks 1.43 deg       1.51   1.4 mm across the ray off its neighbours' line (~5 deg)
+ 16.1189  16.1187 +0.090  405.7   -3.1   0.58  ORIENT 5 marks 1.38 deg       ORIENT 4 marks 0.71 deg       3.36   
+ 16.1309  16.1306 +0.100  409.2   +3.0   1.13  ORIENT 4 marks 0.96 deg       ORIENT 5 marks 1.39 deg       1.55   1.1 mm across the ray off its neighbours' line (~4 deg)
+ 16.1389  16.1395 +0.110  405.3   +1.1   0.61  ORIENT 5 marks 1.15 deg       ORIENT 5 marks 1.35 deg       0.79   
+ 16.1509  16.1515 +0.120  405.2   +2.4   0.60  ORIENT 5 marks 1.40 deg       ORIENT 5 marks 1.60 deg       0.30   
+ 16.1589  16.1595 +0.130  401.4   -1.6   0.23  ORIENT 4 marks 0.90 deg       refused: best pose leaves a d -      
+ 16.1709  16.1715 +0.140  395.7   -7.6   0.39  ORIENT 4 marks 0.87 deg       refused: ambiguous: one misre -      
+ 16.1789  16.1790 +0.150  401.2   +0.9   0.48  refused: ambiguous: one misre refused: ambiguous: one misre -      
+ 16.1913  16.1906 +0.160  402.4   +4.4   0.32  refused: ambiguous: one misre ORIENT 5 marks 1.80 deg       -      
+ 16.1995  16.1991 +0.170  400.1   +2.6   0.48  ORIENT 5 marks 1.71 deg       refused: ambiguous: one misre -      
+ 16.2115  16.2112 +0.180  399.7   +3.6   0.40  ORIENT 5 marks 1.83 deg       refused: ambiguous: one misre -      
+ 16.2195  16.2193 +0.190  392.6   -6.1   1.15  refused: ambiguous: one misre refused: only 2 classified ma -      1.2 mm across the ray off its neighbours' line (~4 deg)
+ 16.2315  16.2312 +0.200  394.8   -2.3   0.40  refused: ambiguous: one misre refused: best pose leaves a b -      
+ 16.2395  16.2393 +0.210  393.3   -1.9   0.35  refused: best pose leaves a b refused: best pose leaves a b -      
+ 16.2516  16.2513 +0.220  395.7m  +2.1   0.21  refused: no two of 3 classifi refused: ball not found in th -      
+ 16.2595  16.2593 +0.230  394.8m  +2.2   0.44  ORIENT 5 marks 2.01 deg       refused: ball not found in th -      
+ 16.2716  16.2713 +0.240  397.0   +7.6   1.59  ORIENT 5 marks 2.22 deg       ORIENT 4 marks 1.25 deg       3.05   1.6 mm across the ray off its neighbours' line (~6 deg)
+ 16.2795  16.2793 +0.250  387.8m  -3.9   1.43  ORIENT 5 marks 1.55 deg       refused: ball not found in th -      1.4 mm across the ray off its neighbours' line (~5 deg)
+ 16.2913  16.2910 +0.260  388.7m  -3.2   0.97  ORIENT 5 marks 1.16 deg       refused: ball not found in th -      1.0 mm across the ray off its neighbours' line (~4 deg)
+ 16.2993  16.2990 +0.270  390.0m  +0.0   0.29  ORIENT 5 marks 1.76 deg       refused: ball not found in th -      
+ 16.3114  16.3112 +0.280  385.7   -6.4   3.46  ORIENT 5 marks 1.54 deg       ORIENT 4 marks 0.89 deg       3.50   3.5 mm across the ray off its neighbours' line (~13 deg)
+ 16.3195  16.3192 +0.290  385.5   -5.0   5.76  ORIENT 4 marks 2.11 deg       refused: best pose leaves a b -      5.8 mm across the ray off its neighbours' line (~22 deg)
+ 16.3316  16.3313 +0.300  402.8  +17.3   2.51  ORIENT 4 marks 2.87 deg       refused: best pose matches on -      2.5 mm across the ray off its neighbours' line (~9 deg)
+ 16.3396  16.3393 +0.310  394.6m  +2.3   4.92  refused: best pose matches on refused: ball not found in th -      4.9 mm across the ray off its neighbours' line (~18 deg)
+ 16.3515  16.3513 +0.320  382.9  -13.2   1.21  refused: best pose matches on refused: only 1 classified ma -      1.2 mm across the ray off its neighbours' line (~5 deg); circle at the image edge in cam2
+ 16.3595  16.3593 +0.330  397.1   +5.4   0.71  refused: best pose matches on refused: only 2 classified ma -      circle at the image edge in cam2
+ 16.3715  16.3707 +0.340  396.6m  +5.7   3.06  refused: ambiguous: one misre refused: ball not found in th -      3.1 mm across the ray off its neighbours' line (~11 deg)
+ 16.3796  16.3793 +0.350  377.1m -20.2   4.78  refused: best pose leaves a b refused: ball not found in th -      4.8 mm across the ray off its neighbours' line (~18 deg)
+ 16.3913  16.3911 +0.360  404.2m +20.5   4.22  refused: only 2 classified ma refused: ball not found in th -      4.2 mm across the ray off its neighbours' line (~16 deg)
+ 16.3993  16.3986 +0.370    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
+ 16.4109  16.4114 +0.380  385.6m -20.7   9.00  refused: only 2 classified ma refused: ball not found in th -      9.0 mm across the ray off its neighbours' line (~34 deg)
+
+rolling comparison (consecutive Orientations, same camera)
+cam   t_a      t_b      dt ms  v m/s  pred deg  meas deg  err %   axis deg  (lean up / to v)  sign  flagged  across mm
+cam1  16.0310  16.0509    20   0.86      46.4       9.9    -79      37.2  (-34.3 / -12.7)    +     F        1.16
+cam2  16.0989  16.1109    10   0.80      21.6      18.7    -14       6.0  ( -5.8 /  -1.6)    +     F        1.40
+cam1  16.1109  16.1189    10   0.80      21.6      16.8    -22       6.5  ( +1.9 /  +6.3)    +     F        1.40
+cam2  16.1109  16.1189    10   0.80      21.6      16.3    -25      14.0  ( -5.1 / +13.0)    +     F        1.40
+cam1  16.1189  16.1309    10   0.80      21.4      17.4    -19      11.0  ( -3.8 / +10.3)    +     F        1.13
+cam2  16.1189  16.1309    10   0.80      21.4      17.8    -17      13.8  (+11.5 /  +7.6)    +     F        1.13
+cam1  16.1309  16.1389    10   0.80      21.5      18.4    -15      14.6  ( +4.0 / -14.0)    +     F        1.13
+cam2  16.1309  16.1389    10   0.80      21.5      18.3    -15      12.8  ( -3.1 / -12.4)    +     F        1.13
+cam1  16.1389  16.1509    10   0.80      21.5      20.4     -5       5.8  ( -4.4 /  -3.8)    +              0.61
+cam2  16.1389  16.1509    10   0.80      21.5      20.7     -3       3.9  ( -2.2 /  -3.2)    +              0.61
+cam1  16.1509  16.1589    10   0.80      21.5      21.4     -1       4.9  ( -4.5 /  +1.7)    +              0.60
+cam1  16.1589  16.1709    10   0.79      21.3      21.3     -0       1.5  ( +0.2 /  +1.5)    +              0.39
+cam1  16.1709  16.1995    30   0.79      63.3      61.7     -2       5.3  ( -2.6 /  -4.6)    +              0.48
+cam1  16.1995  16.2115    10   0.78      21.0      20.1     -4      10.3  ( -9.9 /  +3.1)    +              0.48
+cam1  16.2595  16.2716    10   0.76      20.4      19.8     -3      14.5  ( +1.4 / +14.4)    +     F        1.59
+cam1  16.2716  16.2795    10   0.78      20.9      23.9    +14      13.5  ( +3.2 / -13.1)    +     F        1.59
+cam1  16.2795  16.2913    10   0.76      20.3      19.5     -4      17.1  ( -8.5 / +14.8)    +     F        1.43
+cam1  16.2913  16.2993    10   0.74      19.7      20.0     +1       5.8  ( -2.6 /  +5.2)    +     F        0.97
+cam1  16.2993  16.3114    10   0.74      19.8      23.8    +20      34.9  (+21.7 / +25.9)    +     F        3.46
+cam1  16.3114  16.3195    10   0.75      20.2      29.4    +45      47.9  (-37.5 / -25.1)    +     F        5.76
+cam1  16.3195  16.3316    10   0.76      20.3      27.8    +37      50.8  (+20.3 / +43.8)    +     F        5.76
+
+summary
+frame pairs 39, ball on the track in 38 (1 seed frame(s), 10 monocular)
+cam1: Orientation in 19 of 39 frames (49 %), 19 of 38 with the ball found (50 %)
+cam2: Orientation in 9 of 39 frames (23 %), 9 of 38 with the ball found (24 %)
+centre residual from the neighbours' line: along the ray median 3.4 mm (max 20.7), across median 0.66 mm (90th percentile 4.38, max 9.00); flagged frames 19 (across over 0.8 mm 18, circle at the edge 2)
+centre quality unknown (too few tracked neighbours, not counted as unflagged): 0 frame(s)
+both cameras oriented in 7 frames: agree median 1.55 deg, max 3.50 deg, over 3 deg 3
+both cameras oriented in 3 unflagged frames: agree median 0.79 deg, max 3.36 deg, over 3 deg 1
+a pose in one camera only: 10; carried into the other camera it puts a classified blob off every site in 1, a wrong shape on a site in 3
+missing-ink check passed only on unopened dark pixels: 0 site(s) in 0 frame(s)
+refusals by reason:
+   cam1   6  ambiguous: one misread mark from another pose
+   cam1   3  best pose leaves a dot where a cross belongs
+   cam1   3  only # classified marks
+   cam1   3  best pose matches only # of # classified marks
+   cam1   2  no two of # classified marks fit a pair of neighbouring sites
+   cam1   1  best pose leaves a bar where a cross belongs
+   cam1   1  best pose leaves a bar turned # deg against its site
+   cam1   1  no ball
+   cam2  10  ball not found in this camera
+   cam2   5  ambiguous: one misread mark from another pose
+   cam2   5  only # classified marks
+   cam2   4  best pose leaves a bar where a cross belongs
+   cam2   2  best pose leaves a bar turned # deg against its site
+   cam2   1  best pose leaves a bar where a dot belongs
+   cam2   1  best pose leaves a dot where a cross belongs
+   cam2   1  best pose matches only # of # classified marks
+   cam2   1  no ball
+rolling: 21 comparisons, median |angle error| 14 %, median axis error 12.8 deg, signs right 21 of 21 (later half of the comparisons: 11 of 11)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 4 %, median axis error 13.5 deg
+rolling, flagged centres left out: 6 of 21 comparisons, median |angle error| 3 %, median axis error 5.1 deg, signs right 6 of 6 (0 with an unknown centre left out too)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 2 %, median axis error 5.3 deg

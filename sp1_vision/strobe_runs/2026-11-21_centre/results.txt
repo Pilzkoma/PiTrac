@@ -1,0 +1,95 @@
+2026-11-21 ball centre by cone fit - results
+Spec: docs/superpowers/specs/2026-11-21-ball-centre-cone-fit-design.md
+Code: sp1_vision/sphere_fit.py; orientation_check --centre circle|cone (default cone).
+
+1. Synthetic (diagnosis.txt, centre_diagnosis.py)
+   Oversampled renders with cam1's K and distortion. The circle fits
+   (refine_ball, refine_ball_by_contrast) put the centre radially OUTWARD:
+   +0.4 px at 10 deg off axis, +0.8..1.0 px at 20 deg, ~1.5 px at 30 deg.
+   That error comes from the projection, not from pixel noise: the outline
+   of an off-axis sphere is an ellipse whose centre lies outward, and the
+   lens distortion adds to it. JPEG q85 and noise sigma 2 hardly change it.
+   The cone fit (final code): median 0.02-0.10 px everywhere, no radial
+   trend; 90th percentile <= 0.15 px up to 20 deg, 0.28-0.46 px at 30 deg.
+   At 1.7 deg per px that removes ~1.5 deg of orientation at 20 deg off axis.
+
+2. Two corrections the real frames forced (both pinned in test_sphere_fit)
+   - The outline rule. frame_analysis._outermost_edge_per_ray takes the
+     outermost edge that reaches 3/4 of the strongest edge on its ray. On the
+     real ball the lower limb is dim (the IR comes from above), so a mark's
+     edge out-crisps the limb. The first version took mark edges 13-15 px
+     inside and put the static pair's centre 3.8 px off. Now the search runs
+     in a narrow band round the circle fit, takes only edges that get darker
+     outward, and sets its threshold from the limb over all rays. Later
+     passes search along the outline the cone predicts: off axis that is an
+     ellipse, not a circle round the projected axis.
+   - cv2.remap rounds sample positions to 1/32 px on OpenCV 4.5.4. That gave
+     0.13 px on the Jetson against 0.04 px on Windows with identical images.
+     sphere_fit now samples with its own exact bilinear interpolation.
+   The final review (same day) added two refusals:
+   - Coverage: when the outline points leave a gap of half the circle or
+     more, the fit is refused. A ball centred at an image corner, with a
+     quarter of its outline visible, had been fitted 2-6 px wrong. Half-cut
+     balls still fit (0.1-0.25 px).
+   - Divergence: when the axis moves more than 1.5 px in the last pass, the
+     fit is refused. A first limit of 0.3 px refused good real frames, and
+     putt 1 then lost every frame: real balls settle by 0.1-0.9 px as the
+     band narrows. test_cone_centre_is_adopted_on_a_real_rolling_frame pins
+     this. With 1.5 px the putt tables below are unchanged.
+
+3. Real putts (putt1/2/3_circle.txt, putt1/2/3_cone.txt; the 2026-11-18 line
+   ball, same windows as 2026-11-21_orientation), run on Windows.
+                                       putt 1         putt 2         putt 3
+                                    circle  cone   circle  cone   circle  cone
+   ball on the track                  25    25       38    36       25    24
+     of these monocular                9     7       10     4        7     5
+   along-ray residual median (mm)    5.6   4.5      3.4   0.9      5.9   3.1
+   across-ray residual median (mm)   1.21  0.81     0.66  0.50     1.29  0.57
+   flagged centres (across > 0.8)     15    13       19    13       17     8
+   Orientation share cam1 (%)         43    50       49    56       42    35
+   Orientation share cam2 (%)         20    27       23    38       27    31
+   both cameras oriented               4     6        7    13        4     2
+     agree median (deg)              1.96  1.45     1.55  0.99     0.91  3.55
+     agree max (deg)                 3.96  3.96     3.50  3.50     1.07  5.40
+   rolling comparisons                15    19       21    30       13    11
+     median axis error (deg)         14.6   7.6     12.8   4.5      6.9   5.5
+     median angle error (%)            5     6       14     4       12    10
+     signs right                   15/15 19/19    21/21 30/30    13/13 11/11
+
+   The three frames the cone fit no longer tracks (putt 2: 16.3913, 16.4109;
+   putt 3: 45.1117) are monocular end frames. Their circle centres were
+   4.2 / 9.0 / 5.2 mm off across the ray and ~20 mm along it, so they were
+   wrong anyway; no usable frame was lost. More frames are now found in
+   stereo (monocular 26 -> 16). The pair gates were tuned on circle radii,
+   and the cone's correct radius passes them as well.
+
+   Against the plan's yardstick:
+   - across-ray residual better in all three putts
+     (median 1.21 / 0.66 / 1.29 -> 0.81 / 0.50 / 0.57 mm);
+   - axis error better in all three (14.6 / 12.8 / 6.9 -> 7.6 / 4.5 / 5.5 deg);
+   - every sign right (60 of 60), no usable frame lost.
+   The depth scatter along the ray falls as well (3.4-5.9 -> 0.9-4.5 mm), so
+   the cone centre agrees better between the two cameras.
+
+   Not better everywhere:
+   - putt 3 has fewer cam1 Orientations (11 -> 9), and its two both-camera
+     frames agree worse (3.55 / 5.40 deg, n = 2);
+   - on the static pair cam1 now refuses: its cross at ~57 deg was already
+     borderline and reads as a dot after the ~1 px centre shift. cam2 still
+     orients, and no wrong pose is returned.
+
+4. Decision
+   The cone centre is orientation_check's default (CENTRE = "cone");
+   --centre circle reproduces the 2026-11-21_orientation tables. The static
+   acceptance number (2.60 deg) stays recorded with the circle centre:
+   test_static_pair_both_cameras_agree runs with CENTRE = "circle".
+
+   Still open: in a typical frame the centre is now good to ~0.5 mm across
+   the ray, but 8-13 frames per putt are still flagged (> 0.8 mm). The
+   commonest refusal, and so the next limit, is now the classification of
+   marks near the limb (crosses read as dots).
+
+   Not changed: ball_pair's own default refiner, setup_check and
+   strobe_event still use the circle centre (spec non-goal). The setup
+   check's one-pixel depth steps (strobe_runs README, 2026-11-18) make it a
+   candidate.
