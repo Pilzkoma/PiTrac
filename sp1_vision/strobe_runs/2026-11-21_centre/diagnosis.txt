@@ -1,0 +1,59 @@
+Synthetic diagnosis: what each error of the ball-centre fit costs.
+8 directions per angle; median / 90th percentile of |error| in px, median radial (+ outward); refusals
+
+circle (refine_ball)
+  image   marks    deg   |err| med/p90     radial med  refused
+  clean   no         0    0.06 /  0.09      +0.05      0 of 8
+  clean   no        10    0.39 /  0.45      +0.38      0 of 8
+  clean   no        20    0.83 /  0.94      +0.82      0 of 8
+  clean   no        30    1.18 /  1.73      +0.86      2 of 8
+  clean   yes        0    0.13 /  0.16      -0.04      0 of 8
+  clean   yes       10    0.34 /  0.53      +0.29      0 of 8
+  clean   yes       20    0.96 /  1.17      +0.96      0 of 8
+  clean   yes       30    1.46 /  2.07      -1.02      2 of 8
+  camera  no         0    0.06 /  0.09      +0.04      0 of 8
+  camera  no        10    0.42 /  0.43      +0.42      0 of 8
+  camera  no        20    0.82 /  0.96      +0.82      0 of 8
+  camera  no        30    1.02 /  1.39      +0.86      2 of 8
+  camera  yes        0    0.12 /  0.17      -0.08      0 of 8
+  camera  yes       10    0.34 /  0.50      +0.31      0 of 8
+  camera  yes       20    0.98 /  1.21      +0.98      0 of 8
+  camera  yes       30    1.53 /  2.08      -0.39      2 of 8
+
+contrast (by_contrast)
+  image   marks    deg   |err| med/p90     radial med  refused
+  clean   no         0    0.06 /  0.07      +0.01      0 of 8
+  clean   no        10    0.39 /  0.48      +0.39      0 of 8
+  clean   no        20    0.86 /  0.96      +0.86      0 of 8
+  clean   no        30    1.17 /  1.41      +0.85      2 of 8
+  clean   yes        0    0.10 /  0.14      -0.02      0 of 8
+  clean   yes       10    0.38 /  0.57      +0.38      0 of 8
+  clean   yes       20    0.83 /  1.17      +0.80      0 of 8
+  clean   yes       30    1.70 /  2.60      -0.31      2 of 8
+  camera  no         0    0.04 /  0.07      +0.02      0 of 8
+  camera  no        10    0.41 /  0.46      +0.41      0 of 8
+  camera  no        20    0.88 /  1.00      +0.88      0 of 8
+  camera  no        30    1.12 /  1.44      +0.85      2 of 8
+  camera  yes        0    0.10 /  0.14      +0.00      0 of 8
+  camera  yes       10    0.37 /  0.62      +0.36      0 of 8
+  camera  yes       20    0.77 /  1.18      +0.73      0 of 8
+  camera  yes       30    1.74 /  3.21      -0.35      2 of 8
+
+cone (sphere_fit)
+  image   marks    deg   |err| med/p90     radial med  refused
+  clean   no         0    0.04 /  0.06      +0.01      0 of 8
+  clean   no        10    0.02 /  0.05      -0.00      0 of 8
+  clean   no        20    0.05 /  0.06      +0.00      0 of 8
+  clean   no        30    0.06 /  0.10      +0.03      2 of 8
+  clean   yes        0    0.09 /  0.12      -0.05      0 of 8
+  clean   yes       10    0.06 /  0.11      -0.01      0 of 8
+  clean   yes       20    0.08 /  0.21      +0.05      0 of 8
+  clean   yes       30    0.08 /  0.62      +0.01      2 of 8
+  camera  no         0    0.04 /  0.09      -0.00      0 of 8
+  camera  no        10    0.02 /  0.05      +0.01      0 of 8
+  camera  no        20    0.05 /  0.06      +0.02      0 of 8
+  camera  no        30    0.07 /  0.23      +0.05      2 of 8
+  camera  yes        0    0.08 /  0.15      -0.05      0 of 8
+  camera  yes       10    0.06 /  0.09      -0.02      0 of 8
+  camera  yes       20    0.11 /  0.20      +0.04      0 of 8
+  camera  yes       30    0.12 /  0.53      +0.03      2 of 8
