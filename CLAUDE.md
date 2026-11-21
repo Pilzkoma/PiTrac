@@ -333,7 +333,18 @@ Next SP1 items, in this order:
    stencil as real STEP + STL in `Hardware/ball_stencil/` (FreeCAD 1.1.4 on
    the Windows box; `freecadcmd` always exits 0 - read the printed CHECK
    line). Owner prints and marks 5 balls; part 2 (detection + orientation)
-   needs its own plan.
+   needs its own plan. **Part 2 merged 2026-11-21** (acceptance 2 still
+   open: the hand-turn series; fixture in `Hardware/turn_fixture/` for the
+   owner's 15° disc, three axes). **Part 3 accepted 2026-11-21**: firmware
+   v0.4 `SEQ` / `SEQ_SHOT` / `SEQ_RUN`, recording with
+   `strobe_shot --trigger --offset-us 1000`; cam1 exposes 0.80-1.40 ms, cam2
+   1.80-2.40 ms after cam1's edge, 0.40 ms apart, neither sees the other's
+   flash (`sp1_vision/strobe_runs/2026-11-21_offset_trigger/`). The
+   firmware's host test lives in `Hardware/teensy_strobe/host_test/`,
+   because arduino-cli compiles every .cpp next to the .ino. arduino-cli is
+   the one bundled with the Arduino IDE (`E:\Users\lasse\AppData\Local\
+   Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe`,
+   fqbn `teensy:avr:teensy40`).
 
 **Setup check (2026-11-18, branch `setup-check`):** dashboard page "Aufbau"
 (`/setup`): one flash, ball position against the target 50 cm in front of
