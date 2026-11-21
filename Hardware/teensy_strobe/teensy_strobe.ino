@@ -23,6 +23,21 @@
 //   SHOT,<mask>,<delay_us>,<pulse_us> → OK | ERR <reason>  trigger cameras, flash
 //   TRIG_RUN,<period_us>,<delay_us>,<pulse_us>[,max_ms] → OK | ERR <reason>
 //                                   continuous trigger; STOP → OK <triggers>
+//   SEQ,<t_us>:<event>,...          → OK | ERR <reason>   store a schedule
+//   SEQ_SHOT                        → OK | ERR <reason>   play it once
+//   SEQ_RUN,<period_us>[,max_ms]    → OK | ERR <reason>   repeat it; STOP → OK <periods>
+//
+// SEQ (added 2026-11-21, v0.4): one period as a list of timed events, in time
+// order - E1 / E2 = rising trigger edge on camera 1 / 2 (line low 10 us before),
+// F<pulse_us> = flash. Parsed and checked by seq_schedule.h (host-tested in
+// host_test/test_seq_schedule.cpp): one edge per camera, flashes 1..1000 us and apart.
+// Purpose: the offset trigger of the ball-marks design (part 3) - cam2 edged
+// ~1 ms after cam1, each camera with its own flash inside its own exposure:
+//   SEQ,0:E1,900:F100,1000:E2,1900:F100
+// SEQ_RUN has TRIG_RUN's guards (armed, period >= TRIG_RUN_MIN_PERIOD_US,
+// flash duty <= MAX_RUN_DUTY, schedule + 200 us within the period, max_ms);
+// SEQ_SHOT has SHOT's spacing guard. Transitions are played on the cycle
+// counter; interrupts stay on (a few us of USB jitter, as for SHOT).
 //
 // TRIG_RUN (added 2026-11-12): SHOT repeated on a fixed period - both
 // cameras get an edge every <period_us>, one flash of <pulse_us> (0 = none)
@@ -63,6 +78,8 @@
 // Flash via Arduino IDE + Teensyduino add-on. Pin map below.
 
 #include <Arduino.h>
+
+#include "seq_schedule.h"
 
 constexpr uint8_t FIRE_PIN   = 2;   // input from Jetson GPIO (RISING edge)
 constexpr uint8_t LED_GATE   = 3;   // output to MOSFET gate
@@ -131,12 +148,24 @@ uint32_t trun_period_us = 0;
 uint32_t trun_delay_us  = 0;
 uint32_t trun_pulse_us  = 0;
 
+// Schedule (SEQ / SEQ_SHOT / SEQ_RUN): SEQ_RUN shares State::RUNNING,
+// run_started_ms, run_max_ms and run_pulses (counted periods) with RUN.
+SeqSchedule seq;
+bool     seq_loaded     = false;
+bool     seq_running    = false;
+uint32_t seq_period_us  = 0;
+
 // Forward decls
 void armTrigger(bool on);
 void shot(char* args);
 void fireEdgeAndFlash(uint8_t mask, uint32_t delay_us, uint32_t pulse_us);
 void startTrigRun(char* args);
 void trigRunStep();
+void seqCommand(char* args);
+void seqShot();
+void startSeqRun(char* args);
+void seqRunStep();
+void playSchedule(const SeqSchedule& s);
 void runStep();
 void startRun(char* args);
 void stopRun();
@@ -162,7 +191,7 @@ void setup() {
     Serial.begin(115200);
     uint32_t t0 = millis();
     while (!Serial && (millis() - t0) < BOOT_WAIT_MS) { /* spin */ }
-    Serial.println("BOOT teensy_strobe firmware v0.3 (camera trigger, TRIG_RUN)");
+    Serial.println("BOOT teensy_strobe firmware v0.4 (camera trigger, TRIG_RUN, SEQ)");
 
     attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
 }
@@ -186,7 +215,9 @@ void loop() {
     }
 
     if (current_state == State::RUNNING) {
-        if (trig_running) trigRunStep(); else runStep();
+        if (seq_running) seqRunStep();
+        else if (trig_running) trigRunStep();
+        else runStep();
         return;
     }
 
@@ -306,6 +337,7 @@ void handleLine(char* line) {
         Serial.print(" N_FAST=");      Serial.print(num_pulse_intervals_fast);
         Serial.print(" N_SLOW=");      Serial.print(num_pulse_intervals_slow);
         Serial.print(" TRIG=");        Serial.print(trig_armed ? "ARMED" : "OFF");
+        Serial.print(" SEQ=");         Serial.print(seq_loaded ? seq.events : 0);
         Serial.print(" RUN_PULSES=");  Serial.println(run_pulses);
     } else if (strcmp(line, "TRIG_ARM") == 0) {
         armTrigger(true);
@@ -317,6 +349,12 @@ void handleLine(char* line) {
         shot(args);
     } else if (strcmp(line, "TRIG_RUN") == 0) {
         startTrigRun(args);
+    } else if (strcmp(line, "SEQ") == 0) {
+        seqCommand(args);
+    } else if (strcmp(line, "SEQ_SHOT") == 0) {
+        seqShot();
+    } else if (strcmp(line, "SEQ_RUN") == 0) {
+        startSeqRun(args);
     } else {
         sendErr("unknown command");
     }
@@ -421,10 +459,11 @@ void runStep() {
 void stopRun() {
     if (current_state != State::RUNNING) return;
     digitalWriteFast(LED_GATE, LOW);
-    if (trig_running) {
+    if (trig_running || seq_running) {
         digitalWriteFast(CAM1_TRIG, HIGH);    // armed idle level
         digitalWriteFast(CAM2_TRIG, HIGH);
         trig_running = false;
+        seq_running  = false;
     }
     current_state = State::READY;
     updateState();
@@ -542,6 +581,82 @@ void trigRunStep() {
     fireEdgeAndFlash(3, trun_delay_us, trun_pulse_us);
     run_pulses++;
     run_next_us += trun_period_us;
+}
+
+// --- schedule (SEQ) ---------------------------------------------------------
+
+void seqCommand(char* args) {
+    if (current_state == State::RUNNING) { sendErr("RUN active"); return; }
+    const char* err = seq_parse(args, &seq);   // seq untouched on error
+    if (err) { sendErr(err); return; }
+    seq_loaded = true;
+    sendOk();
+}
+
+// Each transition at its time after c0; ends at the armed idle levels.
+void playSchedule(const SeqSchedule& s) {
+    const uint32_t cycles_per_us = F_CPU_ACTUAL / 1000000;
+    const uint32_t c0 = ARM_DWT_CYCCNT;
+    for (uint8_t i = 0; i < s.n; ++i) {
+        const uint32_t wait = s.tr[i].t_us * cycles_per_us;
+        while ((ARM_DWT_CYCCNT - c0) < wait) { /* spin */ }
+        const uint8_t pin = s.tr[i].line == SEQ_LINE_CAM1 ? CAM1_TRIG
+                          : s.tr[i].line == SEQ_LINE_CAM2 ? CAM2_TRIG
+                          : LED_GATE;
+        digitalWriteFast(pin, s.tr[i].level ? HIGH : LOW);
+    }
+    digitalWriteFast(LED_GATE, LOW);
+    digitalWriteFast(CAM1_TRIG, HIGH);
+    digitalWriteFast(CAM2_TRIG, HIGH);
+}
+
+void seqShot() {
+    if (current_state == State::RUNNING) { sendErr("RUN active"); return; }
+    if (!trig_armed) { sendErr("not armed"); return; }
+    if (!seq_loaded) { sendErr("no SEQ loaded"); return; }
+    if (shot_fired && (micros() - last_shot_us) < SHOT_MIN_SPACING_US) {
+        sendErr("too soon after last SHOT"); return;
+    }
+    detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
+    playSchedule(seq);
+    last_shot_us = micros();
+    shot_fired = true;
+    attachInterrupt(digitalPinToInterrupt(FIRE_PIN), onFire, RISING);
+    sendOk();
+}
+
+void startSeqRun(char* args) {
+    if (current_state == State::RUNNING) { sendErr("already running"); return; }
+    if (!trig_armed) { sendErr("not armed"); return; }
+    if (!seq_loaded) { sendErr("no SEQ loaded"); return; }
+    long period_us, max_ms = (long)RUN_DEFAULT_MAX_MS;
+    char* p = args;
+    if (!nextLong(&p, &period_us)) { sendErr("SEQ_RUN needs period_us[,max_ms]"); return; }
+    if (p && *p && !nextLong(&p, &max_ms)) { sendErr("bad max_ms"); return; }
+    if (period_us < (long)TRIG_RUN_MIN_PERIOD_US) { sendErr("period below minimum"); return; }
+    if ((long)seq.end_us + 200 > period_us) { sendErr("schedule does not fit the period"); return; }
+    if ((float)seq.flash_us / (float)period_us > MAX_RUN_DUTY) { sendErr("duty cycle above limit"); return; }
+    if (max_ms < 1) { sendErr("RUN max_ms must be > 0"); return; }
+    if (max_ms > (long)RUN_CAP_MAX_MS) max_ms = RUN_CAP_MAX_MS;
+
+    seq_period_us  = (uint32_t)period_us;
+    run_pulses     = 0;
+    run_max_ms     = (uint32_t)max_ms;
+    run_started_ms = millis();
+    run_next_us    = micros();
+    detachInterrupt(digitalPinToInterrupt(FIRE_PIN));
+    digitalWriteFast(STATUS_LED, LOW);
+    seq_running    = true;
+    current_state  = State::RUNNING;
+    sendOk();
+}
+
+void seqRunStep() {
+    if (millis() - run_started_ms >= run_max_ms) { stopRun(); return; }
+    if ((int32_t)(micros() - run_next_us) < 0) return;
+    playSchedule(seq);
+    run_pulses++;
+    run_next_us += seq_period_us;
 }
 
 void sendOk()  { Serial.println("OK"); }

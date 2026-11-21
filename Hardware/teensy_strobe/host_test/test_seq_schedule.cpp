@@ -1,12 +1,14 @@
-// Host test for seq_schedule.h (no Arduino needed). On the Jetson:
-//     g++ -std=c++11 -Wall -Wextra -o /tmp/tseq Hardware/teensy_strobe/test_seq_schedule.cpp && /tmp/tseq
+// Host test for seq_schedule.h (no Arduino needed). Lives outside the sketch
+// folder on purpose: arduino-cli compiles every .cpp next to the .ino, and this
+// file's main() then replaced the firmware's. On the Jetson, from the repo root:
+//     g++ -std=c++11 -Wall -Wextra -o /tmp/tseq Hardware/teensy_strobe/host_test/test_seq_schedule.cpp && /tmp/tseq
 // Prints ALL OK, or the first failing check and exits 1.
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-#include "seq_schedule.h"
+#include "../seq_schedule.h"
 
 static int g_checks = 0;
 

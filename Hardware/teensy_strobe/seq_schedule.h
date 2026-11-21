@@ -1,7 +1,7 @@
 // seq_schedule.h - parse and compile the SEQ command's per-period schedule.
 //
 // Pure C++11, no Arduino headers and no heap, so it is unit-tested on the
-// host (test_seq_schedule.cpp) and included unchanged by teensy_strobe.ino.
+// host (host_test/test_seq_schedule.cpp) and included unchanged by teensy_strobe.ino.
 //
 //   SEQ,<t_us>:<event>,<t_us>:<event>,...
 //
