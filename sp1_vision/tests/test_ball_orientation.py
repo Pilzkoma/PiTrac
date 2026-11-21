@@ -142,13 +142,13 @@ class BallOrientationTest(unittest.TestCase):
                 self.assertIsInstance(res, Refusal)
                 key = res.reason
                 refusals[key] = refusals.get(key, 0) + 1
-        print("\n  60 poses: %d orientations, %d refusals, %d wrong, %d off 1-5 deg, %.1f s"
-              % (n_ok, sum(refusals.values()), len(wrong), len(off), time.time() - t0))
-        for reason, count in sorted(refusals.items()):
-            print("    refused %d x: %s" % (count, reason))
-        self.assertEqual(wrong, [])
-        self.assertEqual(off, [])
-        self.assertGreaterEqual(n_ok, 50)
+        tally = "60 poses: %d orientations, %d refusals, %d wrong, %d off 1-5 deg, %.1f s%s" % (
+            n_ok, sum(refusals.values()), len(wrong), len(off), time.time() - t0,
+            "".join("; refused %d x: %s" % (count, reason)
+                    for reason, count in sorted(refusals.items())))
+        self.assertEqual(wrong, [], tally)
+        self.assertEqual(off, [], tally)
+        self.assertGreaterEqual(n_ok, 50, tally)
 
     def test_relative_turn_sign(self):
         r1 = self._rich_pose(17.0)

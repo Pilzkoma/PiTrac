@@ -124,6 +124,18 @@ class OrientationRealTest(unittest.TestCase):
         self._orientation_or_refusal(
             self._pair("limb_cam1_t044.9317.jpg", "limb_cam2_t044.9315.jpg"))
 
+    def test_limb_frame_cam2_is_oriented(self):                      # Review Focus 2
+        # The dim lower limb does not stop cam2 (Windows and Jetson alike,
+        # 2026-11-21): 5 marks, and no limb shading became a classified blob
+        # off the sites (the pose carried into cam1 puts every classified
+        # blob there on a site).
+        r = self._pair("limb_cam1_t044.9317.jpg", "limb_cam2_t044.9315.jpg")
+        o = r["cam2"]
+        self.assertIsInstance(o, ball_orientation.Orientation, o)
+        self.assertEqual(len(o.matched), 5)
+        self.assertLess(o.rms_deg, 2.0)
+        self.assertEqual(r["cross_check"]["cam1"]["off_site"], 0, r["cross_check"])
+
     def test_lone_orientation_fits_the_other_cameras_blobs(self):
         # A pose in one camera only (the other refused) cannot be checked by
         # agree_deg. Carried into the other camera, every classified blob
@@ -144,6 +156,7 @@ class OrientationRealTest(unittest.TestCase):
                     check = r["cross_check"][other]
                     self.assertEqual(check["off_site"], 0, (args[0], check))
                     self.assertGreaterEqual(check["matches"], 2, (args[0], check))
+
 
 def _rodrigues(axis, angle_rad):
     r, _ = cv2.Rodrigues(np.asarray(axis, float).reshape(3) * angle_rad)
