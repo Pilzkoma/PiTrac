@@ -126,5 +126,23 @@ class PairedDifference(unittest.TestCase):
                          ([0], [4.0]))
 
 
+class OffsetSweep(unittest.TestCase):
+    def test_without_offset_one_shot_command_as_before(self):
+        self.assertEqual(ts.shot_commands(1500, True, 50, None), ["SHOT,3,1500,50"])
+        self.assertEqual(ts.shot_commands(1500, False, 50, None), ["SHOT,3,1500,0"])
+
+    def test_with_offset_the_schedule_then_seq_shot(self):
+        self.assertEqual(ts.shot_commands(1500, True, 50, 1000),
+                         ["SEQ,0:E1,1000:E2,1500:F50", "SEQ_SHOT"])
+        self.assertEqual(ts.shot_commands(1500, False, 50, 1000),
+                         ["SEQ,0:E1,1000:E2", "SEQ_SHOT"])
+
+    def test_separation_is_cam2_start_minus_cam1_end(self):
+        self.assertEqual(ts.windows_separation_us({"end_us": 1280}, {"start_us": 1780}), 500)
+
+    def test_overlapping_windows_give_a_negative_separation(self):
+        self.assertLess(ts.windows_separation_us({"end_us": 1300}, {"start_us": 1200}), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
