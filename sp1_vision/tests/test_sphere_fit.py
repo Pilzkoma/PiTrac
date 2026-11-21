@@ -171,8 +171,19 @@ class RefineBallCone(unittest.TestCase):
         img = self._render(centre)
         u, v, r = self._seed(centre)
         fit = self._cone(img, u, v, r)
-        if fit is not None:
-            self.assertLess(float(np.hypot(*(np.array(fit[:2]) - self._truth_px(centre)))), 0.3)
+        self.assertIsNotNone(fit)            # more than half the outline is visible
+        self.assertLess(float(np.hypot(*(np.array(fit[:2]) - self._truth_px(centre)))), 0.3)
+
+    def test_ball_mostly_off_the_image_is_refused(self):
+        # final review 2026-11-21: centre at an image corner, a quarter of the
+        # outline visible -> 2-6 px wrong centres, accepted by the seed guards
+        z = 0.44
+        for corner in ((5.0, 5.0), (1275.0, 795.0), (0.0, 0.0)):
+            und = cv2.undistortPoints(np.array([[corner]]), self.k, self.d).reshape(2)
+            centre = np.array([und[0] * z, und[1] * z, z])
+            img = self._render(centre)
+            with self.subTest(corner=corner):
+                self.assertIsNone(self._cone(img, *self._seed(centre)))
 
     def test_cone_refiner_has_the_ball_pair_signature(self):
         refine = sphere_fit.cone_refiner(self.k, self.d)

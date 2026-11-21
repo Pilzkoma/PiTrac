@@ -98,7 +98,13 @@ def _pair_refiner(rig, f1, f2):
         return frame_analysis.refine_ball
 
     def refine(frame, u, v, r):
-        K, d = (rig.k1, rig.d1) if frame is f1 else (rig.k2, rig.d2)
+        if frame is f1:
+            K, d = rig.k1, rig.d1
+        elif frame is f2:
+            K, d = rig.k2, rig.d2
+        else:
+            raise ValueError("cone refiner handed a frame it was not built for - "
+                             "ball_pair must pass find_ball's frame objects")
         return sphere_fit.refine_ball_cone(frame, u, v, r, K, d)
     return refine
 

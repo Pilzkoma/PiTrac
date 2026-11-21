@@ -106,6 +106,8 @@ RAY_STEP_PX = 0.25
 FIRST_BAND = 0.20          # first pass: +-20 % of the circle fit's radius
 NEXT_BAND_PX = 3.0         # later passes: +-3 px round the outline the cone predicts
 LIMB_STRENGTH = 0.25       # of the typical (median over rays) limb strength
+MAX_OUTLINE_GAP_RAD = np.pi   # outline points must cover more than half the circle
+CONVERGED_PX = 1.5         # last-pass axis movement above this: diverging (real balls <= ~0.9)
 
 
 def _limb_points(blurred, u, v, r, band):
@@ -204,6 +206,12 @@ def predicted_outline(K, dist, axis, alpha):
     return float(u), float(v), np.interp(grid, ang[order], rad[order], period=2.0 * np.pi)
 
 
+def _largest_gap(pix, u, v):
+    """Largest angular gap (rad) between outline points seen from (u, v)."""
+    ang = np.sort(np.arctan2(pix[:, 1] - v, pix[:, 0] - u))
+    return float(np.max(np.diff(np.append(ang, ang[0] + 2.0 * np.pi))))
+
+
 def _project(K, dist, direction):
     p, _ = cv2.projectPoints(np.asarray(direction, np.float64).reshape(1, 1, 3),
                              np.zeros(3), np.zeros(3), np.asarray(K, np.float64),
@@ -217,24 +225,35 @@ def refine_ball_cone(frame, u, v, r, K, dist):
     Seeded by the circle fit (frame_analysis.refine_ball, else
     refine_ball_by_contrast, else the seed itself): outline within +-20 % of
     its radius, cone fit, then REFINE_ITERATIONS - 1 passes within +-3 px of
-    the outline that cone predicts (predicted_outline). The result must stay within frame_analysis's seed
+    the outline that cone predicts (predicted_outline). Refused (None) when
+    the outline points leave a gap of half the circle or more (a ball mostly
+    off the image: a quarter of the outline fitted 2-6 px wrong, final review
+    2026-11-21) or when the axis still moves more than CONVERGED_PX in the
+    last pass - a runaway (the corner case went 0.2 -> 1.6 -> 5.9 px), not
+    the normal settling: on real balls the last pass moves 0.1-0.9 px as the
+    band narrows from +-20 % to +-3 px, and a 0.3 px limit refused good frames. The result must stay within frame_analysis's seed
     guards (a refinement is a correction, not a new detection).
     """
     circle = fa.refine_ball(frame, u, v, r) or fa.refine_ball_by_contrast(frame, u, v, r)
     ou, ov, radii = (float(x) for x in (circle if circle is not None else (u, v, r)))
     band = FIRST_BAND * radii
-    fit = None
+    fit, centre_px, moved = None, None, 0.0
     for _ in range(fa.REFINE_ITERATIONS):
         got = limb_rays(frame, K, dist, ou, ov, radii, band)
-        if got is None:
+        if got is None or _largest_gap(got[1], ou, ov) >= MAX_OUTLINE_GAP_RAD:
             return None
         fit = fit_cone(got[0])
         if fit is None or fit[0][2] <= 0:
             return None
+        px = _project(K, dist, fit[0])
+        moved = 0.0 if centre_px is None else float(np.hypot(*(px - centre_px)))
+        centre_px = px
         ou, ov, radii = predicted_outline(K, dist, *fit)
         band = NEXT_BAND_PX
+    if moved > CONVERGED_PX:
+        return None
     axis, alpha = fit
-    cu, cv_ = (float(x) for x in _project(K, dist, axis))
+    cu, cv_ = (float(x) for x in centre_px)
     cr = float(np.asarray(K)[0, 0]) * float(np.tan(alpha))
     return fa._within_seed_guards(u, v, r, (cu, cv_, cr))
 

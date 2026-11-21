@@ -9,8 +9,9 @@ Code: sp1_vision/sphere_fit.py; orientation_check --centre circle|cone (default 
    That error comes from the projection, not from pixel noise: the outline
    of an off-axis sphere is an ellipse whose centre lies outward, and the
    lens distortion adds to it. JPEG q85 and noise sigma 2 hardly change it.
-   The cone fit: median 0.02-0.12 px everywhere, no radial trend. At 1.7 deg
-   per px that removes ~1.5 deg of orientation at 20 deg off axis.
+   The cone fit (final code): median 0.02-0.10 px everywhere, no radial
+   trend; 90th percentile <= 0.15 px up to 20 deg, 0.28-0.46 px at 30 deg.
+   At 1.7 deg per px that removes ~1.5 deg of orientation at 20 deg off axis.
 
 2. Two corrections the real frames forced (both pinned in test_sphere_fit)
    - The outline rule. frame_analysis._outermost_edge_per_ray takes the
@@ -25,6 +26,16 @@ Code: sp1_vision/sphere_fit.py; orientation_check --centre circle|cone (default 
    - cv2.remap rounds sample positions to 1/32 px on OpenCV 4.5.4. That gave
      0.13 px on the Jetson against 0.04 px on Windows with identical images.
      sphere_fit now samples with its own exact bilinear interpolation.
+   The final review (same day) added two refusals:
+   - Coverage: when the outline points leave a gap of half the circle or
+     more, the fit is refused. A ball centred at an image corner, with a
+     quarter of its outline visible, had been fitted 2-6 px wrong. Half-cut
+     balls still fit (0.1-0.25 px).
+   - Divergence: when the axis moves more than 1.5 px in the last pass, the
+     fit is refused. A first limit of 0.3 px refused good real frames, and
+     putt 1 then lost every frame: real balls settle by 0.1-0.9 px as the
+     band narrows. test_cone_centre_is_adopted_on_a_real_rolling_frame pins
+     this. With 1.5 px the putt tables below are unchanged.
 
 3. Real putts (putt1/2/3_circle.txt, putt1/2/3_cone.txt; the 2026-11-18 line
    ball, same windows as 2026-11-21_orientation), run on Windows.
