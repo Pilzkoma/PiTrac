@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -257,8 +258,39 @@ class MarkDetectTest(unittest.TestCase):
                 false_dark = (mask > 0) & ~self._grow(self._true_ink(u, r), 2)
                 self.assertLess(int(np.count_nonzero(false_dark)), 20)
                 for b in mark_detect.detect_marks(u, self.m):
-                    self.assertFalse(b.shape is None and b.area_mm2 >= 20.0
+                    # a mark cut by the frame is clutter on purpose (next test)
+                    self.assertFalse(b.shape is None and not b.cut and b.area_mm2 >= 20.0
                                      and b.theta_deg > 45.0, repr(b))
+
+    def test_mark_cut_by_the_frame_is_not_classified(self):    # final review 1
+        # Ball 30 px inside the right image edge (random pose 32 of the
+        # reviewer's edge run, seed 31): the frame cuts a bar to 63 % of its
+        # ink. Still in the bar's area band, it used to classify as a bar
+        # with its centroid 5 deg off the site and pulled the pose 2.15 deg
+        # off. A blob touching the frame cut is clutter; the other marks of
+        # the frame are untouched, and with REJECT_CUT_MARKS off the cut bar
+        # classifies as before.
+        r = np.array([[-0.12226641188574106, -0.9132436661068997, -0.3886347010242599],
+                      [-0.5215256035178439, -0.27403836700190065, 0.8080309513170149],
+                      [-0.8444299671375566, 0.3014779921098073, -0.44277426627289884]])
+        centre = np.array([0.3001510516166908, -0.04407379975388523, 0.45])
+        img = render_ball(self.m, self.k, self.d, centre, r)
+        u = ball_unwrap.unwrap(img, self.k, self.d, centre)
+        blobs = mark_detect.detect_marks(u, self.m)
+        cut = [b for b in blobs if b.cut]
+        self.assertEqual(len(cut), 1, blobs)
+        self.assertIsNone(cut[0].shape, cut[0])
+        self.assertIsNone(cut[0].direction)
+        self.assertLess(cut[0].theta_deg, 30.0)
+        self.assertEqual(sorted(b.shape for b in blobs if not b.cut), ["bar", "cross", "dot"])
+        with mock.patch.object(mark_detect, "REJECT_CUT_MARKS", False):
+            before = mark_detect.detect_marks(u, self.m)
+        self.assertEqual([b.shape for b in before if b.cut], ["bar"])
+        # a ball inside the frame has no cut marks
+        _, inside = self._detect(r)
+        self.assertTrue(inside)
+        self.assertFalse(any(b.cut for b in inside))
+
 
 if __name__ == "__main__":
     unittest.main()

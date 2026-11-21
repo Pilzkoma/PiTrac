@@ -16,6 +16,14 @@ a blob with a hole left after the glint fill (a ring) and anything else is
 clutter (shape None) and is still returned, so the identifier can see a
 wrong-shape blob where the pose predicts a mark.
 
+Marks cut by the frame (REJECT_CUT_MARKS): a blob whose component touches
+the frame cut - invalid pixels inside the cap (theta <= MAX_DEG - 1, so not
+the cap's own rim), grown by one pixel - is clutter too (MarkBlob.cut). Cut
+to 63 % of its ink a bar still falls in its area band and classified as a
+bar, its centroid 5 deg off the site, and pulled the pose 2 deg off (final
+review, random edge poses); refuse rather than guess. Turning it off gives
+more orientations at the edge at that price.
+
 Areas are true areas on the ball: the unwrap is azimuthal equidistant, which
 stretches the tangential direction by theta / sin(theta), so each pixel
 counts sin(theta) / theta. Directions are sphere tangents in the camera frame
@@ -40,6 +48,7 @@ AREA_BAND = (0.6, 1.5)
 ELONGATED = 1.8
 ROUND = 1.5
 SOLID = 0.85
+REJECT_CUT_MARKS = True
 
 _BLUR_SIGMA_PX = 3.0
 _PX2_PER_MM2 = PX_PER_MM * PX_PER_MM
@@ -47,7 +56,7 @@ _PX2_PER_MM2 = PX_PER_MM * PX_PER_MM
 
 class MarkBlob(object):
     def __init__(self, normal, shape, direction, area_mm2, theta_deg, elongation,
-                 solidity, xy):
+                 solidity, xy, cut=False):
         self.normal = normal            # (3,) camera frame, at the centroid
         self.shape = shape              # "dot" | "bar" | "cross" | None
         self.direction = direction      # (3,) sphere tangent, or None
@@ -56,10 +65,12 @@ class MarkBlob(object):
         self.elongation = elongation    # major / minor axis (second moments)
         self.solidity = solidity        # area / convex-hull area
         self.xy = xy                    # centroid in the unwrapped image (col, row)
+        self.cut = cut                  # component touches the frame cut
 
     def __repr__(self):
-        return "MarkBlob(%s, %.1f mm2, %.0f deg, elong %.2f, solid %.2f)" % (
-            self.shape, self.area_mm2, self.theta_deg, self.elongation, self.solidity)
+        return "MarkBlob(%s, %.1f mm2, %.0f deg, elong %.2f, solid %.2f%s)" % (
+            self.shape, self.area_mm2, self.theta_deg, self.elongation, self.solidity,
+            ", cut" if self.cut else "")
 
 
 def _disc(diameter_px):
@@ -187,11 +198,22 @@ def _classify(area_mm2, elong, solid, ink):
     return None
 
 
+def _frame_cut(u):
+    """bool: pixels next to (or on) the frame cut - invalid pixels inside the
+    cap's rim, grown by a 3x3 dilation - or None when the frame cuts nothing."""
+    cut = ~u.valid & (u.theta_deg <= ball_unwrap.MAX_DEG - 1.0)
+    if not cut.any():
+        return None
+    return cv2.dilate(cut.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+
+
 def detect_marks(u, mmap):
     """All dark blobs >= MIN_AREA_MM2 centred within EVAL_DEG, classified."""
     dark = dark_mask(u)
     opened = cv2.morphologyEx(dark, cv2.MORPH_OPEN, _disc(OPEN_MM * PX_PER_MM))
     n, lab, stats, cents = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    near_cut = _frame_cut(u)
+    cut_labels = set() if near_cut is None else set(np.unique(lab[near_cut]).tolist())
     c0 = float(u.centre_px)
     blobs = []
     for i in range(1, n):
@@ -223,7 +245,9 @@ def detect_marks(u, mmap):
         solid = float(cv2.contourArea(contour)) / hull_area if hull_area > 0 else 0.0
         # glint holes (< GLINT_HOLE_MM2) are already filled; a hole left now
         # (a ring of print) is no mark, though its outline looks like a dot
-        shape = None if has_hole else _classify(area_mm2, elong, solid, mmap.ink_area_mm2)
+        cut = i in cut_labels
+        shape = (None if has_hole or (cut and REJECT_CUT_MARKS)
+                 else _classify(area_mm2, elong, solid, mmap.ink_area_mm2))
         x, y = cx - c0, cy - c0
         normal = ball_unwrap.normal_at(u, x, y)
         direction = None
@@ -234,5 +258,5 @@ def detect_marks(u, mmap):
             a = _cross_angle(xs, ys, cx, cy)
             direction = ball_unwrap.tangent_at(u, x, y, math.cos(a), math.sin(a))
         blobs.append(MarkBlob(normal, shape, direction, area_mm2, theta_deg, elong,
-                              solid, (cx, cy)))
+                              solid, (cx, cy), cut))
     return blobs
