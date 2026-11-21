@@ -1,0 +1,73 @@
+30 frame pairs 8.74-9.05 s
+   t cam1   t cam2  grid    ball Z   cam1                          cam2                          agree
+  8.7508   8.7506 +0.000  431.0   refused: only 2 classified ma refused: no two of 3 classifi -
+  8.7588   8.7586 +0.010  433.8   refused: no two of 3 classifi refused: no two of 3 classifi -
+  8.7709   8.7706 +0.020  432.8   refused: no two of 3 classifi refused: no two of 3 classifi -
+  8.7788   8.7786 +0.030  430.5   refused: no two of 3 classifi ORIENT 4 marks 1.41 deg       -
+  8.7909   8.7906 +0.040  427.8   refused: no two of 3 classifi ORIENT 4 marks 1.35 deg       -
+  8.7989   8.7986 +0.050  420.4   ORIENT 4 marks 1.41 deg       refused: best pose leaves a d -
+  8.8108   8.8106 +0.060  418.5   ORIENT 4 marks 0.60 deg       refused: ambiguous: one misre -
+  8.8189   8.8195 +0.070  421.2s  ORIENT 5 marks 0.84 deg       ORIENT 4 marks 0.75 deg       2.61
+  8.8309   8.8310 +0.080  422.6   ORIENT 4 marks 1.17 deg       refused: best pose leaves a d -
+  8.8388   8.8389 +0.090  420.5   ORIENT 4 marks 1.24 deg       ORIENT 4 marks 1.08 deg       0.47
+  8.8508   8.8511 +0.100  417.6   ORIENT 4 marks 1.16 deg       refused: ambiguous: one misre -
+  8.8588   8.8591 +0.110  409.0m  ORIENT 3 marks 2.52 deg       refused: ball not found in th -
+  8.8708   8.8712 +0.120  407.3   ORIENT 5 marks 2.19 deg       refused: no two of 3 classifi -
+  8.8788   8.8792 +0.130  417.1   ORIENT 4 marks 1.87 deg       ORIENT 4 marks 2.11 deg       1.30
+  8.8915   8.8912 +0.140  424.7   ORIENT 4 marks 2.56 deg       ORIENT 4 marks 1.86 deg       3.96
+  8.8995   8.8992 +0.150  414.9m  ORIENT 4 marks 1.90 deg       refused: ball not found in th -
+  8.9115   8.9112 +0.160  401.6m  refused: only 2 classified ma refused: ball not found in th -
+  8.9194   8.9192 +0.170  416.4   ORIENT 4 marks 1.90 deg       refused: no two of 3 classifi -
+  8.9312   8.9309 +0.180  416.6   refused: no two of 3 classifi refused: no two of 3 classifi -
+  8.9392   8.9389 +0.190  396.8m  refused: only 2 classified ma refused: ball not found in th -
+  8.9508   8.9506 +0.200  395.2m  refused: only 1 classified ma refused: ball not found in th -
+  8.9594   8.9591 +0.210    -     refused: no ball: not on the  refused: no ball: not on the  -
+  8.9715   8.9706 +0.220  420.5m  refused: ambiguous: one misre refused: ball not found in th -
+  8.9795   8.9793 +0.230  401.9m  ORIENT 5 marks 0.84 deg       refused: ball not found in th -
+  8.9915   8.9912 +0.240  398.3m  refused: best pose leaves a d refused: ball not found in th -
+  8.9995   8.9992 +0.250    -     refused: no ball: not on the  refused: no ball: not on the  -
+  9.0115   9.0112 +0.260    -     refused: no ball: not on the  refused: no ball: not on the  -
+  9.0195   9.0192 +0.270  396.7m  refused: best pose leaves a b refused: ball not found in th -
+  9.0316   9.0313 +0.280    -     refused: no ball: not on the  refused: no ball: not on the  -
+  9.0392   9.0390 +0.290    -     refused: no ball: not on the  refused: no ball: not on the  -
+
+rolling comparison (consecutive Orientations, same camera)
+cam   t_a      t_b      dt ms  v m/s  pred deg  meas deg  err %   axis deg  (lean up / to v)  sign
+cam2   8.7788   8.7909    10   0.87      23.3      15.1    -35       0.9  ( -0.8 /  -0.4)    +
+cam2   8.7909   8.8189    30   0.84      67.7      55.5    -18       2.5  ( -2.4 /  -0.6)    +
+cam1   8.7989   8.8108    10   0.84      22.6      17.6    -22      13.9  (-13.7 /  +2.3)    +
+cam1   8.8108   8.8189    10   0.81      21.8      22.4     +2      12.3  ( +8.9 /  -8.4)    +
+cam1   8.8189   8.8309    10   0.80      21.4      21.2     -1      15.6  (-10.8 / -11.0)    +
+cam2   8.8189   8.8388    20   0.80      42.8      41.5     -3       3.5  ( -3.2 /  -1.2)    +
+cam1   8.8309   8.8388    10   0.79      21.1      20.3     -4       6.3  ( -3.2 /  +5.5)    +
+cam1   8.8388   8.8508    10   0.78      21.0      20.7     -1       4.6  ( +0.7 /  +4.6)    +
+cam1   8.8508   8.8588    10   0.76      20.5      22.3     +9      20.0  ( +1.3 / -20.0)    +
+cam1   8.8588   8.8708    10   0.77      20.6      24.1    +17      33.4  ( -0.9 / +33.4)    +
+cam1   8.8708   8.8788    10   0.77      20.8      19.8     -5      14.8  (-14.7 /  +0.9)    +
+cam1   8.8788   8.8915    10   0.77      20.8      21.4     +3      14.6  ( +9.4 / +11.1)    +
+cam2   8.8788   8.8915    10   0.77      20.8      22.8    +10      19.2  (+16.0 / +10.3)    +
+cam1   8.8915   8.8995    10   0.73      19.7      20.2     +2      20.2  ( -9.1 / -17.8)    +
+cam1   8.8995   8.9194    20   0.78      41.9      39.6     -5      19.6  ( +0.8 / +19.6)    +
+
+summary
+frame pairs 30, ball on the track in 25 (1 seed frame(s), 9 monocular)
+cam1: Orientation in 13 of 30 frames (43 %), 13 of 25 with the ball found (52 %)
+cam2: Orientation in 6 of 30 frames (20 %), 6 of 25 with the ball found (24 %)
+both cameras oriented in 4 frames: agree median 1.96 deg, max 3.96 deg, over 3 deg 1
+a pose in one camera only: 8; carried into the other camera it puts a classified blob off every site in 2, a wrong shape on a site in 3
+missing-ink check passed only on unopened dark pixels: 0 site(s) in 0 frame(s)
+refusals by reason:
+   cam1   5  no two of # classified marks fit a pair of neighbouring sites
+   cam1   5  no ball
+   cam1   4  only # classified marks
+   cam1   1  ambiguous: one misread mark from another pose
+   cam1   1  best pose leaves a dot where a cross belongs
+   cam1   1  best pose leaves a bar where a dot belongs
+   cam2   9  ball not found in this camera
+   cam2   6  no two of # classified marks fit a pair of neighbouring sites
+   cam2   5  no ball
+   cam2   2  best pose leaves a dot where a cross belongs
+   cam2   2  ambiguous: one misread mark from another pose
+rolling: 15 comparisons, median |angle error| 5 %, median axis error 14.6 deg, signs right 15 of 15 (late half: 8 of 8)
+         late half: median |angle error| 5 %, median axis error 19.4 deg
+sheet: sp1_vision/strobe_runs/2026-11-21_orientation/putt1_sheet.jpg
