@@ -1,0 +1,285 @@
+2026-11-21 orientation on real frames: part 2 of the ball-marks design
+(docs/superpowers/specs/2026-11-13-ball-marks-spin-design.md, acceptance 2)
+run on the marked ball of 2026-11-18 (JetsonLM_recordings/2026-11-18_line_ball/,
+README there; not in the repo). Tool: sp1_vision/orientation_check.py.
+
+  python -m sp1_vision.orientation_check static CAM1.png CAM2.png
+  python -m sp1_vision.orientation_check roll SHOTS/cam1 SHOTS/cam2 T_FROM T_TO --sheet OUT.jpg
+
+Files here: putt1/2/3.txt (full per-frame tables, Windows run, regenerated
+with the committed tool after the final-review fixes; putt 1 was run without
+--sheet, no sheet of it is kept), putt2/3_sheet.jpg (unwrapped caps, row cam1 over row cam2: green = matched blob, yellow =
+classified but unmatched, grey = clutter, green crosses = matched sites under
+the pose), whatif_area_band.py (sensitivity run, see the end).
+All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
+
+ACCEPTANCE 2 IS ONLY PARTLY DONE. The spec's acceptance 2 asks for hand
+turns by known amounts about different axes and for backspin-like and
+hook-like sign checks. None of these was recorded. What is here is the
+static cam1/cam2 agreement and three rolling putts, which test the sign
+(and size) of a turn about ONE roughly horizontal axis - the rolling axis,
+up x v - only. A turn about the vertical (hook/slice-like) or about the
+other horizontal axis (backspin-like, seen from these cameras) has not been
+checked against a known answer. Open: a hand-turn series on a fixture (known
+angles about at least three axes, both signs).
+
+1. Static pair (8 ms exposure, one 100 us flash, ball at rest, Z 441 mm)
+   cam1 Orientation, 5 marks, rms 1.13 deg; cam2 Orientation, 5 marks, 0.96 deg
+   (Jetson 1.14 / 0.95; an earlier version of this file gave the Jetson
+   figures as Windows ones - the pre-fix code gives 1.13 / 0.96 on Windows).
+   cam1 / cam2 agree within 2.60 deg (Jetson 2.59).    spec number: < 3 deg - PASS
+   Each camera's pose carried into the other: 5 matches, nothing off-site.
+
+2. Rolling putts (triggered: 0.5 ms exposure, 100 us flash every 10 ms)
+   How the ball is found. find_ball_pair alone fails here: the putts are
+   pushed with a slipper that stays next to the ball, and the plain search
+   says "ambiguous" in most frames (putt 1: 26 of 30) and in a few gives a
+   wrong unambiguous answer (Z 278 / 327 mm on the foot). So the roll follows
+   a track seeded by the marks: a stereo position whose image gives an
+   Orientation in BOTH cameras agreeing within 3 deg is the ball; from there
+   each next frame is searched only within 25 mm of the position predicted
+   by a line through the 5 nearest tracked positions. Where stereo fails
+   (the ball reaches cam2's right edge, ~0.15-0.25 s into each putt) the
+   centre comes from one camera: the circle centre's ray met with the plane
+   the stereo track rolled in ("m" frames in the tables).
+   Frame times: arrival times come in USB pairs 8/12 ms apart while trigger
+   edges are exactly 10 ms apart; steps are snapped to whole 10 ms.
+   Rolling model: angle |v| dt / r about up x v_hat, up from the 2026-11-11
+   attitude (pitch +1.60 deg), v from fit_motion over +-60 ms of track.
+
+                                   putt 1        putt 2        putt 3
+   window (s)                      8.74-9.05     16.02-16.42   44.86-45.13
+   frame pairs / ball on track     30 / 25       39 / 38       26 / 25
+     of these monocular            9             10            7
+   Orientation share, cam1         43 % (52 %)   49 % (50 %)   42 % (44 %)
+   Orientation share, cam2         20 % (24 %)   23 % (24 %)   27 % (28 %)
+     (of all frame pairs; in brackets of the frames with the ball on the
+     track. cam2 has no ball in the monocular frames.)
+   both cameras oriented           4 frames      7 frames      4 frames
+     agree median / max (deg)      1.96 / 3.96   1.55 / 3.50   0.91 / 1.07
+     over 3 deg                    1             3             0
+     (each putt's first both-oriented frame is its track seed, which was
+     CHOSEN for agreeing within 3 deg: 2.61 / 1.51 / 0.87 deg. Unselected
+     frames: 4 of 12 over 3 deg.)
+   rolling comparisons             15            21            13
+     median |angle error|          5 %           14 %          12 %
+       later half *                5 %           4 %           6 %
+     median axis error             14.6 deg      12.8 deg      6.9 deg
+       later half *                19.4 deg      13.5 deg      7.7 deg
+     signs right                   15 of 15      21 of 21      13 of 13
+   * "later half" (earlier "late half") is the second half of the list of
+     comparisons sorted by time, not the second half of the roll time; the
+     comparisons are denser where both cameras orient well, so it is not
+     the same as "the later part of the roll".
+
+   Against the expectation in the plan (angle within 15 %, axis within 10 deg,
+   every sign right in the late part):
+     angle  - met in all three putts (later halves of the lists 4-6 %).
+     sign   - met: 49 of 49 frame pairs, early and late.
+     axis   - met in putt 3 only; putts 1 and 2 have median axis errors of
+              13-15 deg (late halves 13.5 and 19.4 deg).
+   (Superseded by the fix round below: the first version of this paragraph
+   called the axis error "noise, not a bias" without separating out the
+   ball-centre error. It is mostly centre error.)
+
+   Centre quality (fix round 1, review of task 5). The tracker can hand
+   orient_image a wrong centre; nothing flagged it. How much a centre error
+   costs was measured directly (cam1 16.1389 and 16.1509 s, both 5-mark
+   Orientations, centre moved and the frame re-oriented):
+       along camera 1's ray   +-0.5..2 mm: 0.0-0.2 deg;  10 mm: 0.8 deg
+       across the ray         +-0.5 mm: 1.9-2.0 deg;  1 mm: 3.7-4.5 deg;
+                              2 mm: 7.4-8.2 deg   (about 1/r per mm, 2.7
+                              deg, plus more for marks off the view centre)
+   So stereo depth scatter (along the ray, residual median 3-6 mm, up to
+   21 mm) hardly matters, and a centre error across the ray matters a lot.
+   Each tracked frame now gets the residual of its centre from a parabola
+   fitted through the other tracked centres within +-60 ms, split along /
+   across the ray (columns "along across" in the tables), and is flagged
+   when the across part exceeds 0.8 mm - the size that alone costs the
+   static acceptance number of 3 deg (3 / 3.75 deg per mm) - or when a
+   circle used for the centre comes within 2 px of the image edge. On the
+   cleanly tracked middle of putt 2 (16.11-16.30 s) the across residual is
+   0.2-0.6 mm in most frames, so 0.8 mm is also about twice the residual of
+   a good stretch. Flagged frames: 15 of 25 (putt 1), 19 of 38 (putt 2: 18
+   across, 2 at cam2's edge), 17 of 25 (putt 3). Median across residual
+   1.21 / 0.66 / 1.29 mm - typical centres are NOT good to 3 deg.
+
+   Axis error against the comparison's worse across residual (all 49
+   comparisons, three putts):
+       across <= 0.8 mm   13 comparisons   median axis  5.1 deg   angle  3 %
+       0.8 - 1.5 mm       23               median axis 11.0 deg   angle 14 %
+       1.5 - 3 mm          9               median axis 14.8 deg   angle  5 %
+       > 3 mm              4               median axis 41.4 deg   angle 28 %
+   rank correlation 0.74. Per putt, all / flagged centres left out:
+       putt 1   axis 14.6 -> 4.6 deg (5 of 15 left), angle 5 -> 3 %
+       putt 2   axis 12.8 -> 5.1 deg (6 of 21 left), angle 14 -> 3 %
+       putt 3   axis  6.9 -> 5.5 deg (2 of 13 left; both in the early skid,
+                angle 48 %)
+   Both-camera agreement, unflagged frames only: 1.54 / 0.79 / 0.97 deg
+   median, max 2.61 / 3.36 / 1.07 deg (1 of 7 over 3 deg, against 4 of 15
+   with flagged frames). Two of the 7 are seed frames chosen for agreement
+   (2.61 in putt 1 - that putt's max - and 0.87 in putt 3); unselected
+   unflagged frames: 1 of 5 over 3 deg (3.36). Frames whose centre quality
+   is unknown (too few tracked neighbours for a residual) are now a
+   category of their own and not counted as unflagged: 1 frame, putt 1
+   9.0195 (monocular, no Orientation, in no comparison) - no figure above
+   changes.
+   The end of putt 2 is explained: 16.3114, 16.3195, 16.3316 have across
+   residuals 3.5, 5.8 and 2.5 mm (13, 22, 9 deg by the measured
+   sensitivity) - the ball at cam2's edge, stereo going wrong - and those
+   comparisons (+20..+45 %, 35-51 deg) are all flagged.
+
+   What the numbers support: where the ball centre is good to 0.8 mm across
+   the line of sight, the rolling check meets the plan's expectation (13
+   comparisons: axis 5 deg median, angle 3 %, every sign right). The axis
+   failures of putts 1 and 2 come from the ball centre - the circle centre
+   in the image and the tracker that keeps frames whose centre is a few
+   pixels off - not from the mark identification. But only 13 of 49
+   comparisons have such a centre: on these frames the centre, not the
+   marks, limits the precision, and 1 px of circle-centre error (0.45 mm
+   at 420 mm) already costs ~1.7 deg. The method needs a ball centre good
+   to well under a pixel across the line of sight before its axis is
+   within 10 deg routinely; 13 comparisons are too few to call the
+   expectation met.
+   Physics in the early part: right after the push the ball turns slower
+   than rolling and catches up - putt 3 -56, -41, -30, -14, -7, +3 %, putt 2
+   -22, -19, -15, -5, -1 % - the skid the plan allowed for, with the right
+   sign throughout.
+
+   Refusals by reason (camera: count), all three putts together:
+     no ball (track not reached)            cam1 7, cam2 7
+     ball not found in this camera          cam1 1, cam2 25 (monocular frames)
+     best pose leaves a dot where a cross   cam1 9, cam2 8
+       belongs
+     ambiguous: one misread mark from       cam1 11, cam2 8
+       another pose (MISREAD_GUARD)
+     only N classified marks                cam1 8, cam2 7
+     no two of N classified marks fit a     cam1 8, cam2 7
+       pair of neighbouring sites
+     best pose matches only N of M          cam1 4, cam2 1
+     bar where a cross / bar turned /       cam1 4, cam2 10
+       bar where a dot / cross where a
+       bar or dot belongs
+   (per-putt lists at the end of putt1/2/3.txt)
+
+3. What limits the share of frames with an Orientation
+   a) Real marks are smaller than the map's ink areas. Matched marks over
+      the three putts: crosses median 38.1 mm2 (map ink 57.1, ratio 0.67,
+      smallest 34.5 - just above the band's lower edge 0.6 x 57.1 = 34.3),
+      bars 30.8 mm2 (ink 38.1, ratio 0.81), dots 27.1 mm2 (ink 37.8, 0.72).
+      73 cross-like blobs (round, not solid) of 20-34 mm2 fell below the band
+      and became clutter. So crosses are cut off by AREA_BAND; dots and bars
+      are inside it. (The static frame shows the same: cam1's cross at 57 deg,
+      31.8 mm2, unclassified.) Probable causes: the 0.6 x brightness threshold
+      takes only the core of a soft (MJPEG, focus) edge, and the 2 mm opening
+      rounds the arm tips - a cross has the most edge per area.
+   b) Crosses near the limb read as dots: blurred arms fill the notches,
+      solidity 0.85-0.86 against SOLID 0.85 ("a dot where a cross belongs",
+      the commonest conflict; e.g. putt fixture cam1, cross at 58 deg).
+   c) A specular highlight on the central mark: the glint fixture
+      (cam1 16.0908) - the glinted cross has solidity 0.65 and 26.6 mm2 and
+      is clutter, so both cameras refuse ("only 2 classified marks"). The
+      rendered-glint test of Task 3 does not carry over to this real glint.
+   None of these makes a wrong pose; they make refusals.
+
+4. Wrong poses
+   No wrong identification was confirmed: every sign is right, and no
+   rolling comparison or both-camera frame is off by anything like a
+   symmetry of the site set (72 / 120 / 180 deg). That does not cover every
+   pose. Lone poses (one camera oriented, the other refused) carried into
+   the other camera: 26 cases; in 4 a classified blob of the other camera
+   lies off every site:
+     putt 1 8.8708 cam1 - confirmed: the neighbouring rolling comparison
+       (8.8708 -> 8.8788) is within 5 % and 15 deg, so the off-site blob is
+       clutter that classified;
+     putt 1 8.9194 cam1 - confirmed: rolling comparison 8.8995 -> 8.9194
+       -5 %, sign right (axis 19.6 deg, flagged centre 2.0 mm across);
+     putt 2 16.3316 cam1 - in the noisy end of putt 2 (see 2.), comparison
+       +37 % / 51 deg with a flagged centre: neither confirmed nor refuted;
+     putt 3 44.8795 cam2 - UNCONFIRMED: no other cam2 Orientation near it,
+       cam1 refused (misread guard). Nothing here shows it right or wrong.
+   Bound of the method (final review): "never a wrong pose" holds for up to
+   ONE misread blob per image. The misread guard (ball_orientation,
+   MISREAD_GUARD) refuses when re-reading one blob as another shape lets a
+   pose > 10 deg away fit as well. With TWO random shape misreads in one
+   image, 9 of 1200 synthetic views gave wrong poses (72 / 120 / 144 /
+   180 deg off); with a plausible real misread rate about 1 image in 2000.
+   It is a property of the map's code distance; a two-misread guard would
+   refuse ~76 % of clean views. So a lone single-camera pose is not to be
+   trusted for spin without corroboration - cam1/cam2 agreement within the
+   acceptance angle, or consistency across frames (spec, "Spin measurement
+   (parts 3-4)").
+   Precision: 4 of 15 rolling frames with both cameras oriented disagree by
+   3.0-4.0 deg, above the static acceptance number - 4 of the 12 that were
+   not chosen as track seeds (the 3 seeds were chosen for agreeing within
+   3 deg); with flagged centres left out 1 of 7, or 1 of 5 without the
+   seeds (3.36 deg). See "Centre quality" in 2.
+
+5. Open points of Task 4, checked here
+   - Missing-ink check reads the raw dark mask: in no frame of the three
+     putts did a site pass that check only on dark pixels the 2 mm opening
+     removes (orientation_check.missing_ink_audit, 0 of 0). It did not
+     matter on these frames.
+   - Dim lower limb (Review Focus 2): limb fixture cam2 44.9315 gives an
+     Orientation, 5 marks, rms 1.11 deg (Windows and Jetson; pinned in
+     test_orientation_real); no limb shading became a blob within 60 deg. cam1 refuses the same instant (central bar bitten into a
+     "dot" by the glint, left cross blurred to a "dot"); cam2's pose carried
+     into cam1 puts all 4 of cam1's classified blobs on predicted sites
+     (2 matching, 2 of the misread shapes).
+
+6. Sensitivity (whatif_area_band.py, NOT the method - constants unchanged):
+   AREA_BAND lower edge 0.45 instead of 0.6 (crosses from 25.7 mm2):
+     share cam1 57 / 59 / 62 %, cam2 30 / 33 / 31 %;
+     static agree 2.93 deg; both-camera frames over 3 deg 1 / 2 / 3
+     (max 4.92 / 3.21 / 6.87 deg); median axis error 13.1 / 7.9 / 7.7 deg;
+     signs 71 of 71.
+   More orientations, but the cam1/cam2 agreement gets worse, so a lower
+   band is not a free win; calibrating the expected areas on real marks (or
+   a cross test that does not depend on area) is the question for the owner.
+
+Jetson (Python 3.8, OpenCV 4.5.4): see the end of this file.
+
+Jetson run (Python 3.8.10, OpenCV 4.5.4, numpy 1.17.4; frames copied to a
+scratch dir there, same command):
+  static agree 2.59 deg.
+                                   putt 1        putt 2        putt 3
+  Orientation share cam1           43 % (52 %)   49 % (50 %)   38 % (40 %)
+  Orientation share cam2           20 % (24 %)   23 % (24 %)   23 % (24 %)
+  both oriented, agree med / max   1.96 / 3.94   1.58 / 3.47   0.86 / 1.11
+    over 3 deg                     1 of 4        3 of 7        0 of 3
+  median angle err (late half)     5 % (5 %)     14 % (4 %)    13 % (6 %)
+  median axis err (late half)      14.6 (19.4)   12.9 (13.5)   6.3 (6.9) deg
+  signs right                      15 / 15       21 / 21       10 / 10
+  Same tracks and ball positions as on Windows; putts 1 and 2 identical
+  frame by frame (rms differing by 0.01-0.03 deg). In putt 3 two borderline
+  frames flip from Orientation to Refusal (cam2 44.9517: "a dot where a
+  cross belongs"; cam1 44.9916: misread guard), which removes three
+  comparisons - the interpolation/rounding differences between OpenCV
+  versions are enough to move a mark across a classification edge.
+
+Jetson, fix round 1 (centre flag), same frames, committed tool:
+  flagged centres 15 / 19 / 17 (identical to Windows: same tracks, same
+  residuals). Rolling all -> flagged centres left out:
+    putt 1  axis 14.6 -> 4.7 deg (5 of 15), angle 5 -> 3 %
+    putt 2  axis 12.9 -> 5.1 deg (6 of 21), angle 14 -> 3 %
+    putt 3  axis  6.3 -> 5.4 deg (2 of 10), angle 13 -> 48 % (early skid)
+  agreement, unflagged frames: max 2.63 / 3.38 / 1.11 deg (1 of 7 over 3).
+
+Final-review fixes (2026-11-21), same frames, committed tool:
+  - Marks cut by the frame are clutter now (mark_detect.REJECT_CUT_MARKS,
+    on). On these putts it changes nothing: in all three windows one blob
+    touched the frame cut (putt 2, 34.2 mm2 at 40 deg) and it was clutter
+    already. Synthetic edge poses (reviewer's experiment, ball centre within
+    35 px of the right edge): poses 1-5 deg off 2 -> 0 (150 poses) and,
+    dimmed, 6 -> 0 (150 poses); correct poses 17 -> 10 and 14 -> 3; no
+    wrong poses before or after; centred, dimmed and glint runs unchanged.
+  - The refit loop's last pose is verified before it is returned; no
+    figure here changes (the cap was never reached on these frames).
+  - Unknown centre quality is its own category (1 frame, putt 1 9.0195);
+    no figure changes.
+  Headline numbers old -> new, Windows: static 2.60 -> 2.60 deg; share cam1
+  43 / 49 / 42 % -> same, cam2 20 / 23 / 27 % -> same; both-camera max
+  3.96 / 3.50 / 1.07 -> same; median axis 14.6 / 12.8 / 6.9 deg -> same,
+  flagged centres left out 4.6 / 5.1 / 5.5 -> same; signs 49 of 49 -> same.
+  Jetson: identical to the Jetson figures above (static 2.59, axis
+  14.6 / 12.9 / 6.3, unflagged 4.7 / 5.1 / 5.4 deg, putt 3 10 comparisons).
