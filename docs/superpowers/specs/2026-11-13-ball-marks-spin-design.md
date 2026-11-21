@@ -277,3 +277,22 @@ Each part is usable and testable before the next starts.
    crosses stay whole. Side findings for part 2: the dim lower limb (IR
    beam from above) needs a shading model or it reads as ink, and the
    specular highlight can punch a hole into a mark.
+
+## Owner decision (2026-11-21): part 3 as a per-period schedule
+
+5. **Firmware: an event schedule, not fixed offset parameters.** A new
+   command `SEQ,<t_us>:<event>,...` defines one period: `E1` / `E2` = rising
+   trigger edge on cam1 / cam2 at t (the line is pulled low TRIG_LOW_US
+   before), `F<pulse_us>` = flash starting at t. `SEQ_SHOT` plays it once,
+   `SEQ_RUN,<period_us>[,max_ms]` repeats it (stop with `STOP`). SHOT and
+   TRIG_RUN stay as they are. Several flashes per exposure later are then a
+   different schedule, not new firmware. Same guards as today (pulse length,
+   duty, min period, armed).
+   Rejected: offset parameters on TRIG_RUN/SHOT - smaller, but two flashes
+   per exposure would need another firmware change.
+   Timing (builder's call, approved): cam2's edge 1.0 ms after cam1's, each
+   camera's flash 0.9 ms after its own edge, 100 us (20-30 us later):
+   exposure windows 0.78-1.28 and 1.78-2.28 ms, 0.5 ms apart.
+   Acceptance unchanged (part 3 above): `trigger_sweep --offset-us` moves one
+   flash over 0-3 ms with cam2 edged late; each camera sees it only in its
+   own window; frame alignment proven with interleaved dark shots.

@@ -25,9 +25,17 @@ UVC trigger mode, the Teensy (firmware v0.3) sends an edge every 10 ms -
 - and one flash 0.9 ms after each edge, inside a 0.5 ms exposure that starts
 0.78 ms after the edge in both cameras within 25 us. One ball image per
 frame, the same instant in both cameras, 16x less ambient than 8 ms.
+
+--trigger --offset-us 1000 (2026-11-21, firmware v0.4, part 3 of the
+ball-marks design): cam2 gets its edge 1 ms after cam1 and each camera its
+own flash 0.9 ms after its own edge (SEQ / SEQ_RUN); the two exposure
+windows are 0.4 ms apart and neither camera sees the other's flash
+(strobe_runs/2026-11-21_offset_trigger). trigger.json next to raw/ records
+period, offset, delay and pulse, so each camera's flash time is known.
 """
 
 import argparse
+import json
 import os
 import sys
 import threading
@@ -39,6 +47,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sp1_vision import frame_analysis  # noqa: E402
 from sp1_vision import strobe_capture as sc  # noqa: E402
+from sp1_vision import trigger_seq  # noqa: E402
 from sp1_vision.calibration_capture import set_manual_exposure  # noqa: E402
 
 REFERENCE_SKIP_S = 0.3      # after the strobe starts: still settling, not searched
@@ -52,6 +61,25 @@ SCORE_TOP_ROW = 350
 # A frame is searched for a ball only if at least this many floor pixels
 # moved; a ball 25 px in radius alone covers ~2000.
 MIN_MOTION_PX = 400
+
+
+def trigger_run_commands(period_ms, delay_us, pulse_us, max_ms, offset_us):
+    """Teensy lines that start the triggered recording: TRIG_RUN, or with an
+    offset SEQ (each camera its own edge and flash) + SEQ_RUN."""
+    period_us = int(round(period_ms * 1000))
+    if offset_us is None:
+        return ["TRIG_RUN,{},{},{},{}".format(period_us, delay_us, pulse_us, max_ms)]
+    return [trigger_seq.seq_command(trigger_seq.offset_schedule(offset_us, delay_us, pulse_us)),
+            "SEQ_RUN,{},{}".format(period_us, max_ms)]
+
+
+def trigger_info(period_ms, delay_us, pulse_us, exposure_units, offset_us):
+    """What trigger.json records: each camera's edge and flash in the period."""
+    off = offset_us or 0
+    return {"period_us": int(round(period_ms * 1000)), "delay_us": delay_us,
+            "pulse_us": pulse_us, "exposure_units": exposure_units, "offset_us": offset_us,
+            "cam_edge_us": {"1": 0, "2": off},
+            "cam_flash_us": {"1": delay_us, "2": off + delay_us}}
 
 
 def status_led(mode):
@@ -221,6 +249,9 @@ def main(argv=None):
     ap.add_argument("--trigger-period-ms", type=float, default=10.0)
     ap.add_argument("--trigger-delay-us", type=int, default=900,
                     help="flash after the edge (exposure starts at ~780 us)")
+    ap.add_argument("--offset-us", type=int, default=None,
+                    help="with --trigger: edge cam2 this much after cam1, each camera "
+                         "its own flash (firmware v0.4; 1000 = part 3 of the spin design)")
     ap.add_argument("--gamma", type=int, default=sc.MEASURE_GAMMA)
     ap.add_argument("--out", required=True)
     ap.add_argument("--analyse", action="store_true",
@@ -228,6 +259,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.exposure is None:
         args.exposure = 5 if args.trigger else 80
+    if args.offset_us is not None and not args.trigger:
+        ap.error("--offset-us needs --trigger")
     os.makedirs(args.out, exist_ok=True)
 
     if args.analyse:
@@ -257,9 +290,9 @@ def main(argv=None):
         max_ms = int((args.seconds + 2) * 1000)
         if args.trigger:
             sc.set_trigger_mode(caps, True)
-            teensy.cmd("TRIG_RUN,{},{},{},{}".format(
-                int(round(args.trigger_period_ms * 1000)), args.trigger_delay_us,
-                args.pulse_us, max_ms))
+            for line in trigger_run_commands(args.trigger_period_ms, args.trigger_delay_us,
+                                             args.pulse_us, max_ms, args.offset_us):
+                teensy.cmd(line)
         else:
             teensy.cmd("RUN,{}".format(max_ms))
         t0 = time.monotonic()
@@ -294,6 +327,10 @@ def main(argv=None):
         teensy.close()
 
     save_raw(args.out, got, t0)
+    if args.trigger:
+        with open(os.path.join(args.out, "trigger.json"), "w") as fh:
+            json.dump(trigger_info(args.trigger_period_ms, args.trigger_delay_us, args.pulse_us,
+                                   args.exposure, args.offset_us), fh, indent=1)
     analyse(args.out, load_raw(args.out), args.seconds)
     return 0
 

@@ -3,6 +3,7 @@
 
     python3 -m sp1_vision.trigger_sweep --out ~/strobe_raw/trigger_sweep1
     python3 -m sp1_vision.trigger_sweep --out ~/strobe_raw/trigger_sweep1 --analyse
+    python3 -m sp1_vision.trigger_sweep --out ~/strobe_raw/offset_sweep1 --offset-us 1000         --exposure 5 --min-us 0 --max-us 3000 --step-us 50
 
 The B0332 boards take a trigger at pad F (Teensy pins 4 / 5, firmware v0.2):
 in UVC trigger mode (exposure_auto_priority=1) a camera delivers one frame per
@@ -17,6 +18,11 @@ Shots alternate flash / no flash. The UVC driver has been seen to hold a
 frame back (CLAUDE.md, "the driver holds a frame back"); a frame that is one
 shot late then lights the no-flash slots, which held_back_shift detects and
 undoes.
+
+With --offset-us (firmware v0.4, part 3 of the ball-marks design) cam2 gets
+its edge that much after cam1's (SEQ / SEQ_SHOT) and the one flash is swept
+against cam1's edge: each camera must see it only inside its own window, and
+the windows must not overlap (windows_separation_us > 0).
 
 Frames are matched to shots by arrival time: a frame belongs to the last
 shot sent before it, within one shot spacing. Raw frames are saved, so
@@ -36,6 +42,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sp1_vision import strobe_capture as sc  # noqa: E402
+from sp1_vision import trigger_seq  # noqa: E402
 from sp1_vision.calibration_capture import set_manual_exposure  # noqa: E402
 
 SPACING_S = 0.1          # between shots; frames arrive well within this
@@ -178,6 +185,11 @@ def lit_metric(img, ref):
     return float(img.astype(np.float32).mean() - ref.mean())
 
 
+def windows_separation_us(w1, w2):
+    """cam2's window start minus cam1's window end; negative = they overlap."""
+    return w2["start_us"] - w1["end_us"]
+
+
 def small(buf):
     return cv2.imdecode(np.asarray(buf).reshape(-1), cv2.IMREAD_REDUCED_GRAYSCALE_4)
 
@@ -192,6 +204,15 @@ def build_plan(min_us, max_us, step_us, repeats, seed=0):
     for d in delays:
         plan += [(d, True), (d, False)]
     return plan
+
+
+def shot_commands(delay_us, flash, pulse_us, offset_us):
+    """The serial lines for one shot: SHOT as before, or SEQ + SEQ_SHOT with an offset."""
+    pulse = pulse_us if flash else 0
+    if offset_us is None:
+        return ["SHOT,3,{},{}".format(delay_us, pulse)]
+    return [trigger_seq.seq_command(trigger_seq.sweep_schedule(offset_us, delay_us, pulse)),
+            "SEQ_SHOT"]
 
 
 def reader(cap, stop, out):
@@ -228,8 +249,11 @@ def capture(args):
         for k, (delay, flash) in enumerate(plan):
             while time.monotonic() < t_next:
                 time.sleep(0.001)
-            t = time.monotonic()
-            teensy.cmd("SHOT,3,{},{}".format(delay, args.pulse_us if flash else 0))
+            lines = shot_commands(delay, flash, args.pulse_us, args.offset_us)
+            for line in lines[:-1]:
+                teensy.cmd(line)
+            t = time.monotonic()               # just before the line that fires
+            teensy.cmd(lines[-1])
             shots.append({"t": t, "delay_us": delay, "flash": flash,
                           "warmup": k < WARMUP_SHOTS})
             t_next = t + SPACING_S
@@ -253,7 +277,8 @@ def capture(args):
 
     os.makedirs(args.out, exist_ok=True)
     meta = {"exposure_units": args.exposure, "pulse_us": args.pulse_us,
-            "spacing_s": SPACING_S, "shots": shots, "frames": {}}
+            "spacing_s": SPACING_S, "offset_us": args.offset_us,
+            "shots": shots, "frames": {}}
     for n, frames in got.items():
         d = os.path.join(args.out, "raw", "cam%d" % n)
         os.makedirs(d, exist_ok=True)
@@ -273,8 +298,9 @@ def analyse(out):
     shots = meta["shots"]
     t_shots = [s["t"] for s in shots]
     flash = [s["flash"] for s in shots]
+    offset = meta.get("offset_us")
     result = {"exposure_units": meta["exposure_units"], "pulse_us": meta["pulse_us"],
-              "cameras": {}}
+              "offset_us": offset, "cameras": {}}
     for n, frame_times in sorted(meta["frames"].items()):
         d = os.path.join(out, "raw", "cam%s" % n)
         assigned = assign_frames(t_shots, frame_times, meta["spacing_s"])
@@ -317,9 +343,14 @@ def analyse(out):
         if window is None:
             print("  flash never seen")
         else:
-            print("  exposure %.2f .. %.2f ms after the edge (%.2f ms), "
+            own = ""
+            if offset and n == "2":
+                own = " (%.2f .. %.2f ms after its own edge)" % (
+                    (window["start_us"] - offset) / 1000, (window["end_us"] - offset) / 1000)
+            print("  exposure %.2f .. %.2f ms after %s edge%s (%.2f ms), "
                   "edge spread %.2f / %.2f ms, flash +%.0f grey levels" % (
                       window["start_us"] / 1000, window["end_us"] / 1000,
+                      "cam1's" if offset else "the", own,
                       window["width_us"] / 1000, window["start_spread_us"] / 1000,
                       window["end_spread_us"] / 1000, window["top"]))
     w = [c.get("window") for c in result["cameras"].values()]
@@ -327,6 +358,11 @@ def analyse(out):
         off = w[1]["start_us"] - w[0]["start_us"]
         result["cam2_minus_cam1_start_us"] = off
         print("cam2 starts %+.2f ms after cam1" % (off / 1000))
+        if offset:
+            sep = windows_separation_us(w[0], w[1])
+            result["windows_separation_us"] = sep
+            print("windows apart by %.2f ms" % (sep / 1000) if sep > 0
+                  else "OVERLAP: windows share %.2f ms" % (-sep / 1000))
     with open(os.path.join(out, "result.json"), "w") as f:
         json.dump(result, f, indent=1)
     return result
@@ -341,6 +377,9 @@ def main(argv=None):
     ap.add_argument("--max-us", type=int, default=20000)
     ap.add_argument("--step-us", type=int, default=250)
     ap.add_argument("--repeats", type=int, default=5)
+    ap.add_argument("--offset-us", type=int, default=None,
+                    help="edge cam2 this much after cam1 (firmware v0.4 SEQ); "
+                         "the flash delay is then measured from cam1's edge")
     ap.add_argument("--gamma", type=int, default=sc.MEASURE_GAMMA)
     ap.add_argument("--analyse", action="store_true",
                     help="analyse the capture already in --out, capture nothing")
