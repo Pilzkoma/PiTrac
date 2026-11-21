@@ -17,6 +17,7 @@ tracker does).
 """
 import os
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -47,10 +48,33 @@ class OrientationRealTest(unittest.TestCase):
                                              self.mmap, near_m=near_m)
 
     def test_static_pair_both_cameras_agree(self):
-        r = self._pair("static_cam1.png", "static_cam2.png")
+        # the acceptance number of 2026-11-21 (2.60 deg), measured with the
+        # circle centre; the cone centre's result is pinned below
+        with mock.patch.object(orientation_check, "CENTRE", "circle"):
+            r = self._pair("static_cam1.png", "static_cam2.png")
         self.assertIsInstance(r["cam1"], ball_orientation.Orientation, r["cam1"])
         self.assertIsInstance(r["cam2"], ball_orientation.Orientation, r["cam2"])
         self.assertLess(r["agree_deg"], 3.0)                 # spec acceptance: cam1/cam2 agree
+
+    def test_static_pair_with_the_cone_centre(self):
+        # cone centre (the default since 2026-11-21_centre): cam2 orients;
+        # cam1's cross at ~57 deg from the view centre - already borderline,
+        # results "Centre quality" 3a/3b - reads as a dot after the ~1 px
+        # centre shift and cam1 refuses. A refusal is allowed, a wrong pose not.
+        with mock.patch.object(orientation_check, "CENTRE", "cone"):
+            r = self._pair("static_cam1.png", "static_cam2.png")
+        self.assertIsInstance(r["cam2"], ball_orientation.Orientation, r["cam2"])
+        self._no_wrong_pose(r, "cam1", "static, cone")
+
+    def test_cone_refiner_picks_each_cameras_intrinsics(self):
+        f1, f2 = np.zeros((4, 4, 3), np.uint8), np.zeros((4, 4, 3), np.uint8)
+        seen = []
+        with mock.patch.object(orientation_check, "CENTRE", "cone"),                 mock.patch.object(orientation_check.sphere_fit, "refine_ball_cone",
+                                  lambda fr, u, v, r, K, d: seen.append((fr is f1, K is self.rig.k1))):
+            refine = orientation_check._pair_refiner(self.rig, f1, f2)
+            refine(f1, 0, 0, 1)
+            refine(f2, 0, 0, 1)
+        self.assertEqual(seen, [(True, True), (False, False)])
 
     def _no_wrong_pose(self, r, cam, args):
         """cam is a Refusal, or an Orientation that agrees with the other

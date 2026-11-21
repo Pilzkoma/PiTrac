@@ -47,7 +47,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from sp1_vision import ball_orientation, ball_pair, frame_analysis, mark_detect  # noqa: E402
+from sp1_vision import ball_orientation, ball_pair, frame_analysis, mark_detect, sphere_fit  # noqa: E402
 from sp1_vision import mark_map  # noqa: E402
 from sp1_vision import stereo_geometry, strobe_event  # noqa: E402
 from sp1_vision.ball_orientation import Orientation, Refusal  # noqa: E402
@@ -75,6 +75,11 @@ MIN_SPEED_MPS = strobe_event.MIN_SPEED_MPS   # slower: ball at rest, no comparis
 # number (3 deg): 3 / 3.75 = 0.8 mm.
 POSE_DEG_PER_MM_ACROSS = 3.75
 CENTRE_FLAG_MM = 0.8            # across-ray residual from the neighbours' line
+# How the ball centre is measured on its outline (CLI --centre):
+#   "circle" - frame_analysis.refine_ball, a circle fit in the distorted image;
+#   "cone"   - sphere_fit.refine_ball_cone, the cone of rays tangent to the
+#              sphere (no projection / distortion bias; 2026-11-21_centre).
+CENTRE = "cone"
 BORDER_PX = 2.0                 # centre flagged when a used circle comes this near the edge
 
 
@@ -83,6 +88,19 @@ def _gray(img):
     if img.ndim == 3:
         return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img
+
+
+def _pair_refiner(rig, f1, f2):
+    """The outline refiner for a frame pair under CENTRE. ball_pair calls one
+    refine(frame, u, v, r) for both frames, so the cone refiner picks each
+    camera's intrinsics by which frame object it is handed."""
+    if CENTRE == "circle":
+        return frame_analysis.refine_ball
+
+    def refine(frame, u, v, r):
+        K, d = (rig.k1, rig.d1) if frame is f1 else (rig.k2, rig.d2)
+        return sphere_fit.refine_ball_cone(frame, u, v, r, K, d)
+    return refine
 
 
 def find_ball(rig, g1, g2, near_m=None):
@@ -96,8 +114,9 @@ def find_ball(rig, g1, g2, near_m=None):
     Hough then fits circles to the mask edge and the depth jumps by 30 mm.
     """
     f1, f2 = strobe_event.bgr(g1), strobe_event.bgr(g2)
+    refine = _pair_refiner(rig, f1, f2)
     if near_m is None:
-        return ball_pair.find_ball_pair(rig, f1, f2,
+        return ball_pair.find_ball_pair(rig, f1, f2, refine=refine,
                                         max_candidates=strobe_event.MAX_CANDIDATES)
     near = np.asarray(near_m, float).reshape(3)
     low, high = ball_pair.radius_bounds_px(rig)
@@ -124,14 +143,14 @@ def find_ball(rig, g1, g2, near_m=None):
             uv = uv.reshape(2)
             reach = 2.0 * ball_pair.apparent_radius_px(K[0, 0], float(np.linalg.norm(p)))
             local.append([c for c in cands if math.hypot(c[0] - uv[0], c[1] - uv[1]) <= reach])
-        rescue1 = ball_pair._outline_measured(f1, local[0], frame_analysis.refine_ball)
-        rescue2 = ball_pair._outline_measured(f2, local[1], frame_analysis.refine_ball)
+        rescue1 = ball_pair._outline_measured(f1, local[0], refine)
+        rescue2 = ball_pair._outline_measured(f2, local[1], refine)
         _, (rescued, _) = gated(rescue1, rescue2)
         if rescued is not None:
             return ball_pair._to_ball_pair(rescued), None
     if best is None:
         return None, reason
-    refined = ball_pair._refined_pair(rig, f1, f2, best, frame_analysis.refine_ball)
+    refined = ball_pair._refined_pair(rig, f1, f2, best, refine)
     return ball_pair._to_ball_pair(refined if refined is not None else best), None
 
 
@@ -259,7 +278,8 @@ def mono_ball(rig, g, cam, expected_m, up, height_m):
     if not cands:
         return None
     u, v, r = min(cands, key=lambda c: math.hypot(c[0] - uv0[0], c[1] - uv0[1]))
-    fit = frame_analysis.refine_ball(frame, u, v, r)
+    fit = (frame_analysis.refine_ball(frame, u, v, r) if CENTRE == "circle"
+           else sphere_fit.refine_ball_cone(frame, u, v, r, K, d))
     if fit is not None and math.hypot(fit[0] - u, fit[1] - v) <= 0.25 * r0:
         u, v = float(fit[0]), float(fit[1])
     p = cv2.undistortPoints(np.array([[[u, v]]], np.float64), K, d).reshape(2)
@@ -708,7 +728,15 @@ def _median(xs):
 
 
 def main(argv=None):
+    global CENTRE
     argv = sys.argv[1:] if argv is None else argv
+    if "--centre" in argv:
+        i = argv.index("--centre")
+        CENTRE = argv[i + 1]
+        if CENTRE not in ("circle", "cone"):
+            print("--centre circle|cone")
+            return 2
+        argv = argv[:i] + argv[i + 2:]
     rig = stereo_geometry.load_rig()
     stereo_geometry.validate_rig(rig)
     mmap = mark_map.load_map()

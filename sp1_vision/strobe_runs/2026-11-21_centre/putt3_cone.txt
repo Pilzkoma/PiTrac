@@ -1,0 +1,71 @@
+26 frame pairs 44.86-45.13 s
+   t cam1   t cam2  grid    ball Z  along across  cam1                          cam2                          agree  centre flag
+ 44.8714  44.8711 +0.000  530.8  -23.8   3.52  ORIENT 4 marks 0.38 deg       refused: best pose leaves a d -      3.5 mm across the ray off its neighbours' line (~13 deg)
+ 44.8795  44.8792 +0.010  545.9  +15.7   1.80  refused: ambiguous: one misre ORIENT 5 marks 2.23 deg       -      1.8 mm across the ray off its neighbours' line (~7 deg)
+ 44.8917  44.8914 +0.020  529.6   -4.6   0.65  refused: ambiguous: one misre ORIENT 4 marks 0.62 deg       -      
+ 44.8991  44.8994 +0.030  529.7   -2.8   0.29  refused: best pose leaves a d ORIENT 4 marks 0.53 deg       -      
+ 44.9111  44.9114 +0.040  530.5   -1.3   0.33  ORIENT 6 marks 0.75 deg       refused: best pose leaves a c -      
+ 44.9197  44.9194 +0.050  529.6   -0.1   0.32  refused: best pose leaves a d refused: best pose leaves a c -      
+ 44.9317  44.9315 +0.060  531.2   +3.4   0.55  refused: best pose leaves a c ORIENT 5 marks 0.69 deg       -      
+ 44.9398  44.9394 +0.070  526.8   -1.7   0.25  refused: best pose leaves a d ORIENT 4 marks 0.90 deg       -      
+ 44.9517  44.9514 +0.080  528.7   +1.3   0.35  ORIENT 4 marks 1.31 deg       refused: best pose leaves a d -      
+ 44.9591  44.9588 +0.090  528.3   +1.1   0.38  refused: best pose leaves a d refused: best pose leaves a d -      
+ 44.9710  44.9712 +0.100  522.4   -6.7   0.47  refused: best pose leaves a d refused: best pose leaves a b -      
+ 44.9795  44.9788 +0.110  530.6s  +3.5   0.58  ORIENT 5 marks 1.25 deg       ORIENT 4 marks 0.72 deg       1.69   
+ 44.9916  44.9914 +0.120  532.6   +6.4   0.34  ORIENT 4 marks 1.30 deg       refused: no two of 3 classifi -      
+ 44.9991  44.9994 +0.130  517.3  -14.0   0.78  refused: ambiguous: one misre ORIENT 4 marks 0.56 deg       -      
+ 45.0117  45.0114 +0.140  537.0  +10.8   0.39  ORIENT 5 marks 1.70 deg       ORIENT 5 marks 1.39 deg       5.40   
+ 45.0197  45.0194 +0.150  530.5   +1.8   0.76  ORIENT 4 marks 0.75 deg       refused: best pose leaves a d -      
+ 45.0317  45.0314 +0.160  525.4   -4.5   0.17  refused: best pose leaves a d refused: best pose leaves a d -      
+ 45.0397  45.0389 +0.170  526.8   -1.7   0.90  refused: best pose leaves a d refused: no two of 3 classifi -      0.9 mm across the ray off its neighbours' line (~3 deg)
+ 45.0517  45.0514 +0.180  533.3m  +6.2   0.81  refused: best pose leaves a d refused: ball not found in th -      0.8 mm across the ray off its neighbours' line (~3 deg)
+ 45.0597  45.0594 +0.190  528.6   -2.1   1.46  refused: best pose leaves a d refused: best pose leaves a d -      1.5 mm across the ray off its neighbours' line (~5 deg)
+ 45.0714  45.0711 +0.200  528.5m  -0.6   0.95  ORIENT 5 marks 1.60 deg       refused: ball not found in th -      1.0 mm across the ray off its neighbours' line (~4 deg)
+ 45.0790  45.0791 +0.210  528.2m  -6.1   5.14  refused: ball not found in th refused: only 2 classified ma -      5.1 mm across the ray off its neighbours' line (~19 deg)
+ 45.0915  45.0913 +0.220  535.5m  +2.5   0.45  refused: ambiguous: one misre refused: ball not found in th -      
+ 45.0996  45.0994 +0.230  537.1m  +1.8   3.06  ORIENT 4 marks 2.88 deg       refused: ball not found in th -      3.1 mm across the ray off its neighbours' line (~11 deg)
+ 45.1117  45.1114 +0.240    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
+ 45.1191  45.1194 +0.250    -        -      -  refused: no ball: not on the  refused: no ball: not on the  -      
+
+rolling comparison (consecutive Orientations, same camera)
+cam   t_a      t_b      dt ms  v m/s  pred deg  meas deg  err %   axis deg  (lean up / to v)  sign  flagged  across mm
+cam2  44.8795  44.8917    10   1.42      38.1      10.4    -73      15.2  (-14.0 /  +5.8)    +     F        1.80
+cam2  44.8917  44.8991    10   1.40      37.5      13.1    -65       5.5  ( -5.5 /  +0.5)    +              0.65
+cam2  44.8991  44.9317    30   1.36     109.2      52.3    -52       3.2  ( -1.2 /  -3.0)    +              0.55
+cam2  44.9317  44.9398    10   1.31      35.1      21.4    -39       5.2  ( -4.8 /  +2.0)    +              0.55
+cam1  44.9517  44.9795    30   1.23      98.7      88.8    -10       1.7  ( -1.3 /  +1.0)    +              0.58
+cam1  44.9795  44.9916    10   1.19      31.9      29.4     -8       7.6  ( -3.7 /  +6.6)    +              0.58
+cam2  44.9795  44.9991    20   1.19      63.9      60.9     -5       7.1  ( -4.9 /  +5.1)    +              0.78
+cam1  44.9916  45.0117    20   1.18      63.5      61.3     -3       4.5  ( -0.7 /  +4.5)    +              0.39
+cam2  44.9991  45.0117    10   1.18      31.6      32.0     +1       9.9  ( +9.9 /  +0.7)    +              0.78
+cam1  45.0117  45.0197    10   1.17      31.4      30.8     -2       4.8  ( +3.1 /  +3.6)    +              0.76
+cam1  45.0714  45.0996    30   1.22      98.1      86.8    -12      14.7  ( -3.8 / +14.1)    +     F        3.06
+
+summary
+frame pairs 26, ball on the track in 24 (1 seed frame(s), 5 monocular)
+cam1: Orientation in 9 of 26 frames (35 %), 9 of 24 with the ball found (38 %)
+cam2: Orientation in 8 of 26 frames (31 %), 8 of 24 with the ball found (33 %)
+centre residual from the neighbours' line: along the ray median 3.1 mm (max 23.8), across median 0.57 mm (90th percentile 2.68, max 5.14); flagged frames 8 (across over 0.8 mm 8, circle at the edge 0)
+centre quality unknown (too few tracked neighbours, not counted as unflagged): 0 frame(s)
+both cameras oriented in 2 frames: agree median 3.55 deg, max 5.40 deg, over 3 deg 1
+both cameras oriented in 2 unflagged frames: agree median 3.55 deg, max 5.40 deg, over 3 deg 1
+a pose in one camera only: 11; carried into the other camera it puts a classified blob off every site in 1, a wrong shape on a site in 7
+missing-ink check passed only on unopened dark pixels: 0 site(s) in 0 frame(s)
+refusals by reason:
+   cam1   8  best pose leaves a dot where a cross belongs
+   cam1   4  ambiguous: one misread mark from another pose
+   cam1   2  no ball
+   cam1   1  best pose leaves a dot where a bar belongs
+   cam1   1  best pose leaves a cross where a bar belongs
+   cam1   1  ball not found in this camera
+   cam2   6  best pose leaves a dot where a cross belongs
+   cam2   4  ball not found in this camera
+   cam2   2  best pose leaves a cross where a bar belongs
+   cam2   2  no two of # classified marks fit a pair of neighbouring sites
+   cam2   2  no ball
+   cam2   1  best pose leaves a bar where a cross belongs
+   cam2   1  only # classified marks
+rolling: 11 comparisons, median |angle error| 10 %, median axis error 5.5 deg, signs right 11 of 11 (later half of the comparisons: 6 of 6)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 4 %, median axis error 7.3 deg
+rolling, flagged centres left out: 9 of 11 comparisons, median |angle error| 8 %, median axis error 5.2 deg, signs right 9 of 9 (0 with an unknown centre left out too)
+         later half of the comparisons (the list split in two, not half the roll time): median |angle error| 3 %, median axis error 7.1 deg

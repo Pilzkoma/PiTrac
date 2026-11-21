@@ -127,6 +127,29 @@ class RefineBallCone(unittest.TestCase):
             with self.subTest(deg=deg):
                 self.assertLess(self._err(self._cone, centre, ink=True, R=R), 0.2)
 
+    def test_marked_ball_with_a_dim_lower_limb(self):
+        # the real ball: IR from above, the lower limb at ~30 % brightness, so
+        # a dark mark's edge out-crisps the limb (2026-11-21 static pair: the
+        # outermost-strong-edge rule took mark edges, centre 3.8 px off)
+        rs = np.random.RandomState(9)
+        for k in range(6):
+            q = rs.normal(size=4)
+            q /= np.linalg.norm(q)
+            w, x, y, z = q
+            R = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                          [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                          [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+            centre = _direction(8.0 + 3 * k, 100.0 + 40 * k) * 0.44
+            img = render_ball(self.m, self.k, self.d, centre, R, ball_grey=200, ink_grey=40,
+                              background=15, oversample=4, gradient=((0.0, 1.0), 0.3))
+            u, v, r = self._seed(centre)
+            fit = self._cone(img, u, v, r)
+            with self.subTest(pose=k):
+                self.assertIsNotNone(fit)
+                self.assertLess(float(np.hypot(*(np.array(fit[:2]) - self._truth_px(centre)))), 0.3)
+                alpha = np.arcsin(R_M / np.linalg.norm(centre))
+                self.assertAlmostEqual(fit[2] / (self.k[0, 0] * np.tan(alpha)), 1.0, delta=0.03)
+
     def test_the_circle_fit_is_biased_off_axis(self):
         # pins the error the cone fit removes: projection + distortion
         centre = _direction(20.0) * 0.44
