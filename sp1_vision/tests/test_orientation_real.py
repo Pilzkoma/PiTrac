@@ -52,21 +52,50 @@ class OrientationRealTest(unittest.TestCase):
         self.assertIsInstance(r["cam2"], ball_orientation.Orientation, r["cam2"])
         self.assertLess(r["agree_deg"], 3.0)                 # spec acceptance: cam1/cam2 agree
 
+    def _no_wrong_pose(self, r, cam, args):
+        """cam is a Refusal, or an Orientation that agrees with the other
+        camera within 3 deg (both oriented) or, alone, puts every classified
+        blob of the other camera on a predicted site with >= 2 shape matches."""
+        if isinstance(r[cam], ball_orientation.Refusal):
+            return
+        self.assertIsInstance(r[cam], ball_orientation.Orientation)
+        if r["agree_deg"] is not None:
+            self.assertLess(r["agree_deg"], 3.0, args)
+            return
+        other = "cam2" if cam == "cam1" else "cam1"
+        check = r["cross_check"][other]
+        self.assertIsNotNone(check, args)
+        self.assertEqual(check["off_site"], 0, (args, check))
+        self.assertGreaterEqual(check["matches"], 2, (args, check))
+
     @unittest.expectedFailure
     def test_line_into_cross_still_identified(self):
-        # Fails on the real frame (2026-11-21, task-5 report): cam1 refuses
-        # with "best pose leaves a dot where a cross belongs" - not because
-        # of the line (that cross classifies, see the next test) but because
-        # a second cross at 58 deg from the view centre, blurred at the limb,
-        # reads as a dot (solidity 0.86 against SOLID 0.85). Kept as written
-        # in the plan; it passes when limb crosses classify.
+        # The plan's target, tightened. Fails on the real frame today (see
+        # test_line_into_cross_frame_today, which pins the present refusal so
+        # that any other failure of this test shows there).
         r = self._pair("putt_cam1_t016.0788.jpg", "putt_cam2_t016.0786.jpg", PUTT_NEAR_M)
         self.assertIsNotNone(r["ball"], r.get("reason"))
         o = r["cam1"]
         self.assertIsInstance(o, ball_orientation.Orientation, o)
-        self.assertIn("cross", [self.mmap.shapes[s] for _, s in o.matched])
-        if isinstance(r["cam2"], ball_orientation.Orientation):
-            self.assertLess(r["agree_deg"], 3.0)
+        _, blobs = r["detail"]["cam1"]
+        central = min(range(len(blobs)), key=lambda k: blobs[k].theta_deg)
+        matched = dict(o.matched)
+        self.assertIn(central, matched)                     # the cross the line runs into
+        self.assertEqual(self.mmap.shapes[matched[central]], "cross")
+        self._no_wrong_pose(r, "cam1", "putt")
+        self._no_wrong_pose(r, "cam2", "putt")
+
+    def test_line_into_cross_frame_today(self):
+        # Characterisation (2026-11-21): cam1 refuses with "best pose leaves a
+        # dot where a cross belongs" - not because of the line (that cross
+        # classifies, next test) but because a second cross at 58 deg from
+        # the view centre, blurred at the limb, reads as a dot (solidity 0.86
+        # against SOLID 0.85). cam2 must not give a wrong pose meanwhile.
+        r = self._pair("putt_cam1_t016.0788.jpg", "putt_cam2_t016.0786.jpg", PUTT_NEAR_M)
+        self.assertIsNotNone(r["ball"], r.get("reason"))
+        self.assertIsInstance(r["cam1"], ball_orientation.Refusal, r["cam1"])
+        self.assertIn("dot where a cross belongs", r["cam1"].reason)
+        self._no_wrong_pose(r, "cam2", "putt")
 
     def test_cross_with_the_line_running_in_classifies_as_cross(self):
         # putt_cam1_t016.0788: the thin printed line runs into the cross
@@ -163,6 +192,34 @@ class RollingCheckTest(unittest.TestCase):
             None, self.rig, None, records=self._records([0.8, 0.0, 0.05], -1.0))
         self.assertTrue(comps)
         self.assertFalse(any(c["sign_ok"] for c in comps))
+
+    def test_centre_flag_reads_the_across_ray_residual(self):
+        # Ten centres on a straight roll; one moved 10 mm along camera 1's
+        # ray (costs < 1 deg of pose: not flagged), one moved 1.5 mm across it
+        # (~6 deg: flagged), one circle touching the right image edge.
+        recs = self._records([0.8, 0.0, 0.05])
+        for r in recs:
+            r["ball"].uv1, r["ball"].uv2 = (640.0, 600.0), (830.0, 600.0)
+        k_along, k_across, k_edge = 3, 6, 8
+        p = recs[k_along]["ball"].xyz_m
+        recs[k_along]["ball"].xyz_m = p + 0.010 * p / np.linalg.norm(p)
+        recs[k_across]["ball"].xyz_m = recs[k_across]["ball"].xyz_m + np.array([0.0, 0.0015, 0.0])
+        recs[k_edge]["ball"].uv2 = (1250.0, 600.0)
+        orientation_check.centre_quality(recs, self.rig)
+        flagged = [k for k, r in enumerate(recs) if r["centre_flag"]]
+        self.assertEqual(flagged, [k_across, k_edge], [r["centre_flag"] for r in recs])
+        self.assertGreater(recs[k_along]["centre_resid_mm"], 9.0)
+        self.assertLess(recs[k_along]["centre_across_mm"], 0.8)
+        self.assertEqual(recs[k_edge]["at_border"], ["cam2"])
+
+    def test_comparisons_with_a_flagged_frame_are_marked(self):
+        recs = self._records([0.8, 0.0, 0.05])
+        for r in recs:
+            r["centre_flag"] = None
+        recs[4]["centre_flag"] = "test"
+        comps = orientation_check.rolling_check(None, self.rig, None, records=recs)
+        marked = sorted({(c["t_a"], c["t_b"]) for c in comps if c["flagged"]})
+        self.assertEqual(marked, [(recs[3]["t"], recs[4]["t"]), (recs[4]["t"], recs[5]["t"])])
 
     def test_arrival_times_snap_to_the_trigger_period(self):
         ts = [16.0310, 16.0390, 16.0509, 16.0589, 16.0709, 16.0909]

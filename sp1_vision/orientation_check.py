@@ -67,6 +67,15 @@ VELOCITY_WINDOW_S = 0.06        # local fit_motion over +- this round a frame pa
 MIN_VELOCITY_POINTS = 4
 MAX_GAP_S = 0.030               # rolling comparison only across at most this dt
 MIN_SPEED_MPS = strobe_event.MIN_SPEED_MPS   # slower: ball at rest, no comparison
+# A ball-centre error across the line of sight turns every unwrapped normal
+# by about its size / r: measured on real frames (cam1 16.1389, 16.1509 s,
+# centre moved by +-0.5..2 mm) 3.7-4.2 deg per mm across, 0.08 deg per mm
+# along the ray (10 mm along: 0.8 deg). So the centre is flagged on its
+# across-ray residual, at the size that alone costs the static acceptance
+# number (3 deg): 3 / 3.75 = 0.8 mm.
+POSE_DEG_PER_MM_ACROSS = 3.75
+CENTRE_FLAG_MM = 0.8            # across-ray residual from the neighbours' line
+BORDER_PX = 2.0                 # centre flagged when a used circle comes this near the edge
 
 
 def _gray(img):
@@ -372,8 +381,68 @@ def orient_frames(frames, rig, mmap, period_s=TRIGGER_PERIOD_S, up_cam=UP_CAM):
                        "ball": None, "reason": why, "agree_deg": None, "detail": {},
                        "cross_check": {"cam1": None, "cam2": None},
                        "ink_audit": {"cam1": 0, "cam2": 0},
+                       "centre_resid_mm": None, "centre_along_mm": None,
+                       "centre_across_mm": None, "at_border": [], "centre_flag": None,
                        "cam1": Refusal("no ball: " + why), "cam2": Refusal("no ball: " + why)}
+    centre_quality(recs, rig)
     return recs
+
+
+def centre_quality(recs, rig):
+    """Per tracked record: how far its ball centre may be trusted.
+
+    The residual is the centre's offset from a straight line fitted (least
+    squares) through the OTHER tracked centres within VELOCITY_WINDOW_S,
+    evaluated at its time (None with fewer than three others or less than
+    20 ms covered), split along camera 1's ray to the ball and across it:
+    centre_resid_mm (length), centre_along_mm, centre_across_mm. Only the
+    across part moves the pose (POSE_DEG_PER_MM_ACROSS); stereo depth
+    scatter is almost all along. at_border: the cameras whose circle used
+    for the centre comes within BORDER_PX of the image edge (a cut circle
+    shifts the fitted centre). centre_flag: a plain reason when the across
+    residual exceeds CENTRE_FLAG_MM or a circle touches the edge, else None.
+    The flag does not stop a frame from being oriented; rolling_check marks
+    comparisons that use a flagged frame, and the summary reports both.
+    """
+    w, h = rig.image_size
+    tracked = [k for k, r in enumerate(recs) if r["ball"] is not None]
+    for k in tracked:
+        r = recs[k]
+        others = [j for j in tracked if j != k
+                  and abs(recs[j]["tg"] - r["tg"]) <= VELOCITY_WINDOW_S + 1e-9]
+        resid = along = across = None
+        if len(others) >= 3:
+            t = np.array([recs[j]["tg"] for j in others]) - r["tg"]
+            if t.max() - t.min() >= 0.02:
+                x = np.array([recs[j]["ball"].xyz_m for j in others])
+                cols = [t, np.ones(len(t))]
+                if len(others) >= 5:
+                    cols.insert(0, t * t)    # the ball decelerates: a parabola
+                coef = np.linalg.lstsq(np.vstack(cols).T, x, rcond=None)[0]
+                d = 1000.0 * (r["ball"].xyz_m - coef[-1])
+                ray = r["ball"].xyz_m / np.linalg.norm(r["ball"].xyz_m)
+                resid = float(np.linalg.norm(d))
+                along = float(d @ ray)
+                across = float(np.linalg.norm(d - along * ray))
+        b = r["ball"]
+        if isinstance(b, MonoBall):
+            circles = [(b.cam, b.uv, b.radius_px)]
+        else:
+            circles = [("cam1", b.uv1, b.radius1_px), ("cam2", b.uv2, b.radius2_px)]
+        border = [cam for cam, (u, v), rad in circles
+                  if u - rad < BORDER_PX or v - rad < BORDER_PX
+                  or u + rad > w - 1 - BORDER_PX or v + rad > h - 1 - BORDER_PX]
+        why = []
+        if across is not None and across > CENTRE_FLAG_MM:
+            why.append("%.1f mm across the ray off its neighbours' line (~%.0f deg)" % (
+                across, across * POSE_DEG_PER_MM_ACROSS))
+        if border:
+            why.append("circle at the image edge in %s" % "/".join(border))
+        r["centre_resid_mm"] = resid
+        r["centre_along_mm"] = along
+        r["centre_across_mm"] = across
+        r["at_border"] = border
+        r["centre_flag"] = "; ".join(why) or None
 
 
 def _mono_record(rig, g1, g2, mmap, expected, recs, up):
@@ -440,6 +509,13 @@ def _local_velocity(recs, tmid):
     return vel, {i for i, k in zip(idx, inl) if k}
 
 
+def _worst_across(ra, rb):
+    """The larger across-ray centre residual of two records, None if either
+    is unknown (no centre_quality, or too few neighbours)."""
+    xs = [r.get("centre_across_mm") for r in (ra, rb)]
+    return None if any(x is None for x in xs) else max(xs)
+
+
 def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
                   records=None):
     """Measured rotation between consecutive Orientations of one camera
@@ -449,7 +525,9 @@ def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
     One dict per comparison: cam, t_a, t_b (arrival times of cam1's frames),
     dt, speed, pred_deg, meas_deg, angle_err_pct, axis_err_deg, sign_ok
     (measured axis on the predicted axis' side), lean_up_deg / lean_v_deg
-    (measured axis' elevation towards up / towards v), rate_ratio.
+    (measured axis' elevation towards up / towards v), rate_ratio,
+    flagged (either frame's centre_flag is set, see centre_quality),
+    across_mm (the larger across-ray centre residual of the two, or None).
     """
     recs = (orient_frames(frames, rig, mmap, period_s, up_cam) if records is None
             else records)
@@ -489,7 +567,9 @@ def rolling_check(frames, rig, mmap, up_cam=UP_CAM, period_s=TRIGGER_PERIOD_S,
                 "angle_err_pct": 100.0 * (meas - pred) / pred,
                 "axis_err_deg": axis_err, "sign_ok": axis_err < 90.0,
                 "lean_up_deg": lean_up, "lean_v_deg": lean_v,
-                "rate_ratio": meas / pred})
+                "rate_ratio": meas / pred,
+                "flagged": bool(recs[a].get("centre_flag") or recs[b].get("centre_flag")),
+                "across_mm": _worst_across(recs[a], recs[b])})
     out.sort(key=lambda c: (c["t_a"], c["cam"]))
     return out
 
@@ -617,26 +697,31 @@ def main(argv=None):
         frames = [(t1, g1, g2) for t1, g1, g2, _ in loaded]
         recs = orient_frames(frames, rig, mmap)
         print("%d frame pairs %.2f-%.2f s" % (len(recs), float(argv[3]), float(argv[4])))
-        print("   t cam1   t cam2  grid    ball Z   cam1                          "
-              "cam2                          agree")
+        print("   t cam1   t cam2  grid    ball Z  along across  cam1                          "
+              "cam2                          agree  centre flag")
         for r, (_, _, _, t2) in zip(recs, loaded):
             z = ("%6.1f%s" % (r["ball"].depth_mm, "s" if r["seed"] else (
                 "m" if isinstance(r["ball"], MonoBall) else " "))
                  if r["ball"] is not None else "   -   ")
-            print("%8.4f %8.4f %+6.3f %s  %-29s %-29s %s" % (
-                r["t"], t2, r["tg"] - recs[0]["tg"], z, _fmt(r["cam1"])[:29],
+            res = ("%+5.1f %6.2f" % (r["centre_along_mm"], r["centre_across_mm"])
+                   if r["centre_resid_mm"] is not None else "    -      -")
+            print("%8.4f %8.4f %+6.3f %s %s  %-29s %-29s %-5s  %s" % (
+                r["t"], t2, r["tg"] - recs[0]["tg"], z, res, _fmt(r["cam1"])[:29],
                 _fmt(r["cam2"])[:29],
-                "%.2f" % r["agree_deg"] if r["agree_deg"] is not None else "-"))
+                "%.2f" % r["agree_deg"] if r["agree_deg"] is not None else "-",
+                r["centre_flag"] or ""))
         comps = rolling_check(frames, rig, mmap, records=recs)
         print("\nrolling comparison (consecutive Orientations, same camera)")
         print("cam   t_a      t_b      dt ms  v m/s  pred deg  meas deg  err %   axis deg"
-              "  (lean up / to v)  sign")
+              "  (lean up / to v)  sign  flagged  across mm")
         for c in comps:
             print("%s %8.4f %8.4f %5.0f  %5.2f  %8.1f  %8.1f  %+5.0f  %8.1f  (%+5.1f / %+5.1f)"
-                  "    %s" % (
+                  "    %-5s %-7s  %s" % (
                       c["cam"], c["t_a"], c["t_b"], c["dt"] * 1000, c["speed"], c["pred_deg"],
                       c["meas_deg"], c["angle_err_pct"], c["axis_err_deg"], c["lean_up_deg"],
-                      c["lean_v_deg"], "+" if c["sign_ok"] else "WRONG"))
+                      c["lean_v_deg"], "+" if c["sign_ok"] else "WRONG",
+                      "F" if c["flagged"] else "",
+                      "%.2f" % c["across_mm"] if c["across_mm"] is not None else "-"))
         print("\nsummary")
         n = len(recs)
         nb = sum(1 for r in recs if r["ball"] is not None)
@@ -652,11 +737,24 @@ def main(argv=None):
             for r in recs:
                 if isinstance(r[cam], Refusal):
                     reasons[(cam, _reason_class(r[cam].reason))] += 1
-        agrees = [r["agree_deg"] for r in recs if r["agree_deg"] is not None]
-        if agrees:
-            print("both cameras oriented in %d frames: agree median %.2f deg, max %.2f deg, "
-                  "over 3 deg %d" % (len(agrees), _median(agrees), max(agrees),
-                                     sum(1 for a in agrees if a >= 3.0)))
+        alongs = [abs(r["centre_along_mm"]) for r in recs if r["centre_resid_mm"] is not None]
+        acrosses = [r["centre_across_mm"] for r in recs if r["centre_resid_mm"] is not None]
+        if acrosses:
+            print("centre residual from the neighbours' line: along the ray median %.1f mm "
+                  "(max %.1f), across median %.2f mm (90th percentile %.2f, max %.2f); "
+                  "flagged frames %d (across over %.1f mm %d, circle at the edge %d)" % (
+                      _median(alongs), max(alongs), _median(acrosses),
+                      float(np.percentile(acrosses, 90)), max(acrosses),
+                      sum(1 for r in recs if r["centre_flag"]), CENTRE_FLAG_MM,
+                      sum(1 for x in acrosses if x > CENTRE_FLAG_MM),
+                      sum(1 for r in recs if r["at_border"])))
+        for label, keep in (("", lambda r: True),
+                            ("unflagged ", lambda r: not r["centre_flag"])):
+            agrees = [r["agree_deg"] for r in recs if r["agree_deg"] is not None and keep(r)]
+            if agrees:
+                print("both cameras oriented in %d %sframes: agree median %.2f deg, max %.2f "
+                      "deg, over 3 deg %d" % (len(agrees), label, _median(agrees),
+                                              max(agrees), sum(1 for a in agrees if a >= 3.0)))
         lone = [r["cross_check"][cam] for r in recs for cam in ("cam1", "cam2")
                 if r["cross_check"][cam] is not None and r["agree_deg"] is None]
         print("a pose in one camera only: %d; carried into the other camera it puts a "
@@ -680,6 +778,16 @@ def main(argv=None):
             print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
                   % (_median([abs(c["angle_err_pct"]) for c in half]),
                      _median([c["axis_err_deg"] for c in half])))
+            clean = [c for c in comps if not c["flagged"]]
+            print("rolling, flagged centres left out: %d of %d comparisons, median |angle "
+                  "error| %.0f %%, median axis error %.1f deg, signs right %d of %d" % (
+                      len(clean), len(comps), _median([abs(c["angle_err_pct"]) for c in clean]),
+                      _median([c["axis_err_deg"] for c in clean]),
+                      sum(c["sign_ok"] for c in clean), len(clean)))
+            chalf = clean[len(clean) // 2:]
+            print("         late half: median |angle error| %.0f %%, median axis error %.1f deg"
+                  % (_median([abs(c["angle_err_pct"]) for c in chalf]),
+                     _median([c["axis_err_deg"] for c in chalf])))
         if sheet:
             _sheet(recs, mmap, sheet)
             print("sheet: %s" % sheet)

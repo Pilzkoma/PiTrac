@@ -58,16 +58,63 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
      sign   - met: 49 of 49 frame pairs, early and late.
      axis   - met in putt 3 only; putts 1 and 2 have median axis errors of
               13-15 deg (late halves 13.5 and 19.4 deg).
-   The axis error is noise, not a bias: its lean towards up and towards v
-   changes sign from pair to pair (tables), and with ~21 deg per 10 ms a
-   rotation error of 3-5 deg between two poses tips the axis by 8-15 deg.
-   That matches the cam1/cam2 disagreement of 1-4 deg in the same frames.
-   The worst pairs sit where the centre is weakest: next to a monocular
-   frame (putt 1, 8.8508-8.8708: 20 / 33 deg) and at the end of putt 2
-   (16.30-16.33 s, ball at cam2's edge, stereo depth jumping 385 -> 403 mm:
-   +20..+45 % and 35-51 deg). Comparisons over 20-30 ms are much cleaner
-   (putt 3: 5-8 deg) because the pose error is the same size and the turn
-   two to three times larger.
+   (Superseded by the fix round below: the first version of this paragraph
+   called the axis error "noise, not a bias" without separating out the
+   ball-centre error. It is mostly centre error.)
+
+   Centre quality (fix round 1, review of task 5). The tracker can hand
+   orient_image a wrong centre; nothing flagged it. How much a centre error
+   costs was measured directly (cam1 16.1389 and 16.1509 s, both 5-mark
+   Orientations, centre moved and the frame re-oriented):
+       along camera 1's ray   +-0.5..2 mm: 0.0-0.2 deg;  10 mm: 0.8 deg
+       across the ray         +-0.5 mm: 1.9-2.0 deg;  1 mm: 3.7-4.5 deg;
+                              2 mm: 7.4-8.2 deg   (about 1/r per mm, 2.7
+                              deg, plus more for marks off the view centre)
+   So stereo depth scatter (along the ray, residual median 3-6 mm, up to
+   21 mm) hardly matters, and a centre error across the ray matters a lot.
+   Each tracked frame now gets the residual of its centre from a parabola
+   fitted through the other tracked centres within +-60 ms, split along /
+   across the ray (columns "along across" in the tables), and is flagged
+   when the across part exceeds 0.8 mm - the size that alone costs the
+   static acceptance number of 3 deg (3 / 3.75 deg per mm) - or when a
+   circle used for the centre comes within 2 px of the image edge. On the
+   cleanly tracked middle of putt 2 (16.11-16.30 s) the across residual is
+   0.2-0.6 mm in most frames, so 0.8 mm is also about twice the residual of
+   a good stretch. Flagged frames: 15 of 25 (putt 1), 19 of 38 (putt 2: 18
+   across, 2 at cam2's edge), 17 of 25 (putt 3). Median across residual
+   1.21 / 0.66 / 1.29 mm - typical centres are NOT good to 3 deg.
+
+   Axis error against the comparison's worse across residual (all 49
+   comparisons, three putts):
+       across <= 0.8 mm   13 comparisons   median axis  5.1 deg   angle  3 %
+       0.8 - 1.5 mm       23               median axis 11.0 deg   angle 14 %
+       1.5 - 3 mm          9               median axis 14.8 deg   angle  5 %
+       > 3 mm              4               median axis 41.4 deg   angle 28 %
+   rank correlation 0.74. Per putt, all / flagged centres left out:
+       putt 1   axis 14.6 -> 4.6 deg (5 of 15 left), angle 5 -> 3 %
+       putt 2   axis 12.8 -> 5.1 deg (6 of 21 left), angle 14 -> 3 %
+       putt 3   axis  6.9 -> 5.5 deg (2 of 13 left; both in the early skid,
+                angle 48 %)
+   Both-camera agreement, unflagged frames only: 1.54 / 0.79 / 0.97 deg
+   median, max 2.61 / 3.36 / 1.07 deg (1 of 7 over 3 deg, against 4 of 15
+   with flagged frames).
+   The end of putt 2 is explained: 16.3114, 16.3195, 16.3316 have across
+   residuals 3.5, 5.8 and 2.5 mm (13, 22, 9 deg by the measured
+   sensitivity) - the ball at cam2's edge, stereo going wrong - and those
+   comparisons (+20..+45 %, 35-51 deg) are all flagged.
+
+   What the numbers support: where the ball centre is good to 0.8 mm across
+   the line of sight, the rolling check meets the plan's expectation (13
+   comparisons: axis 5 deg median, angle 3 %, every sign right). The axis
+   failures of putts 1 and 2 come from the ball centre - the circle centre
+   in the image and the tracker that keeps frames whose centre is a few
+   pixels off - not from the mark identification. But only 13 of 49
+   comparisons have such a centre: on these frames the centre, not the
+   marks, limits the precision, and 1 px of circle-centre error (0.45 mm
+   at 420 mm) already costs ~1.7 deg. The method needs a ball centre good
+   to well under a pixel across the line of sight before its axis is
+   within 10 deg routinely; 13 comparisons are too few to call the
+   expectation met.
    Physics in the early part: right after the push the ball turns slower
    than rolling and catches up - putt 3 -56, -41, -30, -14, -7, +3 %, putt 2
    -22, -19, -15, -5, -1 % - the skid the plan allowed for, with the right
@@ -119,7 +166,8 @@ All numbers below: Windows (Python 3.14, OpenCV 5) unless marked Jetson.
    and 15 deg, so that pose is right and the off-site blob is clutter that
    classified; 16.3316 is in the noisy end of putt 2 (see 2.).
    Precision: 4 of 15 rolling frames with both cameras oriented disagree by
-   3.0-4.0 deg, above the static acceptance number.
+   3.0-4.0 deg, above the static acceptance number; with flagged centres
+   left out 1 of 7 (3.36 deg). See "Centre quality" in 2.
 
 5. Open points of Task 4, checked here
    - Missing-ink check reads the raw dark mask: in no frame of the three
@@ -162,3 +210,11 @@ scratch dir there, same command):
   cross belongs"; cam1 44.9916: misread guard), which removes three
   comparisons - the interpolation/rounding differences between OpenCV
   versions are enough to move a mark across a classification edge.
+
+Jetson, fix round 1 (centre flag), same frames, committed tool:
+  flagged centres 15 / 19 / 17 (identical to Windows: same tracks, same
+  residuals). Rolling all -> flagged centres left out:
+    putt 1  axis 14.6 -> 4.7 deg (5 of 15), angle 5 -> 3 %
+    putt 2  axis 12.9 -> 5.1 deg (6 of 21), angle 14 -> 3 %
+    putt 3  axis  6.3 -> 5.4 deg (2 of 10), angle 13 -> 48 % (early skid)
+  agreement, unflagged frames: max 2.63 / 3.38 / 1.11 deg (1 of 7 over 3).
