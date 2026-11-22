@@ -1,0 +1,54 @@
+2026-11-22 turntable series about the vertical: acceptance 2 of the ball-marks
+design (docs/superpowers/specs/2026-11-13-ball-marks-spin-design.md), vertical axis.
+
+Recording (Jetson ~/recordings/2026-11-22_turn_vertical/, 635 MB, not in the repo):
+one `strobe_shot --trigger --seconds 2` per position (0.5 ms exposure, 100 us flash,
+10 ms edges), pos_000 ... pos_360 in 15 deg clicks of the owner's disc, marked ball
+on the disc on the floor ~42 cm in front of the cameras.
+
+DIRECTION: the owner turned the disc so that the numbers at the tongue grew -
+COUNTERCLOCKWISE seen from above (confirmed by the owner). turn_series reads the
+folder names as clockwise, so every turn in turn_series.txt shows with the opposite
+sign ("WRONG") - the measured sign is the physically right one. Checked independently
+of the mark map (direction_check.py): dark blobs of two positions matched by nearest
+neighbour on the unwrapped sphere, the turn from their normals by Kabsch: 15.0-16.7 deg
+per click, axis exactly up (axis . down = -1.00) in both cameras = counterclockwise
+from above.
+
+Analysis: python3 -m sp1_vision.turn_series SERIESDIR (Jetson, every 5th frame pair,
+32 pairs per position, 11 min). Full output: turn_series.txt; mark table: marks.csv.
+
+Result, with the sign taken as counterclockwise:
+                                   cam1            cam2
+  positions with a pose            21 of 25        17 of 25
+  |angle error| per position       max 2.4 deg     max 2.9 deg   (most < 1.5)
+  axis vs floor normal (lean)      2.00 deg        0.98 deg
+  per-position axis error          1-7 deg (largest at 15 and 345 deg, small turns)
+  closure pos_360 vs pos_000       2.22 deg        1.83 deg
+  pose spread within a position    0.08-0.60 deg (median ~0.13)
+  cam1/cam2 agreement              median 1.56, max 2.81 deg, 16 positions, 0 over 3 deg
+No position has a pose off by a symmetry of the site set. Position 60 has no pose in
+either camera; 8 more positions only in one.
+
+Spec acceptance 2 for this axis: recovered turn within a few degrees in both cameras
+(max 2.9 deg) - MET; cam1/cam2 agree within 3 deg - MET; sign check about the vertical
+(hook-like) - MET (measured sign = the physical one). Still open: the two horizontal
+axes (stand of Hardware/turn_fixture), backspin-like sign.
+
+Marks under the known pose (7528 blobs, every frame incl. refused ones), share read
+as the true shape:
+  theta from view centre   dot     bar     cross
+   0-20                    73 %    67 %    100 %
+  20-40                   100 %    99 %     91 %
+  40-50                   100 %    99 %     77 %
+  50-55                    99 %    97 %     49 %
+  55-60                    50 %    89 %     38 %
+- crosses beyond 40 deg mostly come out as no shape (area 0.58-0.62 of the map's ink
+  area, the band's lower edge is 0.6), fewer as dots;
+- all real marks measure 0.6-0.8 of the map's ink area: the expected areas are high;
+- near the view centre (0-20 deg) dots and bars are lost as "no shape", most likely
+  the flash's specular highlight sitting on the central mark.
+Refusals: misread guard (cam1 113, cam2 110), "no two classified marks fit a pair of
+neighbouring sites" (96 / 111), "a dot where a cross belongs" (64 / 46).
+Next: calibrate the expected areas (and the cross test) on the EVEN positions of
+marks.csv, check on the ODD ones; then the central glint.
