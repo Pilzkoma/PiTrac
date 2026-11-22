@@ -6,10 +6,17 @@ test went green before the function it was meant to exercise had even been
 wired in. These eight frames exist so that never costs a capture session
 again.
 
-They are captured with the shipped rig, so they can be measured against
-`sp1_vision/calibration_results/stereo_extrinsics.json` and the intrinsics
-in `golf_sim_config.json`. Assertions live in
-`sp1_vision/tests/test_real_frames.py`.
+They were captured with the rig of the old enclosure and are measured
+against **that** calibration, kept next to them in `rig_2026-09-24/`:
+`stereo_extrinsics.json` as of `e61b0fd` (2026-09-24, baseline 79.64 mm
+after the 24.27 mm square correction) and `camera_intrinsics.json`, the four
+camera keys of `golf_sim_config.json` before the 2026-11-10 recalibration
+(`73b99de~1`; unchanged since 2026-08-09, so valid for every pair here).
+The shipped calibration does not fit them: the cameras were re-aimed for
+the reprinted enclosure, and against the 2026-11-10 calibration four of the
+five tests failed while all five pass with this one (Jetson, 2026-11-22).
+Frames from a new rig need a calibration of their own here. Assertions live
+in `sp1_vision/tests/test_real_frames.py`.
 
 ## `lit_from_one_side/` — the formerly blocking case, now the rescue's pin
 

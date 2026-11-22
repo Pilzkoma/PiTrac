@@ -19,7 +19,6 @@ import numpy as np
 
 from sp1_vision import ball_pair, frame_analysis, stereo_geometry
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "fixtures", "ball_pairs")
 
@@ -36,11 +35,15 @@ def load_pair(name):
 
 
 def load_rig():
+    # The rig these frames were captured with (2026-08-11 and 2026-09-24,
+    # old enclosure), not the shipped one: the cameras were re-aimed for the
+    # reprinted enclosure and recalibrated on 2026-11-10, and against that
+    # calibration four of these pairs fail the stereo checks while all five
+    # pass with their own (Jetson, 2026-11-22). See fixtures/ball_pairs/README.md.
+    rig_dir = os.path.join(FIXTURES, "rig_2026-09-24")
     return stereo_geometry.load_rig(
-        os.path.join(REPO, "sp1_vision", "calibration_results",
-                     "stereo_extrinsics.json"),
-        os.path.join(REPO, "Software", "LMSourceCode", "ImageProcessing",
-                     "golf_sim_config.json"))
+        os.path.join(rig_dir, "stereo_extrinsics.json"),
+        os.path.join(rig_dir, "camera_intrinsics.json"))
 
 
 class RealFrameTest(unittest.TestCase):
